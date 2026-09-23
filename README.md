@@ -1,7 +1,10 @@
-# Melogold для Linux
+<p align="center">
+  <img src=".github/melogold-icon.png" width="128" height="128" alt="Melogold">
+</p>
 
-Клиент [Melogold](https://github.com/MaximCemencov/melogoldAndroid) для Linux: музыка из YouTube Music
-с общими избранным, библиотекой и плейлистами на всех устройствах.
+<h1 align="center">Melogold для Linux</h1>
+
+<p align="center">Клиент <a href="https://github.com/MaximCemencov/melogoldAndroid">Melogold</a> для Linux: музыка из YouTube Music с общими избранным, библиотекой и плейлистами на всех устройствах.</p>
 
 ## Статус
 
