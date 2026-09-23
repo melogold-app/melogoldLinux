@@ -17,12 +17,16 @@
 
 Иконки приложения в формате темы hicolor — `packaging/icons/hicolor`.
 
+## Лицензия
+
+[GPL-3.0](./LICENSE).
+
 ## Остальные части Melogold
 
 | Платформа | Репозиторий |
 |---|---|
 | Android | [melogoldAndroid](https://github.com/melogold-app/melogoldAndroid) |
-| Сервер | melogoldServer |
-| Windows | melogoldWindows |
-| Linux | melogoldLinux |
-| iOS и macOS | melogoldiOSmacOS |
+| Сервер | [melogoldServer](https://github.com/melogold-app/melogoldServer) |
+| Windows | [melogoldWindows](https://github.com/melogold-app/melogoldWindows) |
+| Linux | [melogoldLinux](https://github.com/melogold-app/melogoldLinux) |
+| iOS и macOS | [melogoldiOSmacOS](https://github.com/melogold-app/melogoldiOSmacOS) |
