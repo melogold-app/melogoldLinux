@@ -4,7 +4,7 @@
 
 <h1 align="center">Melogold для Linux</h1>
 
-<p align="center">Клиент <a href="https://github.com/MaximCemencov/melogoldAndroid">Melogold</a> для Linux: музыка из YouTube Music с общими избранным, библиотекой и плейлистами на всех устройствах.</p>
+<p align="center">Клиент <a href="https://github.com/melogold-app/melogoldAndroid">Melogold</a> для Linux: музыка из YouTube Music с общими избранным, библиотекой и плейлистами на всех устройствах.</p>
 
 ## Статус
 
@@ -12,7 +12,7 @@
 
 - нативное приложение на Rust с интерфейсом GTK 4 и libadwaita;
 - вход в аккаунт Melogold и список подключённых устройств;
-- AppImage с автообновлением из [GitHub Releases](https://github.com/MaximCemencov/melogoldLinux/releases),
+- AppImage с автообновлением из [GitHub Releases](https://github.com/melogold-app/melogoldLinux/releases),
   а также пакеты deb и rpm.
 
 Иконки приложения в формате темы hicolor — `packaging/icons/hicolor`.
@@ -21,7 +21,7 @@
 
 | Платформа | Репозиторий |
 |---|---|
-| Android | [melogoldAndroid](https://github.com/MaximCemencov/melogoldAndroid) |
+| Android | [melogoldAndroid](https://github.com/melogold-app/melogoldAndroid) |
 | Сервер | melogoldServer |
 | Windows | melogoldWindows |
 | Linux | melogoldLinux |
