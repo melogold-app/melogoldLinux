@@ -75,3 +75,22 @@
 .library-tile:active {
   background-image: image(alpha(currentColor, 0.08));
 }
+
+/* Длинные списки Библиотеки (GtkListView): поля — как у заголовка над списком. */
+listview.track-list {
+  background: none;
+  padding: 0 12px 24px 12px;
+}
+
+listview.track-list > row {
+  border-radius: 8px;
+}
+
+/* Панель выделенного (задание 0004): поверх списка над плеером, как всплывающая плашка. */
+.selection-bar {
+  padding: 6px;
+  border-radius: 14px;
+  background-color: var(--popover-bg-color);
+  color: var(--popover-fg-color);
+  box-shadow: 0 1px 3px 1px alpha(black, 0.12), 0 2px 12px 2px alpha(black, 0.12), 0 0 0 1px var(--border-color);
+}

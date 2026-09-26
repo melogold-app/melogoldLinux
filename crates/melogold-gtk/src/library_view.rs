@@ -3,15 +3,13 @@
 //! действия с «Отменить» (§5.6).
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use adw::prelude::*;
-use gtk::{gdk, gio, glib};
+use gtk::{gio, glib};
 use melogold_core::music::Track;
-use melogold_core::text::format_duration;
-use melogold_core::thumbnails;
 use melogold_data::library::LocalPlaylist;
 use melogold_data::Change;
 use melogold_playback::downloads::DownloadState;
@@ -19,7 +17,7 @@ use melogold_playback::engine::Command;
 use serde::{Deserialize, Serialize};
 
 use crate::localization::{tr, trf};
-use crate::widgets::Cover;
+use crate::track_row::TrackRow;
 use crate::window::MainWindow;
 
 /// Откуда показан трек: от этого зависит «Убрать из…» в меню.
@@ -63,8 +61,8 @@ pub struct LibraryView {
     liked: RefCell<HashSet<String>>,
     hidden: RefCell<HashSet<String>>,
     playlists: RefCell<Vec<LocalPlaylist>>,
-    hearts: RefCell<HashMap<String, Vec<glib::WeakRef<gtk::Button>>>>,
-    marks: RefCell<HashMap<String, Vec<glib::WeakRef<gtk::Stack>>>>,
+    /// Живые строки треков: ♡ и метки обновляются по треку, который в строке сейчас.
+    rows: RefCell<Vec<glib::WeakRef<TrackRow>>>,
     listeners: RefCell<Vec<(u32, Refresh)>>,
     /// Убранное, пока идёт «Отменить»: экраны его уже не показывают, в базе оно ещё есть.
     removing: RefCell<HashSet<String>>,
@@ -83,6 +81,21 @@ impl LibraryView {
 
     pub fn playlists(&self) -> Vec<LocalPlaylist> {
         self.playlists.borrow().clone()
+    }
+
+    pub fn register_row(&self, row: &TrackRow) {
+        let mut rows = self.rows.borrow_mut();
+        // Чистим от ушедших строк не каждый раз: списки создают их пачками.
+        if rows.len() % 64 == 63 {
+            rows.retain(|r| r.upgrade().is_some());
+        }
+        rows.push(row.downgrade());
+    }
+
+    fn live_rows(&self) -> Vec<TrackRow> {
+        let mut rows = self.rows.borrow_mut();
+        rows.retain(|r| r.upgrade().is_some());
+        rows.iter().filter_map(glib::WeakRef::upgrade).collect()
     }
 
     /// Убирается ли сейчас: `removal_key` плейлиста, трека плейлиста или трека истории.
@@ -154,24 +167,21 @@ impl MainWindow {
     }
 
     pub fn update_hearts(&self) {
-        let view = &self.library_view;
-        let liked = view.liked.borrow();
-        view.hearts.borrow_mut().retain(|video_id, buttons| {
-            buttons.retain(|b| b.upgrade().is_some());
-            for button in buttons.iter().filter_map(glib::WeakRef::upgrade) {
-                set_heart(&button, liked.contains(video_id));
+        let rows = self.library_view.live_rows();
+        let liked = self.library_view.liked.borrow();
+        for row in rows {
+            if let Some(video_id) = row.video_id() {
+                row.refresh_heart(liked.contains(&video_id));
             }
-            !buttons.is_empty()
-        });
+        }
         self.player_bar().set_liked(self.state_track().map(|t| liked.contains(&t.video_id)).unwrap_or(false));
     }
 
     fn update_marks(&self, video_id: &str) {
         let state = self.offline_state(video_id);
-        if let Some(marks) = self.library_view.marks.borrow_mut().get_mut(video_id) {
-            marks.retain(|m| m.upgrade().is_some());
-            for mark in marks.iter().filter_map(glib::WeakRef::upgrade) {
-                show_mark(&mark, state);
+        for row in self.library_view.live_rows() {
+            if row.video_id().as_deref() == Some(video_id) {
+                row.refresh_mark(state);
             }
         }
     }
@@ -190,144 +200,39 @@ impl MainWindow {
 
     // ── строка трека ──
 
-    /// Строка трека (§5.3): обложка 40 px, название, исполнитель и альбом; справа колонки постоянной
-    /// ширины — ♡, «есть без сети», длительность, «…». Правый щелчок, клавиша меню и Shift+F10 — меню.
+    /// Строка трека для `GtkListBox` ([`TrackRow`] внутри строки списка).
     pub fn track_row(&self, track: &Track, context: RowContext) -> gtk::ListBoxRow {
-        let cover = Cover::new(40);
-        let fallback = thumbnails::for_video(&track.video_id, 120);
-        cover.set(&self.ctx.services.images, track.thumbnail_url.as_deref().or(Some(&fallback)), 120);
-        let title = gtk::Label::builder().label(&track.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
-        title.set_tooltip_text(Some(&track.title));
-        let subtitle_text = match (track.subtitle(), &track.views_text) {
-            (s, Some(views)) if track.is_video() && !s.is_empty() => format!("{s} · {views}"),
-            (s, _) => s,
-        };
-        let subtitle = gtk::Label::builder().label(&subtitle_text).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
-        subtitle.add_css_class("dim-label");
-        subtitle.add_css_class("caption");
-        let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).hexpand(true).spacing(2).build();
-        texts.append(&title);
-        if !subtitle_text.is_empty() {
-            texts.append(&subtitle);
-        }
-        let content = gtk::Box::builder().spacing(10).margin_top(6).margin_bottom(6).margin_start(8).margin_end(4).build();
-        content.append(&cover.root);
-        content.append(&texts);
-        if track.explicit {
-            let badge = gtk::Label::builder().label("E").tooltip_text("Explicit").valign(gtk::Align::Center).build();
-            badge.add_css_class("explicit-badge");
-            content.append(&badge);
-        }
-        let heart = self.heart_button(track);
-        content.append(&heart);
-        let mark = self.offline_mark(&track.video_id);
-        content.append(&mark);
-        let duration_text = if track.is_live() { "LIVE".to_owned() } else { track.duration_ms.map(format_duration).unwrap_or_default() };
-        let duration = gtk::Label::builder().label(&duration_text).width_chars(6).xalign(1.0).valign(gtk::Align::Center).build();
-        duration.add_css_class("dim-label");
-        duration.add_css_class("numeric");
-        content.append(&duration);
-        let more =
-            gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(tr("RowMenu")).valign(gtk::Align::Center).build();
-        more.add_css_class("flat");
-        let (weak, target) = (self.downgrade(), TrackTarget { track: track.clone(), context, ..Default::default() });
-        more.set_create_popup_func(move |button| {
-            if let Some(window) = weak.upgrade() {
-                button.set_menu_model(Some(&window.track_menu_for(&target)));
-            }
-        });
-        content.append(&more);
-        let row = gtk::ListBoxRow::builder().child(&content).build();
-        row.update_property(&[gtk::accessible::Property::Label(&format!("{}, {}", track.title, subtitle_text))]);
-        if track.unavailable {
-            row.add_css_class("dim-label");
-        }
-        self.attach_context_menu(&row, TrackTarget { track: track.clone(), context, ..Default::default() });
-        row
+        let row = TrackRow::new(self);
+        row.bind(track, context);
+        gtk::ListBoxRow::builder().child(&row).build()
     }
 
-    fn heart_button(&self, track: &Track) -> gtk::Button {
-        let button = gtk::Button::builder()
-            .valign(gtk::Align::Center)
-            .tooltip_text(tr("PlayerLike.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"))
-            .build();
-        button.add_css_class("flat");
-        button.add_css_class("heart");
-        set_heart(&button, self.library_view.is_liked(&track.video_id));
-        let (weak, track_for_click) = (self.downgrade(), track.clone());
-        button.connect_clicked(move |_| {
-            if let Some(window) = weak.upgrade() {
-                // Состояние ведёт библиотека: set_liked перерисует все ♡ этого трека разом.
-                let liked = !window.library_view.is_liked(&track_for_click.video_id);
-                window.set_liked(vec![track_for_click.clone()], liked);
-            }
-        });
-        self.library_view.hearts.borrow_mut().entry(track.video_id.clone()).or_default().push(button.downgrade());
-        button
-    }
-
-    fn offline_mark(&self, video_id: &str) -> gtk::Stack {
-        let stack = gtk::Stack::builder().width_request(18).valign(gtk::Align::Center).build();
-        stack.add_named(&gtk::Box::new(gtk::Orientation::Horizontal, 0), Some("none"));
-        let downloaded = gtk::Image::from_icon_name("offline-filled-symbolic");
-        downloaded.add_css_class("accent");
-        downloaded.set_tooltip_text(Some(tr("Downloads")));
-        downloaded.update_property(&[gtk::accessible::Property::Label(tr("Downloads"))]);
-        stack.add_named(&downloaded, Some("downloaded"));
-        let cached = gtk::Image::from_icon_name("offline-outline-symbolic");
-        cached.set_tooltip_text(Some(tr("LinuxInCache")));
-        cached.update_property(&[gtk::accessible::Property::Label(tr("LinuxInCache"))]);
-        stack.add_named(&cached, Some("cached"));
-        let progress = gtk::DrawingArea::builder().content_width(16).content_height(16).build();
-        progress.set_tooltip_text(Some(tr("MenuDownloadCancel")));
-        stack.add_named(&progress, Some("downloading"));
-        let failed = gtk::Image::from_icon_name("dialog-error-symbolic");
-        failed.add_css_class("error");
-        failed.set_tooltip_text(Some(tr("MenuDownloadRetry")));
-        stack.add_named(&failed, Some("failed"));
-        show_mark(&stack, self.offline_state(video_id));
-        self.library_view.marks.borrow_mut().entry(video_id.to_owned()).or_default().push(stack.downgrade());
-        stack
-    }
-
-    /// Правый щелчок, клавиша меню и Shift+F10 по строке — то же меню, что «…».
+    /// Меню трека у строки не из [`TrackRow`] (очередь): правый щелчок, клавиша меню и Shift+F10.
     pub fn attach_context_menu(&self, row: &impl IsA<gtk::Widget>, target: TrackTarget) {
-        let click = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
-        let (weak, row_widget, click_target) = (self.downgrade(), row.clone().upcast::<gtk::Widget>(), target.clone());
+        let target = Rc::new(target);
+        let click = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
+        let (weak, widget, t) = (self.downgrade(), row.clone().upcast::<gtk::Widget>(), Rc::clone(&target));
         click.connect_pressed(move |gesture, _, x, y| {
             gesture.set_state(gtk::EventSequenceState::Claimed);
             if let Some(window) = weak.upgrade() {
-                window.popup_track_menu(&row_widget, &click_target, Some((x, y)));
+                popup(&widget, &window.track_menu_for(&t), Some((x, y)));
             }
         });
         row.add_controller(click);
         let keys = gtk::EventControllerKey::new();
-        let (weak, row_widget) = (self.downgrade(), row.clone().upcast::<gtk::Widget>());
+        let (weak, widget) = (self.downgrade(), row.clone().upcast::<gtk::Widget>());
         keys.connect_key_pressed(move |_, key, _, modifiers| {
-            let menu_key = key == gdk::Key::Menu || (key == gdk::Key::F10 && modifiers.contains(gdk::ModifierType::SHIFT_MASK));
-            if menu_key {
-                if let Some(window) = weak.upgrade() {
-                    window.popup_track_menu(&row_widget, &target, None);
-                }
-                return glib::Propagation::Stop;
+            let menu_key =
+                key == gtk::gdk::Key::Menu || (key == gtk::gdk::Key::F10 && modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK));
+            if !menu_key {
+                return glib::Propagation::Proceed;
             }
-            glib::Propagation::Proceed
+            if let Some(window) = weak.upgrade() {
+                popup(&widget, &window.track_menu_for(&target), None);
+            }
+            glib::Propagation::Stop
         });
         row.add_controller(keys);
-    }
-
-    fn popup_track_menu(&self, anchor: &gtk::Widget, target: &TrackTarget, at: Option<(f64, f64)>) {
-        let popover = gtk::PopoverMenu::from_model(Some(&self.track_menu_for(target)));
-        popover.set_parent(anchor);
-        popover.set_has_arrow(false);
-        if let Some((x, y)) = at {
-            popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-        }
-        popover.connect_closed(|popover| {
-            let popover = popover.clone();
-            glib::idle_add_local_once(move || popover.unparent());
-        });
-        popover.popup();
     }
 
     // ── меню трека ──
@@ -698,8 +603,7 @@ impl MainWindow {
 
     /// «Новый плейлист…»: название по умолчанию — общий альбом треков, если он у всех один (задание 0004).
     pub fn new_playlist(&self, tracks: Vec<Track>) {
-        let albums: HashSet<&str> = tracks.iter().filter_map(|t| t.album_title.as_deref()).filter(|a| !a.trim().is_empty()).collect();
-        let suggested = if albums.len() == 1 { albums.into_iter().next().unwrap_or_default().to_owned() } else { String::new() };
+        let suggested = suggested_playlist_name(&tracks);
         let weak = self.downgrade();
         self.ask_name(tr("NewPlaylist"), &suggested, move |name| {
             let Some(window) = weak.upgrade() else { return };
@@ -802,6 +706,32 @@ impl MainWindow {
     }
 }
 
+/// Меню у виджета: у указателя или, с клавиатуры, у самого виджета.
+pub fn popup(anchor: &gtk::Widget, menu: &gio::Menu, at: Option<(f64, f64)>) {
+    let popover = gtk::PopoverMenu::from_model(Some(menu));
+    popover.set_parent(anchor);
+    popover.set_has_arrow(false);
+    if let Some((x, y)) = at {
+        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    }
+    popover.connect_closed(|popover| {
+        let popover = popover.clone();
+        glib::idle_add_local_once(move || popover.unparent());
+    });
+    popover.popup();
+}
+
+/// Название нового плейлиста по умолчанию: альбом выделенного, если он у всех, у кого альбом
+/// есть, один (задание 0004, как Windows: у видео альбома нет, и они его не отменяют).
+pub fn suggested_playlist_name(tracks: &[Track]) -> String {
+    let albums: HashSet<&str> = tracks.iter().filter_map(|t| t.album_title.as_deref().map(str::trim)).filter(|a| !a.is_empty()).collect();
+    if albums.len() == 1 {
+        albums.into_iter().next().unwrap_or_default().to_owned()
+    } else {
+        String::new()
+    }
+}
+
 /// Ключи убираемого: страницы прячут его, пока идёт «Отменить».
 pub fn removal_key_playlist(id: i64) -> String {
     format!("playlist-{id}")
@@ -825,7 +755,7 @@ pub enum Offline {
     Failed,
 }
 
-fn show_mark(stack: &gtk::Stack, state: Offline) {
+pub fn show_mark(stack: &gtk::Stack, state: Offline) {
     let name = match state {
         Offline::None => "none",
         Offline::Cached => "cached",
@@ -861,4 +791,23 @@ pub fn set_heart(button: &gtk::Button, liked: bool) {
     }
     let label = tr(if liked { "MenuFavoriteRemove" } else { "MenuFavoriteAdd" });
     button.update_property(&[gtk::accessible::Property::Label(label)]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(album: Option<&str>) -> Track {
+        Track { video_id: "v".into(), title: "t".into(), album_title: album.map(str::to_owned), ..Default::default() }
+    }
+
+    #[test]
+    fn new_playlist_is_named_after_the_common_album() {
+        assert_eq!(suggested_playlist_name(&[track(Some("Альбом")), track(Some(" Альбом "))]), "Альбом");
+        assert_eq!(suggested_playlist_name(&[track(Some("Альбом")), track(Some("Другой"))]), "");
+        // Видео без альбома общий альбом не отменяет.
+        assert_eq!(suggested_playlist_name(&[track(Some("Альбом")), track(None)]), "Альбом");
+        assert_eq!(suggested_playlist_name(&[track(None), track(Some(""))]), "");
+        assert_eq!(suggested_playlist_name(&[]), "");
+    }
 }

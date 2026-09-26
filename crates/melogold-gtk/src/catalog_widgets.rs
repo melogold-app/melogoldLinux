@@ -1,17 +1,20 @@
 //! Виджеты каталога (§5.4, Windows `ShelfView.cs`, `CollectionHeader.cs`, `MediaCard`): полки,
 //! карточки, плитки настроений, списки треков и шапка детального экрана.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
+use gtk::{gio, glib};
 use melogold_core::music::{MusicItem, Shelf, Track};
 use melogold_core::thumbnails;
 use melogold_playback::engine::Command;
 
 use crate::library_view::RowContext;
 use crate::localization::tr;
+use crate::selection::Selection;
+use crate::track_row::TrackRow;
 use crate::widgets::Cover;
 use crate::window::MainWindow;
 
@@ -24,13 +27,15 @@ pub enum TrackContext {
     List,
 }
 
-/// Список треков (§5.3): двойной щелчок или Enter играет, одиночный щелчок выделяет. Треки списка
-/// общие со строками: догрузка дописывает их, и нажатие играет весь известный список.
+/// Список треков (§5.3): двойной щелчок или Enter играет, одиночный щелчок выделяет; Ctrl и Shift
+/// выделяют несколько (задание 0004). Треки списка общие со строками: догрузка дописывает их, и
+/// нажатие играет весь известный список.
 #[derive(Clone)]
 pub struct TrackList {
     pub list: gtk::ListBox,
     pub tracks: Rc<RefCell<Vec<Track>>>,
     row: RowContext,
+    selection: Rc<Selection>,
 }
 
 impl TrackList {
@@ -40,34 +45,127 @@ impl TrackList {
 
     /// Список, строки которого знают своё место: из плейлиста и истории меню предлагает «Убрать из…».
     pub fn with_rows(window: &MainWindow, tracks: &[Track], shown: usize, context: TrackContext, row: RowContext) -> TrackList {
-        let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).activate_on_single_click(false).build();
+        let list = gtk::ListBox::builder().activate_on_single_click(false).build();
         list.add_css_class("boxed-list");
-        for track in tracks.iter().take(shown) {
-            list.append(&window.track_row(track, row));
-        }
+        let selection = Selection::for_list_box(window, &list);
         let all = Rc::new(RefCell::new(tracks.to_vec()));
         let (weak, shared) = (window.downgrade(), Rc::clone(&all));
         list.connect_row_activated(move |_, row| {
             let Some(window) = weak.upgrade() else { return };
-            let index = row.index().max(0) as usize;
-            let tracks = shared.borrow().clone();
-            let Some(track) = tracks.get(index).cloned() else { return };
-            let player = &window.ctx.services.player;
-            match context {
-                TrackContext::Single => player.send(Command::PlaySingle { track, start: Duration::ZERO }),
-                // Весь список играет с выбранного трека, даже если видны не все строки.
-                TrackContext::List => player.send(Command::PlayList { tracks, start: index, shuffle: false }),
-            }
+            play_from(&window, &shared.borrow(), row.index().max(0) as usize, context);
         });
-        TrackList { list, tracks: all, row }
+        let this = TrackList { list, tracks: all, row, selection };
+        for track in tracks.iter().take(shown) {
+            this.list.append(&this.make_row(window, track));
+        }
+        this
+    }
+
+    fn make_row(&self, window: &MainWindow, track: &Track) -> gtk::ListBoxRow {
+        let row = TrackRow::new(window);
+        row.bind(track, self.row);
+        row.set_selection(Some(&self.selection));
+        gtk::ListBoxRow::builder().child(&row).build()
     }
 
     /// Дописать строки (продолжения плейлиста и канала).
     pub fn append(&self, window: &MainWindow, tracks: &[Track]) {
         for track in tracks {
-            self.list.append(&window.track_row(track, self.row));
+            self.list.append(&self.make_row(window, track));
         }
         self.tracks.borrow_mut().extend(tracks.iter().cloned());
+    }
+}
+
+/// Нажатие на трек: одиночный — трек и дальше похожие, в списке — весь список с него (REWRITE §2.3).
+pub fn play_from(window: &MainWindow, tracks: &[Track], index: usize, context: TrackContext) {
+    let Some(track) = tracks.get(index).cloned() else { return };
+    let player = &window.ctx.services.player;
+    match context {
+        TrackContext::Single => player.send(Command::PlaySingle { track, start: Duration::ZERO }),
+        // Весь список играет с выбранного трека, даже если видны не все строки.
+        TrackContext::List => player.send(Command::PlayList { tracks: tracks.to_vec(), start: index, shuffle: false }),
+    }
+}
+
+/// Длинный список треков Библиотеки на `GtkListView`: строки создаются только для видимого, и
+/// тысячи треков не тормозят ни прокрутку, ни изменение размера окна. Выделение — `GtkMultiSelection`.
+#[derive(Clone)]
+pub struct TrackListView {
+    /// Прокрутка со списком — его место на странице.
+    pub root: gtk::ScrolledWindow,
+    store: gio::ListStore,
+    model: gtk::MultiSelection,
+    tracks: Rc<RefCell<Vec<Track>>>,
+}
+
+impl TrackListView {
+    /// `place` — откуда строки (для «Убрать из…»); `context` — что играть по нажатию (у Истории меняется).
+    pub fn new(window: &MainWindow, place: RowContext, context: Rc<Cell<TrackContext>>) -> TrackListView {
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let model = gtk::MultiSelection::new(Some(store.clone()));
+        let tracks: Rc<RefCell<Vec<Track>>> = Rc::default();
+        let factory = gtk::SignalListItemFactory::new();
+        let view = gtk::ListView::builder().model(&model).factory(&factory).single_click_activate(false).show_separators(true).build();
+        view.add_css_class("track-list");
+        let selection = Selection::for_list_view(window, &view, &model, Rc::clone(&tracks));
+        let weak = window.downgrade();
+        factory.connect_setup(move |_, item| {
+            let (Some(window), Some(item)) = (weak.upgrade(), item.downcast_ref::<gtk::ListItem>()) else { return };
+            item.set_child(Some(&TrackRow::new(&window)));
+        });
+        let selection_for_bind = Rc::downgrade(&selection);
+        factory.connect_bind(move |_, item| {
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+            let (Some(row), Some(object)) = (item.child().and_downcast::<TrackRow>(), item.item().and_downcast::<glib::BoxedAnyObject>())
+            else {
+                return;
+            };
+            row.bind(&object.borrow::<Track>(), place);
+            row.set_position(item.position());
+            row.set_selection(selection_for_bind.upgrade().as_ref());
+        });
+        let (weak, shared) = (window.downgrade(), Rc::clone(&tracks));
+        view.connect_activate(move |_, position| {
+            if let Some(window) = weak.upgrade() {
+                play_from(&window, &shared.borrow(), position as usize, context.get());
+            }
+        });
+        let clamp = adw::ClampScrollable::builder().maximum_size(1100).child(&view).build();
+        let root = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&clamp).vexpand(true).build();
+        // Выделение живёт, пока жив список: держим его в замыкании прокрутки.
+        let keep = RefCell::new(Some(selection));
+        root.connect_destroy(move |_| {
+            keep.take();
+        });
+        TrackListView { root, store, model, tracks }
+    }
+
+    /// Показать треки (после фильтра и сортировки). Тот же список (библиотека сообщила о своём
+    /// изменении) не перестраивается: не сбиваются ни прокрутка, ни выделение. Новый — выделение
+    /// переносится на те же треки.
+    pub fn set_tracks(&self, tracks: Vec<Track>) {
+        let same = {
+            let old = self.tracks.borrow();
+            old.len() == tracks.len() && old.iter().zip(&tracks).all(|(a, b)| a.video_id == b.video_id)
+        };
+        if same {
+            // Данные строк (название, длительность) могли уточниться — в строках они обновятся при прокрутке.
+            self.tracks.replace(tracks);
+            return;
+        }
+        let selected: std::collections::HashSet<String> = {
+            let bitset = self.model.selection();
+            let old = self.tracks.borrow();
+            (0..bitset.size()).filter_map(|i| old.get(bitset.nth(i as u32) as usize)).map(|t| t.video_id.clone()).collect()
+        };
+        let objects: Vec<glib::BoxedAnyObject> = tracks.iter().cloned().map(glib::BoxedAnyObject::new).collect();
+        let reselect: Vec<u32> = tracks.iter().enumerate().filter(|(_, t)| selected.contains(&t.video_id)).map(|(i, _)| i as u32).collect();
+        self.tracks.replace(tracks);
+        self.store.splice(0, self.store.n_items(), &objects);
+        for position in reselect {
+            self.model.select_item(position, false);
+        }
     }
 }
 

@@ -35,6 +35,7 @@ use crate::now_playing::NowPlaying;
 use crate::pages;
 use crate::player_bar::{Hidden, PlayerBar};
 use crate::queue_panel::QueuePanel;
+use crate::selection::{Selection, SelectionBar};
 use crate::services::playback_settings;
 
 #[derive(Clone)]
@@ -76,6 +77,9 @@ pub struct Inner {
     compact: Cell<bool>,
     headers: RefCell<Vec<glib::WeakRef<gtk::Box>>>,
     pub library_view: LibraryView,
+    /// Выделение, чья панель сейчас на экране (задание 0004).
+    pub selection: RefCell<Option<Rc<Selection>>>,
+    pub selection_bar: SelectionBar,
 }
 
 struct Section {
@@ -152,9 +156,13 @@ impl MainWindow {
             .tooltip_text(format!("{} (F10)", tr("LinuxMainMenu")))
             .build();
         header.pack_end(&menu_button);
+        // Панель выделения — поверх списка над плеером: список под ней не сжимается.
+        let selection_bar = SelectionBar::new();
+        let stack_overlay = gtk::Overlay::builder().child(&stack).build();
+        stack_overlay.add_overlay(&selection_bar.root);
         let content = adw::ToolbarView::new();
         content.add_top_bar(&header);
-        content.set_content(Some(&stack));
+        content.set_content(Some(&stack_overlay));
 
         let split =
             adw::OverlaySplitView::builder().sidebar(&sidebar).content(&content).min_sidebar_width(200.0).max_sidebar_width(260.0).build();
@@ -226,6 +234,8 @@ impl MainWindow {
             compact: Cell::new(false),
             headers: RefCell::default(),
             library_view: LibraryView::default(),
+            selection: RefCell::default(),
+            selection_bar,
         }));
         this.build_player();
         this.install_breakpoints();
@@ -234,6 +244,7 @@ impl MainWindow {
         this.connect_sidebar(&bottom_list);
         this.install_actions();
         this.install_track_actions();
+        this.install_selection_actions();
         this.start_library();
         this.install_keys();
         this.install_search();
@@ -488,12 +499,14 @@ impl MainWindow {
             b.connect_apply(move |_| {
                 if let Some(window) = weak.upgrade() {
                     window.player_bar().set_hidden(hidden);
+                    window.selection_bar.set_phone(hidden.queue);
                 }
             });
             let weak = self.downgrade();
             b.connect_unapply(move |_| {
                 if let Some(window) = weak.upgrade() {
                     window.player_bar().set_hidden(Hidden::default());
+                    window.selection_bar.set_phone(false);
                 }
             });
         };
@@ -512,15 +525,32 @@ impl MainWindow {
                 }
             });
         };
+        // Панель выделенного: уже 1100 (с боковой панелью это ~840 для содержимого) — только значки.
+        let selection_follows = |b: &adw::Breakpoint| {
+            let weak = self.downgrade();
+            b.connect_apply(move |_| {
+                if let Some(window) = weak.upgrade() {
+                    window.selection_bar.set_compact(true);
+                }
+            });
+            let weak = self.downgrade();
+            b.connect_unapply(move |_| {
+                if let Some(window) = weak.upgrade() {
+                    window.selection_bar.set_compact(false);
+                }
+            });
+        };
         let medium = breakpoint("max-width: 1100sp");
         volume_as_button(&medium);
         headers_follow(&medium, false);
+        selection_follows(&medium);
         self.window.add_breakpoint(medium);
         let narrow = breakpoint("max-width: 720sp");
         volume_as_button(&narrow);
         two_rows(&narrow);
         menu_follows(&narrow, Hidden { modes: true, queue: false, heart: false });
         headers_follow(&narrow, true);
+        selection_follows(&narrow);
         self.window.add_breakpoint(narrow);
         let phone = breakpoint("max-width: 480sp");
         volume_as_button(&phone);
@@ -529,6 +559,7 @@ impl MainWindow {
         phone.add_setter(&bar.heart, "visible", Some(&false.to_value()));
         menu_follows(&phone, Hidden { modes: true, queue: true, heart: true });
         headers_follow(&phone, true);
+        selection_follows(&phone);
         self.window.add_breakpoint(phone);
     }
 
@@ -790,7 +821,8 @@ impl MainWindow {
                     return glib::Propagation::Stop;
                 }
                 (gdk::Key::Escape, false, false, false) => {
-                    return if window.go_back() { glib::Propagation::Stop } else { glib::Propagation::Proceed };
+                    // Сначала снимается выделение, потом — «Назад».
+                    return if window.clear_selection() || window.go_back() { glib::Propagation::Stop } else { glib::Propagation::Proceed };
                 }
                 (_, _, _, true) => return glib::Propagation::Proceed,
                 (gdk::Key::slash, false, _, _) => "win.search",

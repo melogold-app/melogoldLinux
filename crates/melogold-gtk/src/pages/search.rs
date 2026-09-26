@@ -15,6 +15,8 @@ use melogold_innertube::music::{MusicFilter, WebFilter};
 use melogold_innertube::YouTubeError;
 
 use crate::localization::tr;
+use crate::selection::Selection;
+use crate::track_row::TrackRow;
 use crate::widgets::{catalog_error, section_title, StateView};
 use crate::window::MainWindow;
 
@@ -56,7 +58,7 @@ struct Inner {
     loading_more: Cell<bool>,
     shown: RefCell<HashSet<String>>,
     /// Последний список выдачи и его элементы по порядку строк.
-    current_list: RefCell<Option<(gtk::ListBox, Rc<RefCell<Vec<MusicItem>>>)>>,
+    current_list: RefCell<Option<(gtk::ListBox, Rc<RefCell<Vec<MusicItem>>>, Rc<Selection>)>>,
 }
 
 pub fn page(window: &MainWindow, query: &str) -> adw::NavigationPage {
@@ -319,11 +321,13 @@ fn load_more(inner: &Rc<Inner>) {
 fn append(inner: &Rc<Inner>, items: Vec<MusicItem>, new_group: bool) {
     let Some(window) = inner.window.upgrade() else { return };
     let existing = if new_group { None } else { inner.current_list.borrow().clone() };
-    let (list, items_of_list) = match existing {
+    let (list, items_of_list, selection) = match existing {
         Some(pair) => pair,
         None => {
-            let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).activate_on_single_click(false).build();
+            let list = gtk::ListBox::builder().activate_on_single_click(false).build();
             list.add_css_class("boxed-list");
+            // Треки выдачи выделяются, как в любом списке (задание 0004); альбомы и исполнители — нет.
+            let selection = Selection::for_list_box(&window, &list);
             let items_of_list: Rc<RefCell<Vec<MusicItem>>> = Rc::default();
             let (weak, lookup) = (window.downgrade(), Rc::clone(&items_of_list));
             // Двойной щелчок или Enter играет, одиночный выделяет (§5.3).
@@ -333,8 +337,8 @@ fn append(inner: &Rc<Inner>, items: Vec<MusicItem>, new_group: bool) {
                 }
             });
             inner.list.append(&list);
-            inner.current_list.replace(Some((list.clone(), Rc::clone(&items_of_list))));
-            (list, items_of_list)
+            inner.current_list.replace(Some((list.clone(), Rc::clone(&items_of_list), Rc::clone(&selection))));
+            (list, items_of_list, selection)
         }
     };
     for item in items {
@@ -342,7 +346,12 @@ fn append(inner: &Rc<Inner>, items: Vec<MusicItem>, new_group: bool) {
             continue;
         }
         let row = match &item {
-            MusicItem::Track(track) => window.track_row(track, crate::library_view::RowContext::Plain),
+            MusicItem::Track(track) => {
+                let row = TrackRow::new(&window);
+                row.bind(track, crate::library_view::RowContext::Plain);
+                row.set_selection(Some(&selection));
+                gtk::ListBoxRow::builder().child(&row).build()
+            }
             other => match crate::widgets::item_row(&window.ctx.services.images, other) {
                 Some(row) => {
                     // Переход — одним щелчком: это не трек, выделять в нём нечего.
@@ -357,6 +366,7 @@ fn append(inner: &Rc<Inner>, items: Vec<MusicItem>, new_group: bool) {
                         }
                     });
                     row.add_controller(click);
+                    row.set_selectable(false);
                     row
                 }
                 None => continue,

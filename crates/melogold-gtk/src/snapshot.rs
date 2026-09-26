@@ -174,6 +174,24 @@ pub fn maybe_start(window: &MainWindow) {
         ("12e-downloads", Box::new(|w| w.push(&crate::pages::library::downloads_page(w))), 1200),
         ("12f-albums", Box::new(|w| w.push(&crate::pages::library::saved_albums(w))), 2500),
         (
+            // Задание 0004: три выделенных трека и панель действий над плеером.
+            "12g-selection",
+            Box::new(|w| {
+                w.push(&crate::pages::library::favorites(w));
+                let weak = w.downgrade();
+                glib::timeout_add_local_once(Duration::from_millis(900), move || {
+                    let Some(window) = weak.upgrade() else { return };
+                    let page = window.nav(Tab::Library).visible_page();
+                    // Список треков, а не список внутри выпадающей сортировки.
+                    let list = page.and_then(|p| descendant::<gtk::ListView>(p.upcast_ref(), "track-list"));
+                    if let Some(list) = list {
+                        let _ = list.activate_action("list.select-all", None);
+                    }
+                });
+            }),
+            1800,
+        ),
+        (
             "13-shortcuts",
             Box::new(|w| {
                 w.go_back();
@@ -225,15 +243,34 @@ fn capture(window: &adw::ApplicationWindow, path: &Path) -> Option<()> {
     saved
 }
 
+/// Первый потомок нужного типа с классом CSS `class` (обход в глубину).
+fn descendant<T: IsA<gtk::Widget>>(widget: &gtk::Widget, class: &str) -> Option<T> {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if let Some(found) = current.downcast_ref::<T>().filter(|w| w.has_css_class(class)) {
+            return Some(found.clone());
+        }
+        if let Some(found) = descendant::<T>(&current, class) {
+            return Some(found);
+        }
+        child = current.next_sibling();
+    }
+    None
+}
+
 fn sample_tracks() -> Vec<melogold_core::music::Track> {
-    [("dQw4w9WgXcQ", "Never Gonna Give You Up", "Rick Astley", 213_000), ("cYKAr38pZcY", "Photosynthesis", "Saba", 236_000)]
-        .into_iter()
-        .map(|(id, title, artist, duration)| melogold_core::music::Track {
-            video_id: id.into(),
-            title: title.into(),
-            artists_text: Some(artist.into()),
-            duration_ms: Some(duration),
-            ..Default::default()
-        })
-        .collect()
+    [
+        ("dQw4w9WgXcQ", "Never Gonna Give You Up", "Rick Astley", 213_000),
+        ("cYKAr38pZcY", "Photosynthesis", "Saba", 236_000),
+        ("fJ9rUzIMcZQ", "Bohemian Rhapsody", "Queen", 355_000),
+    ]
+    .into_iter()
+    .map(|(id, title, artist, duration)| melogold_core::music::Track {
+        video_id: id.into(),
+        title: title.into(),
+        artists_text: Some(artist.into()),
+        duration_ms: Some(duration),
+        ..Default::default()
+    })
+    .collect()
 }

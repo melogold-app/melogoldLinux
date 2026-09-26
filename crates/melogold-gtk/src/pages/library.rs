@@ -4,7 +4,7 @@
 //! Каждая страница подписана на свои изменения библиотеки ([`Change`]) и перерисовывается сама.
 //! Убранное с «Отменить» страницы не показывают, пока идёт отсрочка.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -15,7 +15,7 @@ use melogold_data::library::LocalPlaylist;
 use melogold_data::{Change, Library};
 use melogold_playback::engine::Command;
 
-use crate::catalog_widgets::{card_grid, card_view, TrackContext, TrackList};
+use crate::catalog_widgets::{card_grid, card_view, TrackContext, TrackList, TrackListView};
 use crate::library_view::{removal_key_history, removal_key_playlist, removal_key_track, RowContext};
 use crate::localization::{plural, tr, trf};
 use crate::widgets::{size_text, StateView};
@@ -188,14 +188,14 @@ struct Toolbar {
 
 impl Toolbar {
     fn new(window: &MainWindow, screen: &'static str, sorts: &[Sort], changed: Rc<dyn Fn()>) -> Toolbar {
-        // Ширина — «естественная» (до 40 знаков), а не наименьшая: в узком окне поле сжимается.
-        let filter = gtk::SearchEntry::builder().placeholder_text(tr("Filter")).hexpand(true).max_width_chars(40).build();
+        let filter = gtk::SearchEntry::builder().placeholder_text(tr("Filter")).max_width_chars(40).build();
         filter.update_property(&[gtk::accessible::Property::Label(tr("Filter"))]);
-        // Фильтр тянется до 320, сортировка справа видна всегда: в узком окне уже фильтр, а не сортировка.
-        let clamp =
-            adw::Clamp::builder().maximum_size(320).tightening_threshold(320).child(&filter).hexpand(true).halign(gtk::Align::Fill).build();
+        // Фильтр — своей естественной ширины (до 40 знаков) у левого края и сжимается в узком окне;
+        // сортировка справа видна всегда.
+        filter.set_hexpand(false);
         let root = gtk::Box::builder().spacing(8).build();
-        root.append(&clamp);
+        root.append(&filter);
+        root.append(&gtk::Box::builder().hexpand(true).build());
         let on_filter = Rc::clone(&changed);
         filter.connect_search_changed(move |_| on_filter());
         let descending: Rc<RefCell<Option<bool>>> = Rc::default();
@@ -265,15 +265,9 @@ impl Toolbar {
     }
 }
 
-/// Список треков с меню по месту: нажатие играет весь видимый список с выбранного трека.
+/// Список треков с меню по месту: нажатие играет весь список с выбранного трека.
 fn track_list(window: &MainWindow, tracks: &[Track], context: RowContext, plays: TrackContext) -> gtk::ListBox {
     TrackList::with_rows(window, tracks, usize::MAX, plays, context).list
-}
-
-fn nothing_found(content: &gtk::Box) {
-    let status = adw::StatusPage::builder().icon_name("edit-find-symbolic").title(tr("NothingFound")).build();
-    status.add_css_class("compact");
-    content.append(&status);
 }
 
 fn heading(text: &str) -> gtk::Label {
@@ -418,37 +412,68 @@ fn tile(window: &MainWindow, icon: &str, title: &str, subtitle: &str, open: fn(&
 
 type Entries = Rc<RefCell<Option<Vec<(Track, i64)>>>>;
 
+/// Страница длинного списка (§5.3): сверху заголовок и фильтр, под ними прокручивается список
+/// ([`TrackListView`] — строки только для видимого).
+struct ListPage {
+    page: adw::NavigationPage,
+    top: gtk::Box,
+    list: TrackListView,
+    state: StateView,
+}
+
+fn list_page(window: &MainWindow, title: &str, tag: Option<&str>, place: RowContext, plays: Rc<Cell<TrackContext>>) -> ListPage {
+    let list = TrackListView::new(window, place, plays);
+    let state = StateView::new(&list.root);
+    let top = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(24)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
+    let clamp = adw::Clamp::builder().maximum_size(1100).child(&top).build();
+    let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    root.append(&clamp);
+    root.append(&state.root);
+    let mut builder = adw::NavigationPage::builder().title(title).child(&root);
+    if let Some(tag) = tag {
+        builder = builder.tag(tag);
+    }
+    ListPage { page: builder.build(), top, list, state }
+}
+
 /// Страница списка треков: заголовок со счётом, фильтр и сортировка, список; `load` — из базы.
 struct TrackPage {
-    page: Page,
+    page: adw::NavigationPage,
     header: Header,
     entries: Entries,
     show: Rc<dyn Fn()>,
 }
 
-fn track_page(window: &MainWindow, title: &str, tag: Option<&str>, screen: &'static str, sorts: &[Sort], row: RowContext) -> TrackPage {
-    let p = page(title, tag);
+fn track_page(window: &MainWindow, title: &str, tag: Option<&str>, screen: &'static str, sorts: &[Sort], place: RowContext) -> TrackPage {
+    let p = list_page(window, title, tag, place, Rc::new(Cell::new(TrackContext::List)));
     let visible: Rc<RefCell<Vec<Track>>> = Rc::default();
     let head = header(window, title, &visible);
-    p.above(&head.root);
+    p.top.append(&head.root);
     let entries: Entries = Rc::default();
     let toolbar_cell: Rc<RefCell<Option<Toolbar>>> = Rc::default();
-    let (weak, content, state, subtitle) = (window.downgrade(), p.content.clone(), p.state.clone(), head.subtitle.clone());
+    let (weak, list, state, subtitle) = (window.downgrade(), p.list.clone(), p.state.clone(), head.subtitle.clone());
     let (show_entries, show_toolbar) = (Rc::clone(&entries), Rc::clone(&toolbar_cell));
     let show: Rc<dyn Fn()> = Rc::new(move || {
         let (Some(window), Some(toolbar)) = (weak.upgrade(), show_toolbar.borrow().clone()) else { return };
         let Some(all) = show_entries.borrow().clone() else { return };
-        let all: Vec<(Track, i64)> = match row {
+        let all: Vec<(Track, i64)> = match place {
             RowContext::Playlist(id) => {
                 all.into_iter().filter(|(t, _)| !window.library_view.is_removing(&removal_key_track(id, &t.video_id))).collect()
             }
             _ => all,
         };
-        clear(&content);
         let tracks: Vec<Track> = all.iter().map(|(t, _)| t.clone()).collect();
         subtitle.set_label(&summary(&tracks));
         toolbar.root.set_visible(!all.is_empty());
-        let list = toolbar.apply(&all);
+        let shown = toolbar.apply(&all);
+        list.set_tracks(shown.clone());
         if all.is_empty() {
             let (icon, title, hint) = match screen {
                 "favorites" => ("heart-outline-symbolic", tr("FavoritesEmpty"), tr("FavoritesEmptyHint")),
@@ -456,26 +481,23 @@ fn track_page(window: &MainWindow, title: &str, tag: Option<&str>, screen: &'sta
                 _ => ("view-list-bullet-symbolic", tr("PlaylistEmpty"), tr("PlaylistEmptyHint")),
             };
             state.empty(icon, title, hint);
+        } else if shown.is_empty() {
+            state.empty("edit-find-symbolic", tr("NothingFound"), "");
         } else {
-            if list.is_empty() {
-                nothing_found(&content);
-            } else {
-                content.append(&track_list(&window, &list, row, TrackContext::List));
-            }
             state.content();
         }
-        visible.replace(list);
+        visible.replace(shown);
     });
     let toolbar = Toolbar::new(window, screen, sorts, Rc::clone(&show));
-    p.above(&toolbar.root);
+    p.top.append(&toolbar.root);
     toolbar_cell.replace(Some(toolbar));
-    TrackPage { page: p, header: head, entries, show }
+    TrackPage { page: p.page, header: head, entries, show }
 }
 
 impl TrackPage {
     fn load(&self, window: &MainWindow, mask: Change, load: impl Fn(&Library) -> Vec<(Track, i64)> + Send + Sync + Copy + 'static) {
         let (weak, entries, show) = (window.downgrade(), Rc::clone(&self.entries), Rc::clone(&self.show));
-        live(window, &self.page.page, mask, move || {
+        live(window, &self.page, mask, move || {
             let Some(window) = weak.upgrade() else { return };
             let task = window.ctx.services.db(load);
             let (entries, show) = (Rc::clone(&entries), Rc::clone(&show));
@@ -496,7 +518,7 @@ pub fn favorites(window: &MainWindow) -> adw::NavigationPage {
     page.load(window, Change(Change::LIKES.0 | Change::BLOCKS.0), |library| {
         library.favorites().unwrap_or_default().into_iter().map(|t| (t, 0)).collect()
     });
-    page.page.page
+    page.page
 }
 
 /// «Все треки» (задание Windows 0005): прослушанное, лайкнутое, лежащее в своих плейлистах и скачанное.
@@ -505,7 +527,7 @@ pub fn all_tracks(window: &MainWindow) -> adw::NavigationPage {
     let page = track_page(window, tr("AllTracks"), None, "allTracks", &sorts, RowContext::Plain);
     let mask = Change(Change::LIKES.0 | Change::PLAYLISTS.0 | Change::HISTORY.0 | Change::DOWNLOADS.0 | Change::BLOCKS.0);
     page.load(window, mask, |library| library.all_tracks().unwrap_or_default().into_iter().map(|e| (e.track, e.play_time_ms)).collect());
-    page.page.page
+    page.page
 }
 
 /// Свой плейлист (REWRITE §3.8.1): «Убрать из плейлиста» и «Удалить плейлист» — с «Отменить»;
@@ -525,7 +547,7 @@ pub fn local_playlist(window: &MainWindow, id: i64) -> adw::NavigationPage {
     more.add_css_class("circular");
     page.header.buttons.append(&more);
     // Название меняется на месте после «Переименовать».
-    let (weak, nav_page, title) = (window.downgrade(), page.page.page.clone(), page.header.title.clone());
+    let (weak, nav_page, title) = (window.downgrade(), page.page.clone(), page.header.title.clone());
     let rename: Rc<dyn Fn()> = Rc::new(move || {
         let Some(window) = weak.upgrade() else { return };
         if let Some(playlist) = window.library_view.playlists().into_iter().find(|p| p.id == id) {
@@ -535,18 +557,19 @@ pub fn local_playlist(window: &MainWindow, id: i64) -> adw::NavigationPage {
     });
     window.library_view.listen(Change::PLAYLISTS, &rename);
     let keep = RefCell::new(Some(rename));
-    page.page.page.connect_destroy(move |_| {
+    page.page.connect_destroy(move |_| {
         keep.take();
     });
     page.load(window, Change::PLAYLISTS, move |library| {
         library.playlist_tracks(id).unwrap_or_default().into_iter().map(|t| (t, 0)).collect()
     });
-    page.page.page
+    page.page
 }
 
 /// История (REWRITE §3.2.4): «Недавние» — трек и дальше похожие, «Чаще всего» за период — весь список.
 pub fn history(window: &MainWindow) -> adw::NavigationPage {
-    let p = page(tr("History"), None);
+    let plays = Rc::new(Cell::new(TrackContext::Single));
+    let p = list_page(window, tr("History"), None, RowContext::History, Rc::clone(&plays));
     let clear_button = gtk::Button::builder().label(tr("ClearHistory")).valign(gtk::Align::Center).build();
     clear_button.add_css_class("flat");
     let top = gtk::Box::builder().spacing(8).build();
@@ -554,7 +577,7 @@ pub fn history(window: &MainWindow) -> adw::NavigationPage {
     title.set_hexpand(true);
     top.append(&title);
     top.append(&clear_button);
-    p.above(&top);
+    p.top.append(&top);
     let modes = adw::ToggleGroup::builder().halign(gtk::Align::Start).build();
     modes.add(adw::Toggle::builder().name("recent").label(tr("HistoryRecent")).build());
     modes.add(adw::Toggle::builder().name("top").label(tr("HistoryMostPlayed")).build());
@@ -570,10 +593,9 @@ pub fn history(window: &MainWindow) -> adw::NavigationPage {
     controls.append(&periods);
     let controls_scroller =
         gtk::ScrolledWindow::builder().child(&controls).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).build();
-    p.above(&controls_scroller);
+    p.top.append(&controls_scroller);
 
-    let (weak, content, state, modes_ref, periods_ref) =
-        (window.downgrade(), p.content.clone(), p.state.clone(), modes.clone(), periods.clone());
+    let (weak, list, state, modes_ref, periods_ref) = (window.downgrade(), p.list.clone(), p.state.clone(), modes.clone(), periods.clone());
     let refresh = live(window, &p.page, Change(Change::HISTORY.0 | Change::BLOCKS.0), move || {
         let Some(window) = weak.upgrade() else { return };
         let top = modes_ref.active_name().as_deref() == Some("top");
@@ -587,24 +609,24 @@ pub fn history(window: &MainWindow) -> adw::NavigationPage {
         };
         let task = window.ctx.services.db(move |library| {
             if top {
-                library.most_played(since, 200).unwrap_or_default().into_iter().map(|e| e.track).collect::<Vec<_>>()
+                library.most_played(since, 500).unwrap_or_default().into_iter().map(|e| e.track).collect::<Vec<_>>()
             } else {
-                library.recent_history(200).unwrap_or_default().into_iter().map(|e| e.track).collect()
+                library.recent_history(500).unwrap_or_default().into_iter().map(|e| e.track).collect()
             }
         });
-        let (weak, content, state) = (window.downgrade(), content.clone(), state.clone());
+        let (weak, list, state, plays) = (window.downgrade(), list.clone(), state.clone(), Rc::clone(&plays));
         glib::spawn_future_local(async move {
-            let (Some(window), Some(list)) = (weak.upgrade(), task.await) else { return };
+            let (Some(window), Some(tracks)) = (weak.upgrade(), task.await) else { return };
             let view = &window.library_view;
-            let list: Vec<Track> = list.into_iter().filter(|t| !view.is_removing(&removal_key_history(&t.video_id))).collect();
-            clear(&content);
-            if list.is_empty() {
+            let tracks: Vec<Track> = tracks.into_iter().filter(|t| !view.is_removing(&removal_key_history(&t.video_id))).collect();
+            plays.set(if top { TrackContext::List } else { TrackContext::Single });
+            let empty = tracks.is_empty();
+            list.set_tracks(tracks);
+            if empty {
                 state.empty("document-open-recent-symbolic", tr("HistoryEmpty"), tr("HistoryEmptyHint"));
-                return;
+            } else {
+                state.content();
             }
-            let plays = if top { TrackContext::List } else { TrackContext::Single };
-            content.append(&track_list(&window, &list, RowContext::History, plays));
-            state.content();
         });
     });
     let (r1, r2) = (Rc::clone(&refresh), Rc::clone(&refresh));

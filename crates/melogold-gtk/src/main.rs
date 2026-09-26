@@ -16,6 +16,7 @@ mod pages;
 mod player_bar;
 mod queue_panel;
 mod save_file;
+mod selection;
 mod services;
 mod settings_store;
 mod shortcuts;
@@ -23,6 +24,7 @@ mod shortcuts;
 mod snapshot;
 mod strings_generated;
 mod texts;
+mod track_row;
 mod widgets;
 mod window;
 

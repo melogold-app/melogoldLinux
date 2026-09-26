@@ -102,17 +102,7 @@ impl Downloads {
 
     /// «Скачать»: треки — в список загрузок и в очередь; трансляции и уже скачанное пропускаются.
     pub fn download(self: &Arc<Self>, tracks: &[Track]) -> usize {
-        let wanted: Vec<Track> = tracks
-            .iter()
-            .filter(|t| {
-                !t.is_live()
-                    && !matches!(
-                        self.state(&t.video_id),
-                        Some(DownloadState::Completed | DownloadState::Downloading(_) | DownloadState::Queued)
-                    )
-            })
-            .cloned()
-            .collect();
+        let wanted = wanted(tracks, |id| self.state(id));
         if let Err(error) = self.library.add_downloads(&wanted) {
             tracing::warn!(%error, "загрузки не записались в библиотеку");
         }
@@ -253,5 +243,47 @@ impl Downloads {
         };
         reader.cancel();
         result
+    }
+}
+
+/// Что из `tracks` качать: трансляции, скачанное и уже идущее пропускаются, сбой — качается снова.
+fn wanted(tracks: &[Track], state: impl Fn(&str) -> Option<DownloadState>) -> Vec<Track> {
+    let mut seen = HashSet::new();
+    tracks
+        .iter()
+        .filter(|t| !t.is_live() && seen.insert(t.video_id.as_str()))
+        .filter(|t| !matches!(state(&t.video_id), Some(DownloadState::Completed | DownloadState::Downloading(_) | DownloadState::Queued)))
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(id: &str, live: bool) -> Track {
+        Track { video_id: id.into(), title: id.into(), video_type: live.then(|| "live".into()), ..Default::default() }
+    }
+
+    #[test]
+    fn download_skips_downloaded_going_and_live() {
+        let tracks = [
+            track("new", false),
+            track("done", false),
+            track("going", false),
+            track("queued", false),
+            track("failed", false),
+            track("live", true),
+            track("new", false),
+        ];
+        let state = |id: &str| match id {
+            "done" => Some(DownloadState::Completed),
+            "going" => Some(DownloadState::Downloading(Some(0.5))),
+            "queued" => Some(DownloadState::Queued),
+            "failed" => Some(DownloadState::Failed),
+            _ => None,
+        };
+        let ids: Vec<String> = wanted(&tracks, state).into_iter().map(|t| t.video_id).collect();
+        assert_eq!(ids, ["new", "failed"]);
     }
 }

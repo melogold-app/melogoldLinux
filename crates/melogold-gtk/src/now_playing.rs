@@ -62,7 +62,8 @@ impl NowPlaying {
         overlay.add_css_class("cover");
         overlay.add_css_class("large");
         let frame = gtk::AspectFrame::builder().ratio(1.0).obey_child(false).child(&overlay).vexpand(true).build();
-        frame.set_size_request(200, 200);
+        // Обложка уступает место тексту ошибки и кнопкам: окно 800×600 не переполняется.
+        frame.set_size_request(160, 160);
 
         let title = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).build();
         title.add_css_class("title-2");
