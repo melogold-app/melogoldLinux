@@ -7,6 +7,7 @@
 mod app;
 mod catalog_widgets;
 mod images;
+mod library_view;
 mod localization;
 mod logging;
 mod mpris;
@@ -14,6 +15,7 @@ mod now_playing;
 mod pages;
 mod player_bar;
 mod queue_panel;
+mod save_file;
 mod services;
 mod settings_store;
 mod shortcuts;

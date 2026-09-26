@@ -2,16 +2,11 @@
 
 pub mod catalog;
 pub mod diagnostics;
+pub mod library;
 pub mod search;
 pub mod settings;
 
 use adw::prelude::*;
-
-/// Раздел, содержимое которого приходит в следующих срезах (docs/PROMPT.md §7).
-pub fn placeholder(title: &str, icon: &str, description: &str) -> adw::NavigationPage {
-    let status = adw::StatusPage::builder().icon_name(icon).title(title).description(description).build();
-    adw::NavigationPage::builder().title(title).tag("root").child(&status).build()
-}
 
 /// Строка-ссылка наружу: открывает адрес в браузере.
 pub fn link_row(title: &str, subtitle: &str, uri: &'static str) -> adw::ActionRow {

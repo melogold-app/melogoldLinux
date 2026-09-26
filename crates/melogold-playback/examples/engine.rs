@@ -22,6 +22,8 @@ async fn main() {
         resolver: Arc::new(Resolver::new(client.clone(), clients)),
         music: YouTubeMusic::new(client),
         songs: SongCache::new(std::env::temp_dir().join("melogold-engine-example"), 256 << 20),
+        downloads: None,
+        library: None,
         http: reqwest::Client::new(),
         settings: Default::default(),
         queue_path: None,

@@ -342,7 +342,7 @@ fn append(inner: &Rc<Inner>, items: Vec<MusicItem>, new_group: bool) {
             continue;
         }
         let row = match &item {
-            MusicItem::Track(track) => crate::widgets::track_row(&window.ctx.services.images, track, Some(window.track_menu(track))),
+            MusicItem::Track(track) => window.track_row(track, crate::library_view::RowContext::Plain),
             other => match crate::widgets::item_row(&window.ctx.services.images, other) {
                 Some(row) => {
                     // Переход — одним щелчком: это не трек, выделять в нём нечего.

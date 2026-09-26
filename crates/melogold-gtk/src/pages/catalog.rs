@@ -7,11 +7,13 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use melogold_core::music::{MusicItem, Shelf, Track};
+use melogold_core::music::{ArtistItem, MusicItem, Shelf, Track};
 use melogold_innertube::YouTubeError;
 use melogold_playback::engine::Command;
 
-use crate::catalog_widgets::{card_grid, description, mood_grid, shelf_view, track_list, CollectionHeader, TrackContext, TrackList};
+use crate::catalog_widgets::{
+    card_grid, description, mood_grid, shelf_view, track_list, CollectionHeader, Toggle, TrackContext, TrackList,
+};
 use crate::localization::tr;
 use crate::widgets::{catalog_error, StateView};
 use crate::window::MainWindow;
@@ -193,6 +195,22 @@ pub fn album_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage {
                 false,
             );
             add_play_buttons(window, &header, album.tracks.clone());
+            let (weak, item) = (window.downgrade(), album.album.clone());
+            let save =
+                header.add_toggle([tr("SaveToLibrary"), tr("InLibrary")], ["list-add-symbolic", "object-select-symbolic"], move |on| {
+                    let Some(window) = weak.upgrade() else { return };
+                    let item = item.clone();
+                    let task = window.ctx.services.db(move |library| library.set_album_saved(&item, on));
+                    glib::spawn_future_local(async move {
+                        if let Some(Err(error)) = task.await {
+                            tracing::warn!(%error, "альбом не сохранился");
+                        }
+                    });
+                });
+            bookmark_state(window, &save, {
+                let id = album.album.browse_id.clone();
+                move |library| library.is_album_saved(&id).unwrap_or(false)
+            });
             if let Some(artist) = album.album.artists.iter().find_map(|a| a.id.clone()) {
                 let weak = window.downgrade();
                 header.add_button(tr("MenuGoToArtist"), "avatar-default-symbolic", false, move || {
@@ -291,6 +309,13 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
                 artist.thumbnail_url.as_deref(),
                 true,
             );
+            let item = ArtistItem {
+                browse_id: artist.browse_id.clone(),
+                name: artist.name.clone(),
+                subtitle: None,
+                thumbnail_url: artist.thumbnail_url.clone(),
+                is_channel: artist.is_channel,
+            };
             let top: Vec<Track> = artist.shelves.first().map(|s| s.tracks().cloned().collect()).unwrap_or_default();
             if !top.is_empty() {
                 let (weak, music, songs, top_tracks) =
@@ -316,6 +341,19 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
                 header.add_button(tr("PlayAll"), "media-playback-start-symbolic", true, move || play(false));
                 header.add_button(tr("Shuffle"), "media-playlist-shuffle-symbolic", false, move || all_songs(true));
             }
+            let (weak, id) = (window.downgrade(), item.browse_id.clone());
+            let subscribe =
+                header.add_toggle([tr("Subscribe"), tr("Subscribed")], ["list-add-symbolic", "object-select-symbolic"], move |on| {
+                    let Some(window) = weak.upgrade() else { return };
+                    let item = item.clone();
+                    let task = window.ctx.services.db(move |library| library.set_artist_saved(&item, on));
+                    glib::spawn_future_local(async move {
+                        if let Some(Err(error)) = task.await {
+                            tracing::warn!(%error, "подписка не сохранилась");
+                        }
+                    });
+                });
+            bookmark_state(window, &subscribe, move |library| library.is_artist_saved(&id).unwrap_or(false));
             content.append(&header.root);
             if let Some(text) = artist.description.as_deref().filter(|d| !d.is_empty()) {
                 content.append(&description(text));
@@ -388,6 +426,17 @@ pub fn track_list_page(window: &MainWindow, title: &str, tracks: &[Track]) -> ad
     page.content.append(&track_list(window, tracks, usize::MAX, TrackContext::List));
     page.state.content();
     page.page
+}
+
+/// Состояние «Сохранить»/«Подписаться» — из базы, после того как шапка уже показана.
+fn bookmark_state(window: &MainWindow, toggle: &Toggle, read: impl FnOnce(&melogold_data::Library) -> bool + Send + 'static) {
+    let task = window.ctx.services.db(read);
+    let toggle = toggle.clone();
+    glib::spawn_future_local(async move {
+        if let Some(on) = task.await {
+            toggle.set_quietly(on);
+        }
+    });
 }
 
 fn spacer() -> gtk::Box {

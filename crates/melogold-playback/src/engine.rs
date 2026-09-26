@@ -117,11 +117,13 @@ pub struct Settings {
     pub speed: f64,
     pub normalize: bool,
     pub autoplay: bool,
+    /// «Не сохранять историю» (REWRITE §3.5.4): прослушивания не записываются.
+    pub history_paused: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { volume: 0.8, muted: false, speed: 1.0, normalize: true, autoplay: true }
+        Self { volume: 0.8, muted: false, speed: 1.0, normalize: true, autoplay: true, history_paused: false }
     }
 }
 
@@ -237,6 +239,10 @@ pub struct Deps {
     pub resolver: Arc<Resolver>,
     pub music: YouTubeMusic,
     pub songs: Arc<SongCache>,
+    /// Скачанное: играет отсюда без сети и без запросов.
+    pub downloads: Option<Arc<SongCache>>,
+    /// История прослушиваний и скрытые треки; без неё движок только играет.
+    pub library: Option<Arc<melogold_data::Library>>,
     pub http: reqwest::Client,
     pub settings: Settings,
     /// Куда сохранять очередь для восстановления после перезапуска.
@@ -679,14 +685,19 @@ impl Engine {
         self.set_status(Status::Resolving);
 
         let preloaded = self.preloaded.remove(&track.video_id);
-        let (resolver, songs, http, tx) =
-            (Arc::clone(&self.deps.resolver), Arc::clone(&self.deps.songs), self.deps.http.clone(), self.tx.clone());
+        let (resolver, songs, downloads, http, tx) = (
+            Arc::clone(&self.deps.resolver),
+            Arc::clone(&self.deps.songs),
+            self.deps.downloads.clone(),
+            self.deps.http.clone(),
+            self.tx.clone(),
+        );
         tokio::spawn(async move {
             let mut attempt = 0;
             let result = loop {
                 let opened = match &preloaded {
                     Some(stream) if attempt == 0 && !stream.reader().is_cancelled() => Ok(Arc::clone(stream)),
-                    _ => open(&resolver, &songs, &http, &track.video_id).await,
+                    _ => open(&resolver, &songs, downloads.as_ref(), &http, &track.video_id).await,
                 };
                 match opened {
                     Ok(stream) => break Ok(stream),
@@ -842,17 +853,23 @@ impl Engine {
         });
         if let Some(next) = upcoming.first() {
             if !self.preloaded.contains_key(next) && self.preloading.insert(next.clone()) {
-                let (resolver, songs, http, tx, video_id) =
-                    (Arc::clone(&self.deps.resolver), Arc::clone(&self.deps.songs), self.deps.http.clone(), self.tx.clone(), next.clone());
+                let (resolver, songs, downloads, http, tx, video_id) = (
+                    Arc::clone(&self.deps.resolver),
+                    Arc::clone(&self.deps.songs),
+                    self.deps.downloads.clone(),
+                    self.deps.http.clone(),
+                    self.tx.clone(),
+                    next.clone(),
+                );
                 tokio::spawn(async move {
-                    if let Ok(stream) = open(&resolver, &songs, &http, &video_id).await {
+                    if let Ok(stream) = open(&resolver, &songs, downloads.as_ref(), &http, &video_id).await {
                         let _ = tx.send(Command::Preloaded { video_id, stream });
                     }
                 });
             }
         }
         for video_id in upcoming.into_iter().skip(1) {
-            if self.deps.songs.is_complete(&video_id) {
+            if self.deps.songs.is_complete(&video_id) || self.deps.downloads.as_ref().is_some_and(|d| d.is_complete(&video_id)) {
                 continue;
             }
             let resolver = Arc::clone(&self.deps.resolver);
@@ -917,10 +934,13 @@ impl Engine {
             self.autoplay.seed = seed;
         }
         let known: HashSet<&str> = self.queue.items().iter().map(|i| i.track.video_id.as_str()).collect();
+        // «Не показывать этот трек» действует и на похожие.
+        let hidden = self.deps.library.as_ref().and_then(|l| l.hidden_tracks().ok()).unwrap_or_default();
         let mut seen = HashSet::new();
         let fresh: Vec<Track> = tracks
             .into_iter()
             .filter(|t| !t.unavailable && !known.contains(t.video_id.as_str()) && !self.played_session.contains(&t.video_id))
+            .filter(|t| !hidden.contains(&t.video_id))
             .filter(|t| seen.insert(t.video_id.clone()))
             .take(25)
             .collect();
@@ -964,6 +984,15 @@ impl Engine {
         let played = std::mem::take(&mut self.listened).mul_f64(self.rate());
         if let Some(track) = self.listened_track.take() {
             if played >= MIN_PLAY {
+                if let (Some(library), false) = (self.deps.library.clone(), self.settings.history_paused) {
+                    let (track, ms, ended) = (track.clone(), played.as_millis() as i64, melogold_core::text::now_ms());
+                    // История — не повод ронять плеер и не повод его ждать.
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(error) = library.record_play(&track, ms, ended) {
+                            tracing::warn!(%error, "прослушивание не записалось");
+                        }
+                    });
+                }
                 self.broadcast(Event::Listened { track, played });
             }
         }
@@ -1008,15 +1037,20 @@ impl Engine {
 async fn open(
     resolver: &Arc<Resolver>,
     songs: &Arc<SongCache>,
+    downloads: Option<&Arc<SongCache>>,
     http: &reqwest::Client,
     video_id: &str,
 ) -> Result<Arc<TrackStream>, StreamError> {
-    let info = match songs.complete(video_id) {
-        Some(info) => info,
-        None => resolver.resolve(video_id).await?,
+    let downloaded = downloads.and_then(|store| store.complete(video_id).map(|info| (Arc::clone(store), info)));
+    let (store, info) = match downloaded {
+        Some(found) => found,
+        None => match songs.complete(video_id) {
+            Some(info) => (Arc::clone(songs), info),
+            None => (Arc::clone(songs), resolver.resolve(video_id).await?),
+        },
     };
-    let entry = songs.entry(&info);
-    let reader = RangeReader::new(http.clone(), Arc::clone(resolver), info, Some((Arc::clone(songs), entry)));
+    let entry = store.entry(&info);
+    let reader = RangeReader::new(http.clone(), Arc::clone(resolver), info, Some((store, entry)));
     let result = TrackStream::open(Arc::clone(&reader)).await;
     if result.is_err() {
         reader.cancel();

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/melogold-core",
+    "crates/melogold-data",
     "crates/melogold-innertube",
     "crates/melogold-playback",
     "crates/melogold-gtk",
@@ -37,6 +38,8 @@ gst = { package = "gstreamer", version = "0.25" }
 gst-base = { package = "gstreamer-base", version = "0.25" }
 gst-audio = { package = "gstreamer-audio", version = "0.25" }
 gst-app = { package = "gstreamer-app", version = "0.25" }
+# SQLite вшит в бинарь: одна и та же версия на всех дистрибутивах и в AppImage.
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip", "brotli", "stream"] }
 # gtk4 и libadwaita — пара одного выпуска gtk-rs: обе завязаны на один glib.
 gtk = { package = "gtk4", version = "0.11", features = ["v4_20"] }

@@ -5,6 +5,7 @@ use adw::prelude::*;
 use gtk::glib;
 use melogold_playback::engine::{Command, QueueView};
 
+use crate::library_view::{RowContext, TrackTarget};
 use crate::localization::tr;
 use crate::widgets::Cover;
 use crate::window::MainWindow;
@@ -109,6 +110,9 @@ impl QueuePanel {
                 _ => glib::Propagation::Proceed,
             });
             row.add_controller(keys);
+            // Правый щелчок и клавиша меню — меню трека; «Убрать из очереди» — у всех, кроме играющего.
+            let context = if current { RowContext::Player } else { RowContext::Queue(item.id) };
+            window.attach_context_menu(&row, TrackTarget { track: item.track.clone(), context, ..Default::default() });
             self.list.append(&row);
         }
     }

@@ -29,6 +29,7 @@ use melogold_core::youtube_links::{self, LinkTarget};
 use melogold_playback::engine::{Command, Event, QueueView, State};
 
 use crate::app::AppContext;
+use crate::library_view::LibraryView;
 use crate::localization::{tr, trf};
 use crate::now_playing::NowPlaying;
 use crate::pages;
@@ -64,6 +65,8 @@ pub struct Inner {
     suggestions: gtk::Popover,
     suggestion_list: gtk::ListBox,
     suggestion_token: Cell<u64>,
+    /// Строки подсказок по порядку списка.
+    suggestion_items: RefCell<Vec<Suggestion>>,
     current: Cell<Tab>,
     player_bar: OnceCell<PlayerBar>,
     now_playing: OnceCell<NowPlaying>,
@@ -72,6 +75,7 @@ pub struct Inner {
     /// Узкое окно (порог 720): шапки коллекций ставят обложку сверху (§5.2).
     compact: Cell<bool>,
     headers: RefCell<Vec<glib::WeakRef<gtk::Box>>>,
+    pub library_view: LibraryView,
 }
 
 struct Section {
@@ -213,6 +217,7 @@ impl MainWindow {
             suggestions,
             suggestion_list,
             suggestion_token: Cell::new(0),
+            suggestion_items: RefCell::default(),
             current: Cell::new(Tab::Trends),
             player_bar: OnceCell::new(),
             now_playing: OnceCell::new(),
@@ -220,6 +225,7 @@ impl MainWindow {
             state: RefCell::default(),
             compact: Cell::new(false),
             headers: RefCell::default(),
+            library_view: LibraryView::default(),
         }));
         this.build_player();
         this.install_breakpoints();
@@ -227,6 +233,8 @@ impl MainWindow {
         this.connect_sidebar(&top_list);
         this.connect_sidebar(&bottom_list);
         this.install_actions();
+        this.install_track_actions();
+        this.start_library();
         this.install_keys();
         this.install_search();
         this.install_drop();
@@ -249,6 +257,15 @@ impl MainWindow {
 
     pub fn toast(&self, text: &str) {
         self.toasts.add_toast(adw::Toast::new(text));
+    }
+
+    pub fn add_toast(&self, toast: adw::Toast) {
+        self.toasts.add_toast(toast);
+    }
+
+    /// Играющий (или выбранный) трек.
+    pub fn state_track(&self) -> Option<Track> {
+        self.state.borrow().track.clone()
     }
 
     pub fn player_bar(&self) -> &PlayerBar {
@@ -384,7 +401,7 @@ impl MainWindow {
             LinkTarget::Channel(id) => self.push(&catalog::artist_page(self, &id)),
             LinkTarget::Handle(name) => self.resolve_channel(format!("https://www.youtube.com/@{name}")),
             LinkTarget::LegacyChannel(url) => self.resolve_channel(url),
-            LinkTarget::Search(query) => self.search_for(&query),
+            LinkTarget::Search(query) => self.submit_search(&query),
             LinkTarget::External { .. } => self.toast(tr("LinkImportLater")),
             LinkTarget::Unsupported(youtube_links::EMPTY) => {}
             LinkTarget::Unsupported(_) => self.toast(tr("LinkUnsupported")),
@@ -432,26 +449,6 @@ impl MainWindow {
                 _ => window.toast(tr("ErrorOffline")),
             }
         });
-    }
-
-    /// Меню «…» строки трека: действия получают трек параметром действия окна.
-    pub fn track_menu(&self, track: &Track) -> gio::MenuModel {
-        let target = serde_json::to_string(track).unwrap_or_default().to_variant();
-        let item = |label: &str, action: &str| {
-            let item = gio::MenuItem::new(Some(label), None);
-            item.set_action_and_target_value(Some(action), Some(&target));
-            item
-        };
-        let menu = gio::Menu::new();
-        let queue = gio::Menu::new();
-        queue.append_item(&item(tr("MenuPlayNext"), "win.track-play-next"));
-        queue.append_item(&item(tr("MenuAddToQueue"), "win.track-add-to-queue"));
-        menu.append_section(None, &queue);
-        let other = gio::Menu::new();
-        other.append_item(&item(tr("MenuTrackRadio"), "win.track-radio"));
-        other.append_item(&item(tr("MenuCopyLink"), "win.track-copy-link"));
-        menu.append_section(None, &other);
-        menu.upcast()
     }
 
     // ── сборка ──
@@ -522,14 +519,15 @@ impl MainWindow {
         let narrow = breakpoint("max-width: 720sp");
         volume_as_button(&narrow);
         two_rows(&narrow);
-        menu_follows(&narrow, Hidden { modes: true, queue: false });
+        menu_follows(&narrow, Hidden { modes: true, queue: false, heart: false });
         headers_follow(&narrow, true);
         self.window.add_breakpoint(narrow);
         let phone = breakpoint("max-width: 480sp");
         volume_as_button(&phone);
         two_rows(&phone);
         phone.add_setter(&bar.queue, "visible", Some(&false.to_value()));
-        menu_follows(&phone, Hidden { modes: true, queue: true });
+        phone.add_setter(&bar.heart, "visible", Some(&false.to_value()));
+        menu_follows(&phone, Hidden { modes: true, queue: true, heart: true });
         headers_follow(&phone, true);
         self.window.add_breakpoint(phone);
     }
@@ -557,7 +555,7 @@ impl MainWindow {
             let page = match section.tab {
                 Tab::Trends => pages::catalog::trends(self),
                 Tab::WhatsNew => pages::catalog::new_page(self),
-                Tab::Library => pages::placeholder(tr("LibraryHeader"), "library-symbolic", tr("LinuxSectionSoonLibrary")),
+                Tab::Library => pages::library::root(self),
                 Tab::Settings => pages::settings::root(self),
             };
             section.nav.add(&page);
@@ -607,18 +605,6 @@ impl MainWindow {
                 .activate(move |_: &adw::ApplicationWindow, _, _| {
                     if let Some(window) = weak.upgrade() {
                         run(&window);
-                    }
-                })
-                .build()
-        };
-        let with_track = |name: &str, run: Box<dyn Fn(&MainWindow, Track)>| {
-            let weak = self.downgrade();
-            gio::ActionEntry::builder(name)
-                .parameter_type(Some(glib::VariantTy::STRING))
-                .activate(move |_: &adw::ApplicationWindow, _, parameter| {
-                    let track = parameter.and_then(|p| p.get::<String>()).and_then(|json| serde_json::from_str::<Track>(&json).ok());
-                    if let (Some(window), Some(track)) = (weak.upgrade(), track) {
-                        run(&window, track);
                     }
                 })
                 .build()
@@ -674,48 +660,20 @@ impl MainWindow {
             simple(
                 "other-versions",
                 Box::new(|w| {
-                    // «Другие версии»: тот же трек у других загрузчиков — поиск по названию и исполнителю.
-                    if let Some(track) = w.state.borrow().track.clone() {
-                        let query = format!("{} {}", track.title, track.artists_text.unwrap_or_default());
-                        w.search_for(query.trim());
+                    if let Some(track) = w.state_track() {
+                        w.other_versions(&track);
                     }
                 }),
             ),
             simple(
-                "current-radio",
+                "current-like",
                 Box::new(|w| {
-                    if let Some(track) = w.state.borrow().track.clone() {
-                        w.ctx.services.player.send(Command::PlaySingle { track, start: Duration::ZERO });
+                    if let Some(track) = w.state_track() {
+                        let liked = !w.library_view.is_liked(&track.video_id);
+                        w.set_liked(vec![track], liked);
                     }
                 }),
             ),
-            simple(
-                "current-copy-link",
-                Box::new(|w| {
-                    if let Some(track) = w.state.borrow().track.clone() {
-                        w.copy_link(&track);
-                    }
-                }),
-            ),
-            with_track(
-                "track-play-next",
-                Box::new(|w, track| {
-                    w.toast(&trf("PlayingNextFormat", &[&track.title]));
-                    w.ctx.services.player.send(Command::PlayNext(vec![track]));
-                }),
-            ),
-            with_track(
-                "track-add-to-queue",
-                Box::new(|w, track| {
-                    w.toast(&trf("QueuedCountFormat", &[&track.title]));
-                    w.ctx.services.player.send(Command::AddToEnd(vec![track]));
-                }),
-            ),
-            with_track(
-                "track-radio",
-                Box::new(|w, track| w.ctx.services.player.send(Command::PlaySingle { track, start: Duration::ZERO })),
-            ),
-            with_track("track-copy-link", Box::new(|w, track| w.copy_link(&track))),
         ];
         self.window.add_action_entries(entries);
 
@@ -768,7 +726,7 @@ impl MainWindow {
         }
     }
 
-    fn copy_link(&self, track: &Track) {
+    pub fn copy_link(&self, track: &Track) {
         let link = if track.is_video() {
             format!("https://www.youtube.com/watch?v={}", track.video_id)
         } else {
@@ -859,15 +817,14 @@ impl MainWindow {
         self.search.connect_activate(move |entry| {
             let Some(window) = weak.upgrade() else { return };
             // Выбранная стрелками подсказка важнее набранного.
-            let chosen = window
-                .suggestions
-                .is_visible()
-                .then(|| window.suggestion_list.selected_row().and_then(|row| row.child()).and_downcast::<gtk::Label>())
-                .flatten()
-                .filter(|l| l.widget_name() != "open-link")
-                .map(|l| l.label());
-            let text = chosen.map(|t| t.to_string()).unwrap_or_else(|| entry.text().to_string());
-            window.open_text(&text);
+            let chosen = window.suggestions.is_visible().then(|| window.suggestion_list.selected_row()).flatten();
+            match chosen {
+                Some(row) => window.choose_suggestion(row.index()),
+                None => {
+                    window.suggestions.popdown();
+                    window.open_text(&entry.text());
+                }
+            }
         });
         let weak = self.downgrade();
         self.search.connect_search_changed(move |entry| {
@@ -877,13 +834,8 @@ impl MainWindow {
         });
         let weak = self.downgrade();
         self.suggestion_list.connect_row_activated(move |_, row| {
-            if let (Some(window), Some(label)) = (weak.upgrade(), row.child().and_downcast::<gtk::Label>()) {
-                if label.widget_name() == "open-link" {
-                    window.suggestions.popdown();
-                    window.open_text(&window.search.text());
-                } else {
-                    window.search_for(&label.label());
-                }
+            if let Some(window) = weak.upgrade() {
+                window.choose_suggestion(row.index());
             }
         });
         let keys = gtk::EventControllerKey::new();
@@ -909,6 +861,15 @@ impl MainWindow {
         self.search.add_controller(keys);
         let focus = gtk::EventControllerFocus::new();
         let weak = self.downgrade();
+        focus.connect_enter(move |_| {
+            // До ввода — недавние запросы (§5.4 «Поиск»).
+            if let Some(window) = weak.upgrade() {
+                if window.search.text().trim().is_empty() {
+                    window.show_recent_searches();
+                }
+            }
+        });
+        let weak = self.downgrade();
         focus.connect_leave(move |_| {
             if let Some(window) = weak.upgrade() {
                 // Щелчок по подсказке уводит фокус — даём ему дойти до строки.
@@ -923,11 +884,86 @@ impl MainWindow {
         self.search.add_controller(focus);
     }
 
-    /// Подсказки YouTube Music при вводе — через 150 мс после последней буквы.
-    fn update_suggestions(&self, text: String) {
+    fn choose_suggestion(&self, index: i32) {
+        let item = self.suggestion_items.borrow().get(index.max(0) as usize).cloned();
+        self.suggestions.popdown();
+        match item {
+            Some(Suggestion::Query(query)) | Some(Suggestion::Recent(query)) => {
+                self.search.set_text(&query);
+                self.submit_search(&query);
+            }
+            Some(Suggestion::Link(_)) => self.open_text(&self.search.text()),
+            Some(Suggestion::Track(track)) => self.ctx.services.player.send(Command::PlaySingle { track: *track, start: Duration::ZERO }),
+            None => {}
+        }
+    }
+
+    /// Запрос из поля: в историю поиска (если она не на паузе) и выдача.
+    fn submit_search(&self, query: &str) {
+        let query = query.trim().to_owned();
+        if query.is_empty() {
+            return;
+        }
+        if !self.ctx.settings.get(&keys::SEARCH_HISTORY_PAUSED) {
+            let text = query.clone();
+            let task = self.ctx.services.db(move |library| library.add_search(&text));
+            glib::spawn_future_local(async move {
+                if let Some(Err(error)) = task.await {
+                    tracing::warn!(%error, "запрос не записался в историю поиска");
+                }
+            });
+        }
+        self.search_for(&query);
+    }
+
+    fn show_suggestions(&self, items: Vec<Suggestion>) {
+        while let Some(child) = self.suggestion_list.first_child() {
+            self.suggestion_list.remove(&child);
+        }
+        for item in &items {
+            self.suggestion_list.append(&suggestion_row(item));
+        }
+        let empty = items.is_empty();
+        self.suggestion_items.replace(items);
+        if empty {
+            self.suggestions.popdown();
+        } else {
+            self.suggestions.set_width_request(self.search.width());
+            self.suggestions.popup();
+        }
+    }
+
+    /// Недавние запросы — пока поле пустое; история поиска на паузе — их нет.
+    fn show_recent_searches(&self) {
         let token = self.suggestion_token.get() + 1;
         self.suggestion_token.set(token);
-        if text.trim().is_empty() || links::is_melogold_link(&text) {
+        if self.ctx.settings.get(&keys::SEARCH_HISTORY_PAUSED) {
+            return;
+        }
+        let task = self.ctx.services.db(|library| library.recent_searches(8).unwrap_or_default());
+        let weak = self.downgrade();
+        glib::spawn_future_local(async move {
+            let (Some(window), Some(recent)) = (weak.upgrade(), task.await) else { return };
+            if window.suggestion_token.get() == token && window.search.has_focus() && window.search.text().trim().is_empty() {
+                window.show_suggestions(recent.into_iter().map(Suggestion::Recent).collect());
+            }
+        });
+    }
+
+    /// При вводе (§5.4): ссылка — «Открыть ссылку»; иначе через 150 мс после последней буквы
+    /// «В библиотеке» (до трёх своих треков) и подсказки YouTube Music.
+    fn update_suggestions(&self, text: String) {
+        if text.trim().is_empty() {
+            if self.search.has_focus() {
+                self.show_recent_searches();
+            } else {
+                self.suggestions.popdown();
+            }
+            return;
+        }
+        let token = self.suggestion_token.get() + 1;
+        self.suggestion_token.set(token);
+        if links::is_melogold_link(&text) {
             self.suggestions.popdown();
             return;
         }
@@ -946,36 +982,26 @@ impl MainWindow {
                 _ => None,
             };
             if let Some(kind) = link_kind {
-                while let Some(child) = window.suggestion_list.first_child() {
-                    window.suggestion_list.remove(&child);
-                }
-                let label = gtk::Label::builder().label(trf("OpenLinkFormat", &[&tr(kind)])).xalign(0.0).build();
-                label.set_widget_name("open-link");
-                window.suggestion_list.append(&label);
-                window.suggestions.set_width_request(window.search.width());
-                window.suggestions.popup();
+                window.show_suggestions(vec![Suggestion::Link(trf("OpenLinkFormat", &[&tr(kind)]))]);
                 return;
             }
+            let query = text.trim().to_owned();
+            let local_query = query.clone();
+            let local = window.ctx.services.db(move |library| library.search_library(&local_query, 3).unwrap_or_default());
             let music = window.ctx.services.music.clone();
-            let query = text.clone();
-            let task = window.ctx.services.run(async move { music.suggestions(&query).await });
+            let remote = window.ctx.services.run(async move { music.suggestions(&query).await });
             glib::spawn_future_local(async move {
-                let Some(Ok(suggestions)) = task.await else { return };
-                if window.suggestion_token.get() != token || !window.search.has_focus() {
-                    return;
+                let mut items: Vec<Suggestion> =
+                    local.await.unwrap_or_default().into_iter().map(|t| Suggestion::Track(Box::new(t))).collect();
+                if window.suggestion_token.get() == token && window.search.has_focus() && !items.is_empty() {
+                    window.show_suggestions(items.clone());
                 }
-                while let Some(child) = window.suggestion_list.first_child() {
-                    window.suggestion_list.remove(&child);
+                // Без сети подсказок нет — остаётся «В библиотеке».
+                if let Some(Ok(remote)) = remote.await {
+                    items.extend(remote.into_iter().take(8).map(Suggestion::Query));
                 }
-                for suggestion in suggestions.iter().take(8) {
-                    let label = gtk::Label::builder().label(suggestion).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
-                    window.suggestion_list.append(&label);
-                }
-                if suggestions.is_empty() {
-                    window.suggestions.popdown();
-                } else {
-                    window.suggestions.set_width_request(window.search.width());
-                    window.suggestions.popup();
+                if window.suggestion_token.get() == token && window.search.has_focus() {
+                    window.show_suggestions(items);
                 }
             });
         });
@@ -996,7 +1022,11 @@ impl MainWindow {
     fn connect_close(&self) {
         let settings = Rc::clone(&self.ctx.settings);
         let player = self.ctx.services.player.clone();
+        let weak = self.downgrade();
         self.window.connect_close_request(move |window| {
+            if let Some(main) = weak.upgrade() {
+                main.flush_pending();
+            }
             let (width, height) = window.default_size();
             settings.set(&keys::WINDOW_WIDTH, width);
             settings.set(&keys::WINDOW_HEIGHT, height);
@@ -1092,6 +1122,47 @@ impl MainWindow {
     pub fn split_view(&self) -> &adw::OverlaySplitView {
         &self.split
     }
+}
+
+/// Строка под полем поиска.
+#[derive(Clone)]
+enum Suggestion {
+    /// Недавний запрос (поле пустое).
+    Recent(String),
+    /// Подсказка YouTube Music.
+    Query(String),
+    /// «Открыть ссылку: видео YouTube».
+    Link(String),
+    /// «В библиотеке»: свой трек — играет сразу.
+    Track(Box<Track>),
+}
+
+fn suggestion_row(item: &Suggestion) -> gtk::ListBoxRow {
+    let (icon, title, subtitle) = match item {
+        Suggestion::Recent(query) => ("document-open-recent-symbolic", query.clone(), None),
+        Suggestion::Query(query) => ("system-search-symbolic", query.clone(), None),
+        Suggestion::Link(text) => ("adw-external-link-symbolic", text.clone(), None),
+        Suggestion::Track(track) => {
+            let artist = track.artists_text.as_deref().unwrap_or_default();
+            let subtitle = if artist.is_empty() { tr("InLibrary").to_owned() } else { format!("{} · {artist}", tr("InLibrary")) };
+            ("library-symbolic", track.title.clone(), Some(subtitle))
+        }
+    };
+    let content = gtk::Box::builder().spacing(10).build();
+    content.append(&gtk::Image::from_icon_name(icon));
+    let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).build();
+    let title_label = gtk::Label::builder().label(&title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
+    texts.append(&title_label);
+    if let Some(subtitle) = subtitle {
+        let label = gtk::Label::builder().label(&subtitle).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        label.add_css_class("dim-label");
+        label.add_css_class("caption");
+        texts.append(&label);
+    }
+    content.append(&texts);
+    let row = gtk::ListBoxRow::builder().child(&content).build();
+    row.update_property(&[gtk::accessible::Property::Label(&title)]);
+    row
 }
 
 fn sidebar_list() -> gtk::ListBox {

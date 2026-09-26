@@ -33,6 +33,7 @@ pub struct Inner {
     subtitle: gtk::Label,
     error_box: gtk::Box,
     error_label: gtk::Label,
+    pub heart: gtk::Button,
     pub shuffle: gtk::ToggleButton,
     previous: gtk::Button,
     play: gtk::Button,
@@ -51,6 +52,7 @@ pub struct Inner {
     mute_buttons: [gtk::ToggleButton; 2],
     volume_value: gtk::Label,
     more: gtk::MenuButton,
+    hidden: Cell<Hidden>,
     state: RefCell<State>,
     /// Пользователь тянет ползунок: позиция из плеера его не перебивает.
     seeking: Cell<bool>,
@@ -120,9 +122,18 @@ impl PlayerBar {
         texts.append(&title);
         texts.append(&subtitle);
         texts.append(&error_box);
+        // ♡ играющего трека — рядом с названием, как у всех клиентов; в «…» его поэтому нет.
+        let heart = icon_button(
+            "heart-outline-symbolic",
+            tr("PlayerLike.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"),
+            tr("MenuFavoriteAdd"),
+        );
+        heart.add_css_class("heart");
+        heart.set_action_name(Some("win.current-like"));
         let track = gtk::Box::builder().spacing(10).hexpand(false).build();
         track.append(&cover_button);
         track.append(&texts);
+        track.append(&heart);
 
         // ── середина: кнопки и перемотка ──
         let shuffle = toggle_button(
@@ -251,6 +262,7 @@ impl PlayerBar {
             subtitle,
             error_box,
             error_label,
+            heart,
             shuffle,
             previous,
             play,
@@ -269,6 +281,7 @@ impl PlayerBar {
             mute_buttons: [mute_inline, mute_popover],
             volume_value,
             more,
+            hidden: Cell::new(Hidden::default()),
             state: RefCell::default(),
             seeking: Cell::new(false),
             seek_token: Cell::new(0),
@@ -276,7 +289,6 @@ impl PlayerBar {
             updating: Cell::new(false),
         }));
         bar.connect(window);
-        bar.set_hidden(Hidden::default());
         bar
     }
 
@@ -337,6 +349,18 @@ impl PlayerBar {
         });
         self.volume_button.add_controller(scroll);
         self.update_volume_icon(&window.ctx.settings);
+
+        // «…» собирается при открытии: пункты зависят от трека, его загрузки и ширины окна.
+        let (weak_window, weak_bar) = (window.downgrade(), Rc::downgrade(&self.0));
+        self.more.set_create_popup_func(move |button| {
+            if let (Some(window), Some(bar)) = (weak_window.upgrade(), weak_bar.upgrade()) {
+                button.set_menu_model(Some(&player_menu(&window, bar.hidden.get())));
+            }
+        });
+    }
+
+    pub fn set_liked(&self, liked: bool) {
+        crate::library_view::set_heart(&self.heart, liked);
     }
 
     pub fn update_volume_icon(&self, settings: &crate::settings_store::SettingsStore) {
@@ -359,7 +383,7 @@ impl PlayerBar {
     }
 
     pub fn set_hidden(&self, hidden: Hidden) {
-        self.more.set_menu_model(Some(&player_menu(hidden)));
+        self.hidden.set(hidden);
     }
 
     pub fn set_volume(&self, value: f64) {
@@ -378,6 +402,7 @@ impl PlayerBar {
                 let fallback = melogold_core::thumbnails::for_video(&track.video_id, 120);
                 self.cover.set(&window.ctx.services.images, track.thumbnail_url.as_deref().or(Some(&fallback)), 120);
             }
+            self.set_liked(window.library_view.is_liked(&track.video_id));
             self.title.set_label(&track.title);
             self.title.set_tooltip_text(Some(&track.title));
             self.subtitle.set_label(&track.subtitle());
@@ -468,10 +493,13 @@ impl PlayerBar {
 pub struct Hidden {
     pub modes: bool,
     pub queue: bool,
+    /// ♡ у названия (окно уже 480): в «…» появляется «В Избранное».
+    pub heart: bool,
 }
 
-/// Меню «…» панели плеера — одно на всё (§5.3). Трек, текст и таймер добавят свои срезы.
-pub fn player_menu(hidden: Hidden) -> gio::Menu {
+/// Меню «…» панели плеера — одно на всё (§5.3): спрятанное порогом, меню играющего трека (без
+/// очереди и ♡ — они рядом), сведения о потоке и клавиши. Текст и таймер добавят свои срезы.
+pub fn player_menu(window: &MainWindow, hidden: Hidden) -> gio::Menu {
     let menu = gio::Menu::new();
     let panel = gio::Menu::new();
     if hidden.queue {
@@ -481,13 +509,22 @@ pub fn player_menu(hidden: Hidden) -> gio::Menu {
         panel.append(Some(tr("Shuffle")), Some("win.shuffle"));
         panel.append(Some(tr("RepeatAll")), Some("win.repeat"));
     }
+    if hidden.heart {
+        let liked = window.state_track().is_some_and(|t| window.library_view.is_liked(&t.video_id));
+        panel.append(Some(tr(if liked { "MenuFavoriteRemove" } else { "MenuFavoriteAdd" })), Some("win.current-like"));
+    }
     if panel.n_items() > 0 {
         menu.append_section(None, &panel);
     }
-    let track = gio::Menu::new();
-    track.append(Some(tr("MenuTrackRadio")), Some("win.current-radio"));
-    track.append(Some(tr("MenuCopyLink")), Some("win.current-copy-link"));
-    menu.append_section(None, &track);
+    if let Some(track) = window.state_track() {
+        let target = crate::library_view::TrackTarget { track, context: crate::library_view::RowContext::Player, ..Default::default() };
+        let track_menu = window.track_menu_for(&target);
+        for index in 0..track_menu.n_items() {
+            if let Some(section) = track_menu.item_link(index, gio::MENU_LINK_SECTION) {
+                menu.append_section(None, &section);
+            }
+        }
+    }
     let info = gio::Menu::new();
     info.append(Some(tr("MenuStreamInfo")), Some("win.stream-info"));
     info.append(Some(tr("MenuShortcuts")), Some("app.shortcuts"));

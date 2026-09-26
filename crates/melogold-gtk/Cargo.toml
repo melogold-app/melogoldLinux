@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 melogold-core = { path = "../melogold-core" }
+melogold-data = { path = "../melogold-data" }
 melogold-innertube = { path = "../melogold-innertube" }
 melogold-playback = { path = "../melogold-playback" }
 futures-util.workspace = true

@@ -37,6 +37,8 @@ async fn main() {
         resolver: Arc::new(Resolver::new(client, clients)),
         music,
         songs: SongCache::new(cache_dir.clone(), 0),
+        downloads: None,
+        library: None,
         http: reqwest::Client::new(),
         settings: engine::Settings { autoplay: false, ..Default::default() },
         queue_path: None,

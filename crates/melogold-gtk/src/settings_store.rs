@@ -38,6 +38,17 @@ impl SettingsStore {
         }
     }
 
+    /// Сортировка списка (`sort.favorites`, `sort.allTracks`): «Title:asc», как у Android.
+    pub fn sort(&self, screen: &str) -> Option<String> {
+        self.values.borrow().sort(screen)
+    }
+
+    pub fn set_sort(self: &Rc<Self>, screen: &str, value: &str) {
+        if self.values.borrow_mut().set_sort(screen, value) {
+            self.schedule_save();
+        }
+    }
+
     /// Правки идут пачками (размер окна, ползунок громкости): пишем раз в 300 мс.
     fn schedule_save(self: &Rc<Self>) {
         if self.read_only || self.save_scheduled.replace(true) {

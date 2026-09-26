@@ -5,6 +5,10 @@
     <file preprocess="xml-stripblanks">icons/scalable/actions/trending-up-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/new-releases-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/library-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/heart-filled-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/heart-outline-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/offline-filled-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/offline-outline-symbolic.svg</file>
     <file>icons/256x256/apps/app.melogold.Melogold.png</file>
     <file>style.css</file>
   </gresource>

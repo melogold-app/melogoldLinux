@@ -28,7 +28,7 @@ pub struct Inner {
     title: gtk::Label,
     subtitle: gtk::Label,
     error: gtk::Label,
-    error_actions: gtk::Box,
+    error_actions: adw::WrapBox,
     play: gtk::Button,
     play_icon: gtk::Image,
     previous: gtk::Button,
@@ -71,7 +71,15 @@ impl NowPlaying {
         let error = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).visible(false).build();
         error.add_css_class("error");
         // Рядом с причиной — «Повторить · Пропустить · Другие версии» (задание 0001).
-        let error_actions = gtk::Box::builder().spacing(6).halign(gtk::Align::Center).visible(false).build();
+        // В узком окне кнопки переносятся на вторую строку, а не распирают окно.
+        let error_actions = adw::WrapBox::builder()
+            .child_spacing(6)
+            .line_spacing(6)
+            .justify(adw::JustifyMode::None)
+            .align(0.5)
+            .halign(gtk::Align::Center)
+            .visible(false)
+            .build();
         for (label, action) in [(tr("Retry"), "win.retry"), (tr("LinuxSkip"), "win.next"), (tr("MenuOtherVersions"), "win.other-versions")]
         {
             let button = gtk::Button::builder().label(label).action_name(action).build();

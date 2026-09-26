@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
-use melogold_core::music::{MusicItem, Track};
-use melogold_core::text::format_duration;
+use melogold_core::music::MusicItem;
 use melogold_core::thumbnails;
 
 use crate::images::Images;
@@ -72,58 +71,6 @@ impl Cover {
 
 // ── строки ──
 
-/// Строка трека (§5.3): обложка 40 px, название, под ним исполнитель и альбом; справа длительность и «…».
-pub fn track_row(images: &Images, track: &Track, menu: Option<gtk::gio::MenuModel>) -> gtk::ListBoxRow {
-    let cover = Cover::new(40);
-    cover.set(images, track.thumbnail_url.as_deref().or(Some(&thumbnails::for_video(&track.video_id, 120))), 120);
-    let title = gtk::Label::builder().label(&track.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
-    title.set_tooltip_text(Some(&track.title));
-    let subtitle_text = match (&track.subtitle(), &track.views_text) {
-        (s, Some(views)) if track.is_video() && !s.is_empty() => format!("{s} · {views}"),
-        (s, _) => s.clone(),
-    };
-    let subtitle = gtk::Label::builder().label(&subtitle_text).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
-    subtitle.add_css_class("dim-label");
-    subtitle.add_css_class("caption");
-    let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).hexpand(true).spacing(2).build();
-    texts.append(&title);
-    if !subtitle_text.is_empty() {
-        texts.append(&subtitle);
-    }
-    let content = gtk::Box::builder().spacing(12).margin_top(6).margin_bottom(6).margin_start(8).margin_end(4).build();
-    content.append(&cover.root);
-    content.append(&texts);
-    if track.explicit {
-        let badge = gtk::Label::builder().label("E").tooltip_text("Explicit").valign(gtk::Align::Center).build();
-        badge.add_css_class("explicit-badge");
-        content.append(&badge);
-    }
-    // Колонки постоянной ширины: значки стоят ровно, даже если в строке чего-то нет (§5.3).
-    let duration_text = if track.is_live() { "LIVE".to_owned() } else { track.duration_ms.map(format_duration).unwrap_or_default() };
-    let duration = gtk::Label::builder().label(&duration_text).width_chars(6).xalign(1.0).valign(gtk::Align::Center).build();
-    duration.add_css_class("dim-label");
-    duration.add_css_class("numeric");
-    content.append(&duration);
-    let more = gtk::MenuButton::builder()
-        .icon_name("view-more-symbolic")
-        .tooltip_text(tr("PlayerMore.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"))
-        .valign(gtk::Align::Center)
-        .build();
-    more.add_css_class("flat");
-    if let Some(menu) = menu {
-        more.set_menu_model(Some(&menu));
-    } else {
-        more.set_sensitive(false);
-    }
-    content.append(&more);
-    let row = gtk::ListBoxRow::builder().child(&content).build();
-    row.update_property(&[gtk::accessible::Property::Label(&format!("{}, {}", track.title, subtitle_text))]);
-    if track.unavailable {
-        row.add_css_class("dim-label");
-    }
-    row
-}
-
 /// Строка альбома, исполнителя, канала или плейлиста — той же раскладкой, что строка трека:
 /// обложки и текст стоят в одну линию.
 pub fn item_row(images: &Images, item: &MusicItem) -> Option<gtk::ListBoxRow> {
@@ -155,6 +102,23 @@ pub fn item_row(images: &Images, item: &MusicItem) -> Option<gtk::ListBoxRow> {
     let row = gtk::ListBoxRow::builder().child(&content).build();
     row.update_property(&[gtk::accessible::Property::Label(&format!("{title}, {subtitle}"))]);
     Some(row)
+}
+
+/// Размер для людей: «512 МБ», «1,5 ГБ» (Windows `SettingsSize`).
+pub fn size_text(bytes: u64) -> String {
+    let (value, key) = if bytes >= 1 << 30 {
+        (bytes as f64 / f64::from(1u32 << 30), "SizeGigabytesFormat")
+    } else {
+        (bytes as f64 / f64::from(1u32 << 20), "SizeMegabytesFormat")
+    };
+    let mut number = format!("{value:.1}");
+    if number.ends_with(".0") {
+        number.truncate(number.len() - 2);
+    }
+    if crate::localization::lang() == crate::localization::Lang::Ru {
+        number = number.replace('.', ",");
+    }
+    crate::localization::trf(key, &[&number])
 }
 
 /// Заголовок группы в выдаче («YouTube Music», «YouTube»).

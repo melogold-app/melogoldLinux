@@ -136,6 +136,44 @@ pub fn maybe_start(window: &MainWindow) {
         ),
         ("12-geo-now-playing", Box::new(|w| w.show_now_playing()), 1200),
         (
+            // Библиотека с данными: ♡ двум трекам, свой плейлист, сохранённый альбом (данные — во временных папках).
+            "12a-library",
+            Box::new(|w| {
+                w.go_back();
+                let tracks = sample_tracks();
+                w.set_liked(tracks.clone(), true);
+                let task = w.ctx.services.db(move |library| {
+                    let _ = library.create_playlist("Вечер", &tracks);
+                    let album = melogold_core::music::AlbumItem {
+                        browse_id: "MPREb_OLmD8O5IYNS".into(),
+                        title: "Группа крови".into(),
+                        artists_text: Some("Кино".into()),
+                        year: Some("1988".into()),
+                        ..Default::default()
+                    };
+                    let _ = library.set_album_saved(&album, true);
+                });
+                glib::spawn_future_local(async move {
+                    let _ = task.await;
+                });
+                w.show_tab(Tab::Library);
+            }),
+            1500,
+        ),
+        ("12b-favorites", Box::new(|w| w.push(&crate::pages::library::favorites(w))), 1200),
+        ("12c-history", Box::new(|w| w.push(&crate::pages::library::history(w))), 1200),
+        (
+            "12d-playlist",
+            Box::new(|w| {
+                if let Some(playlist) = w.library_view.playlists().first() {
+                    w.push(&crate::pages::library::local_playlist(w, playlist.id));
+                }
+            }),
+            1200,
+        ),
+        ("12e-downloads", Box::new(|w| w.push(&crate::pages::library::downloads_page(w))), 1200),
+        ("12f-albums", Box::new(|w| w.push(&crate::pages::library::saved_albums(w))), 2500),
+        (
             "13-shortcuts",
             Box::new(|w| {
                 w.go_back();
@@ -185,4 +223,17 @@ fn capture(window: &adw::ApplicationWindow, path: &Path) -> Option<()> {
     let saved = renderer.render_texture(&node, None).save_to_png(path).ok();
     renderer.unrealize();
     saved
+}
+
+fn sample_tracks() -> Vec<melogold_core::music::Track> {
+    [("dQw4w9WgXcQ", "Never Gonna Give You Up", "Rick Astley", 213_000), ("cYKAr38pZcY", "Photosynthesis", "Saba", 236_000)]
+        .into_iter()
+        .map(|(id, title, artist, duration)| melogold_core::music::Track {
+            video_id: id.into(),
+            title: title.into(),
+            artists_text: Some(artist.into()),
+            duration_ms: Some(duration),
+            ..Default::default()
+        })
+        .collect()
 }

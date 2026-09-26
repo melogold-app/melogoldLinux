@@ -53,3 +53,25 @@
   border-radius: 6px 0 0 6px;
   background-color: alpha(currentColor, 0.2);
 }
+
+/* ♡ лайкнутого трека — цветом акцента, как у всех клиентов. */
+.heart.liked {
+  color: var(--accent-color);
+}
+
+/* Плитки коллекций Библиотеки: карточкой, а не плоской кнопкой (§5.4). */
+.library-tile {
+  padding: 4px 8px;
+  min-height: 52px;
+  border-radius: 12px;
+  background-color: var(--card-bg-color);
+  box-shadow: 0 0 0 1px var(--card-shade-color);
+}
+
+.library-tile:hover {
+  background-image: image(alpha(currentColor, 0.04));
+}
+
+.library-tile:active {
+  background-image: image(alpha(currentColor, 0.08));
+}

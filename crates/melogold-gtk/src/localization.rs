@@ -63,7 +63,8 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxSkip", "Пропустить", "Skip"),
     ("LinuxSectionSoonTrends", "В тренде и настроения появятся в следующем срезе", "Trending and moods are coming next"),
     ("LinuxSectionSoonNew", "Новые релизы и «Для вас» появятся позже", "New releases and For you are coming later"),
-    ("LinuxSectionSoonLibrary", "Избранное, плейлисты и история появятся позже", "Favorites, playlists and history are coming later"),
+    // Метка строки: трек целиком в кэше музыки и играет без сети (у Windows только раздел «В кэше · …»).
+    ("LinuxInCache", "В кэше — играет без сети", "Cached — plays offline"),
     ("LinuxServerLinkOpened", "Ссылка на сервер: {0}. Вход появится вместе с аккаунтом", "Server link: {0}. Sign-in comes with accounts"),
     (
         "LinuxLinkRequest",

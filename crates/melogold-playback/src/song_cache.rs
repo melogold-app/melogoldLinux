@@ -205,6 +205,34 @@ impl SongCache {
         }
     }
 
+    /// Трек, целиком лежащий в `source`, — копией сюда (загрузка трека из кэша: сразу и без сети).
+    pub fn copy_from(&self, source: &SongCache, video_id: &str) -> bool {
+        let Some(from) = source.with_index(|index| index.get(video_id).filter(|e| e.is_complete()).cloned()) else { return false };
+        let base = self.dir.join(format!("{video_id}.{}", from.info.itag));
+        if std::fs::create_dir_all(&self.dir).is_err() || !from.copy_to(&base) {
+            return false;
+        }
+        let modified = SystemTime::now();
+        let Some(entry) = Entry::read(&base, modified).filter(Entry::is_complete) else { return false };
+        self.with_index(|index| {
+            if let Some(old) = index.get(video_id) {
+                if old.info.itag != entry.info.itag {
+                    old.delete_files();
+                }
+            }
+            index.insert(video_id.to_owned(), Arc::new(entry));
+        });
+        self.notify(video_id);
+        true
+    }
+
+    /// Все байты трека, если он целиком здесь («Сохранить файлом»).
+    pub fn read_complete(&self, video_id: &str) -> Option<Vec<u8>> {
+        let entry = self.with_index(|index| index.get(video_id).filter(|e| e.is_complete()).cloned())?;
+        let total = entry.total()?;
+        entry.try_read(0, usize::try_from(total).ok()?)
+    }
+
     /// Треки, которые здесь есть (целиком или частично).
     pub fn video_ids(&self) -> Vec<String> {
         self.with_index(|index| index.keys().cloned().collect())
@@ -390,6 +418,15 @@ impl Entry {
         !was_complete && is_complete(&state)
     }
 
+    /// Копия файлов записи под другим именем (`base` без расширения).
+    fn copy_to(&self, base: &Path) -> bool {
+        let state = self.lock();
+        if state.deleted {
+            return false;
+        }
+        std::fs::copy(data_path(&self.base), data_path(base)).is_ok() && std::fs::copy(meta_path(&self.base), meta_path(base)).is_ok()
+    }
+
     /// Удалить байты и сведения (вытеснение, смена формата, «Очистить кэш»).
     fn delete_files(&self) {
         {
@@ -524,6 +561,20 @@ mod tests {
         cache.clear();
         assert_eq!(cache.video_ids(), ["playingplay"], "играющий «Очистить кэш» не трогает");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn complete_track_copies_into_downloads() {
+        let (songs_dir, downloads_dir) = (temp_dir("copy-songs"), temp_dir("copy-downloads"));
+        let songs = SongCache::new(songs_dir.clone(), 0);
+        let downloads = SongCache::new(downloads_dir.clone(), 0);
+        let entry = songs.entry(&info("copycopycop", 4));
+        entry.write(0, b"abcd", None);
+        assert!(downloads.copy_from(&songs, "copycopycop"));
+        assert_eq!(downloads.read_complete("copycopycop").as_deref(), Some(&b"abcd"[..]));
+        assert!(!downloads.copy_from(&songs, "missingmiss"));
+        let _ = std::fs::remove_dir_all(songs_dir);
+        let _ = std::fs::remove_dir_all(downloads_dir);
     }
 
     #[test]

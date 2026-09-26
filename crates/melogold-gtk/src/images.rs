@@ -46,18 +46,25 @@ impl Images {
         if let Some(texture) = self.cached(&url) {
             return Some(texture);
         }
+        let bytes = self.bytes(url.clone()).await?;
+        let texture = gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok()?;
+        self.remember(&url, &texture);
+        Some(texture)
+    }
+
+    /// Байты картинки: с диска или из сети (заодно на диск).
+    pub async fn bytes(&self, url: String) -> Option<Vec<u8>> {
         let path = self.dir.join(format!("{}.img", hex::encode(&Sha256::digest(url.as_bytes())[..16])));
-        let (http, fetch_url) = (self.http.clone(), url.clone());
-        let bytes = self
-            .runtime
+        let http = self.http.clone();
+        self.runtime
             .spawn(async move {
                 if let Ok(bytes) = tokio::fs::read(&path).await {
                     return Some(bytes);
                 }
-                let mut response = http.get(&fetch_url).send().await.ok()?;
+                let mut response = http.get(&url).send().await.ok()?;
                 if response.status() == 404 {
                     // У старых видео нет крупных кадров — есть только hqdefault (Windows `Thumbnails.Fallback`).
-                    let fallback = melogold_core::thumbnails::fallback(&fetch_url)?;
+                    let fallback = melogold_core::thumbnails::fallback(&url)?;
                     response = http.get(fallback).send().await.ok()?;
                 }
                 if !response.status().is_success() {
@@ -71,9 +78,6 @@ impl Images {
                 Some(bytes)
             })
             .await
-            .ok()??;
-        let texture = gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok()?;
-        self.remember(&url, &texture);
-        Some(texture)
+            .ok()?
     }
 }

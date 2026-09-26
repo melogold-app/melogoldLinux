@@ -9,8 +9,10 @@ use std::sync::Arc;
 use melogold_core::app_info;
 use melogold_core::paths::AppPaths;
 use melogold_core::settings::keys;
+use melogold_data::{Change, Database, Library};
 use melogold_innertube::music::YouTubeMusic;
 use melogold_innertube::{locale_from, InnerTube};
+use melogold_playback::downloads::Downloads;
 use melogold_playback::engine::{self, PlayerHandle};
 use melogold_playback::resolver::Resolver;
 use melogold_playback::song_cache::SongCache;
@@ -24,10 +26,15 @@ pub struct Services {
     runtime: tokio::runtime::Runtime,
     pub music: YouTubeMusic,
     pub resolver: Arc<Resolver>,
-    #[allow(dead_code)] // «Хранилище» — срез 4
     pub songs: Arc<SongCache>,
     pub player: PlayerHandle,
     pub images: Images,
+    pub library: Arc<Library>,
+    pub downloads: Arc<Downloads>,
+    /// Изменения библиотеки — в главный поток: экраны обновляются сами.
+    pub library_changes: async_channel::Receiver<Change>,
+    /// У трека изменилась загрузка или кэш — метки «есть без сети».
+    pub offline_changes: async_channel::Receiver<String>,
 }
 
 impl Services {
@@ -55,17 +62,48 @@ impl Services {
         let resolver = Arc::new(Resolver::new(client.clone(), stream_clients::load_saved(&clients_path)));
         let limit_mb = settings.get(&keys::STREAM_CACHE_MB);
         let songs = SongCache::new(paths.song_cache(), if limit_mb <= 0 { 0 } else { limit_mb * 1024 * 1024 });
+        let database = match Database::open(&paths.database()) {
+            Ok(database) => database,
+            Err(error) => {
+                // Не открылась база — работаем с пустой в памяти, а не падаем: музыка важнее.
+                tracing::error!(%error, "библиотека не открылась");
+                Database::in_memory().expect("база в памяти открывается")
+            }
+        };
+        let library = Library::open(database);
+        let (change_sender, library_changes) = async_channel::unbounded();
+        library.subscribe(move |change| {
+            let _ = change_sender.try_send(change);
+        });
+        let (offline_sender, offline_changes) = async_channel::unbounded();
+        let sender = offline_sender.clone();
+        songs.set_listener(move |video_id| {
+            let _ = sender.try_send(video_id.to_owned());
+        });
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .pool_idle_timeout(std::time::Duration::from_secs(120))
             .build()
             .expect("HTTP-клиент собирается");
+        let downloads = Downloads::new(
+            SongCache::new(paths.downloads(), 0),
+            Arc::clone(&songs),
+            Arc::clone(&resolver),
+            Arc::clone(&library),
+            http.clone(),
+            runtime.handle().clone(),
+        );
+        downloads.set_listener(move |video_id| {
+            let _ = offline_sender.try_send(video_id.to_owned());
+        });
         let player = engine::start(
             runtime.handle(),
             engine::Deps {
                 resolver: Arc::clone(&resolver),
                 music: music.clone(),
                 songs: Arc::clone(&songs),
+                downloads: Some(Arc::clone(downloads.store())),
+                library: Some(Arc::clone(&library)),
                 http: http.clone(),
                 settings: playback_settings(settings),
                 queue_path: Some(paths.data().join("queue.json")),
@@ -85,8 +123,12 @@ impl Services {
                 }
             });
         }
+        {
+            let _guard = runtime.enter();
+            downloads.resume();
+        }
         tracing::info!(hl = %hl, gl = %gl, "InnerTube");
-        Services { runtime, music, resolver, songs, player, images }
+        Services { runtime, music, resolver, songs, player, images, library, downloads, library_changes, offline_changes }
     }
 
     /// Выполнить в рантайме tokio; результат ждётся из главного потока как future.
@@ -96,6 +138,17 @@ impl Services {
         T: Send + 'static,
     {
         let task = self.runtime.spawn(future);
+        async move { task.await.ok() }
+    }
+
+    /// Библиотека не в главном потоке: SQLite ждёт диск.
+    pub fn db<F, T>(&self, work: F) -> impl Future<Output = Option<T>> + 'static
+    where
+        F: FnOnce(&Library) -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let library = Arc::clone(&self.library);
+        let task = self.runtime.spawn_blocking(move || work(&library));
         async move { task.await.ok() }
     }
 
@@ -117,5 +170,6 @@ pub fn playback_settings(settings: &SettingsStore) -> engine::Settings {
         speed: settings.get(&keys::SPEED).clamp(0.5, 2.0),
         normalize: settings.get(&keys::NORMALIZATION),
         autoplay: settings.get(&keys::AUTOPLAY),
+        history_paused: settings.get(&keys::HISTORY_PAUSED),
     }
 }

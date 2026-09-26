@@ -10,12 +10,13 @@ use melogold_core::music::{MusicItem, Shelf, Track};
 use melogold_core::thumbnails;
 use melogold_playback::engine::Command;
 
+use crate::library_view::RowContext;
 use crate::localization::tr;
-use crate::widgets::{track_row, Cover};
+use crate::widgets::Cover;
 use crate::window::MainWindow;
 
 /// Что играть по нажатию на трек (REWRITE §2.3).
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum TrackContext {
     /// Выдача поиска, «Недавние», ссылка: трек и дальше похожие.
     Single,
@@ -29,14 +30,20 @@ pub enum TrackContext {
 pub struct TrackList {
     pub list: gtk::ListBox,
     pub tracks: Rc<RefCell<Vec<Track>>>,
+    row: RowContext,
 }
 
 impl TrackList {
     pub fn new(window: &MainWindow, tracks: &[Track], shown: usize, context: TrackContext) -> TrackList {
+        TrackList::with_rows(window, tracks, shown, context, RowContext::Plain)
+    }
+
+    /// Список, строки которого знают своё место: из плейлиста и истории меню предлагает «Убрать из…».
+    pub fn with_rows(window: &MainWindow, tracks: &[Track], shown: usize, context: TrackContext, row: RowContext) -> TrackList {
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).activate_on_single_click(false).build();
         list.add_css_class("boxed-list");
         for track in tracks.iter().take(shown) {
-            list.append(&track_row(&window.ctx.services.images, track, Some(window.track_menu(track))));
+            list.append(&window.track_row(track, row));
         }
         let all = Rc::new(RefCell::new(tracks.to_vec()));
         let (weak, shared) = (window.downgrade(), Rc::clone(&all));
@@ -52,13 +59,13 @@ impl TrackList {
                 TrackContext::List => player.send(Command::PlayList { tracks, start: index, shuffle: false }),
             }
         });
-        TrackList { list, tracks: all }
+        TrackList { list, tracks: all, row }
     }
 
     /// Дописать строки (продолжения плейлиста и канала).
     pub fn append(&self, window: &MainWindow, tracks: &[Track]) {
         for track in tracks {
-            self.list.append(&track_row(&window.ctx.services.images, track, Some(window.track_menu(track))));
+            self.list.append(&window.track_row(track, self.row));
         }
         self.tracks.borrow_mut().extend(tracks.iter().cloned());
     }
@@ -80,6 +87,18 @@ pub fn card(window: &MainWindow, item: &MusicItem) -> gtk::Button {
         }
         MusicItem::Mood(m) => (m.title.clone(), String::new(), None, false, false),
     };
+    let button = card_view(window, &title, &subtitle, thumbnail.as_deref(), round, wide);
+    let (weak, item) = (window.downgrade(), item.clone());
+    button.connect_clicked(move |_| {
+        if let Some(window) = weak.upgrade() {
+            window.activate_item(&item);
+        }
+    });
+    button
+}
+
+/// Карточка без действия: обложка и две строки подписи (свои плейлисты Библиотеки — тоже ею).
+pub fn card_view(window: &MainWindow, title: &str, subtitle: &str, thumbnail: Option<&str>, round: bool, wide: bool) -> gtk::Button {
     let cover = Cover::new(160);
     if wide {
         // Клипы — карточкой 16:9: кадр видео целиком (§5.3 «Видео и песни»).
@@ -88,10 +107,10 @@ pub fn card(window: &MainWindow, item: &MusicItem) -> gtk::Button {
     if round {
         cover.root.add_css_class("round");
     }
-    cover.set(&window.ctx.services.images, thumbnail.as_deref(), 320);
+    cover.set(&window.ctx.services.images, thumbnail, 320);
     let width = if wide { 240 } else { 160 };
     let title_label = gtk::Label::builder()
-        .label(&title)
+        .label(title)
         .xalign(0.0)
         .wrap(true)
         .lines(2)
@@ -100,7 +119,7 @@ pub fn card(window: &MainWindow, item: &MusicItem) -> gtk::Button {
         .width_request(width)
         .build();
     let subtitle_label = gtk::Label::builder()
-        .label(&subtitle)
+        .label(subtitle)
         .xalign(0.0)
         .ellipsize(gtk::pango::EllipsizeMode::End)
         .max_width_chars(1)
@@ -114,16 +133,10 @@ pub fn card(window: &MainWindow, item: &MusicItem) -> gtk::Button {
     if !subtitle.is_empty() {
         content.append(&subtitle_label);
     }
-    let button = gtk::Button::builder().child(&content).valign(gtk::Align::Start).tooltip_text(&title).build();
+    let button = gtk::Button::builder().child(&content).valign(gtk::Align::Start).tooltip_text(title).build();
     button.add_css_class("flat");
     button.add_css_class("card-button");
     button.update_property(&[gtk::accessible::Property::Label(&format!("{title}, {subtitle}"))]);
-    let (weak, item) = (window.downgrade(), item.clone());
-    button.connect_clicked(move |_| {
-        if let Some(window) = weak.upgrade() {
-            window.activate_item(&item);
-        }
-    });
     button
 }
 
@@ -145,7 +158,7 @@ pub fn card_grid(window: &MainWindow, items: &[MusicItem]) -> gtk::FlowBox {
     let grid = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .homogeneous(true)
-        .min_children_per_line(2)
+        .min_children_per_line(1)
         .max_children_per_line(12)
         .column_spacing(4)
         .row_spacing(12)
@@ -313,6 +326,43 @@ impl CollectionHeader {
         button.connect_clicked(move |_| action());
         self.buttons.append(&button);
         button
+    }
+}
+
+impl CollectionHeader {
+    /// Переключатель в шапке: «Сохранить» ↔ «В библиотеке», «Подписаться» ↔ «Вы подписаны».
+    /// `changed` зовётся только от нажатия; [`Toggle::set_quietly`] ставит состояние молча.
+    pub fn add_toggle(&self, labels: [&'static str; 2], icons: [&'static str; 2], changed: impl Fn(bool) + 'static) -> Toggle {
+        let content = adw::ButtonContent::builder().label(labels[0]).icon_name(icons[0]).build();
+        let button = gtk::ToggleButton::builder().child(&content).build();
+        button.add_css_class("pill");
+        let quiet = Rc::new(std::cell::Cell::new(false));
+        let flag = Rc::clone(&quiet);
+        button.connect_toggled(move |button| {
+            let on = button.is_active();
+            content.set_label(labels[usize::from(on)]);
+            content.set_icon_name(icons[usize::from(on)]);
+            if !flag.get() {
+                changed(on);
+            }
+        });
+        self.buttons.append(&button);
+        Toggle { button, quiet }
+    }
+}
+
+#[derive(Clone)]
+pub struct Toggle {
+    pub button: gtk::ToggleButton,
+    quiet: Rc<std::cell::Cell<bool>>,
+}
+
+impl Toggle {
+    /// Состояние без вызова действия (прочитано из базы).
+    pub fn set_quietly(&self, on: bool) {
+        self.quiet.set(true);
+        self.button.set_active(on);
+        self.quiet.set(false);
     }
 }
 
