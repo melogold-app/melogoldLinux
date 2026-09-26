@@ -73,6 +73,8 @@ pub struct Inner {
     now_playing: OnceCell<NowPlaying>,
     queue_panel: OnceCell<QueuePanel>,
     state: RefCell<State>,
+    /// Последняя очередь: после правки названия трека (задание 0005) она перерисовывается.
+    last_queue: RefCell<Option<QueueView>>,
     /// Узкое окно (порог 720): шапки коллекций ставят обложку сверху (§5.2).
     compact: Cell<bool>,
     headers: RefCell<Vec<glib::WeakRef<gtk::Box>>>,
@@ -231,6 +233,7 @@ impl MainWindow {
             now_playing: OnceCell::new(),
             queue_panel: OnceCell::new(),
             state: RefCell::default(),
+            last_queue: RefCell::default(),
             compact: Cell::new(false),
             headers: RefCell::default(),
             library_view: LibraryView::default(),
@@ -274,9 +277,36 @@ impl MainWindow {
         self.toasts.add_toast(toast);
     }
 
-    /// Играющий (или выбранный) трек.
+    /// Играющий (или выбранный) трек — каким его дал YouTube (для действий).
     pub fn state_track(&self) -> Option<Track> {
         self.state.borrow().track.clone()
+    }
+
+    /// Трек, каким его показывать: со своими названием, исполнителем и альбомом (задание 0005).
+    /// В действия (♡, плейлисты, загрузки) идёт исходный трек: в базе остаётся то, что дал YouTube.
+    pub fn display(&self, track: &Track) -> Track {
+        self.ctx.services.library.display(track)
+    }
+
+    /// Правки названий изменились: строки, панель плеера, «Сейчас играет» и очередь — заново.
+    pub fn refresh_display(&self) {
+        for row in self.library_view.live_rows() {
+            row.rebind();
+        }
+        let state = self.state.borrow().clone();
+        self.show_state(&state);
+        if let Some(view) = self.last_queue.borrow().clone() {
+            self.apply_queue(&view);
+        }
+    }
+
+    fn show_state(&self, state: &State) {
+        let mut shown = state.clone();
+        shown.track = shown.track.map(|t| self.display(&t));
+        self.player_bar().apply(self, &shown);
+        if let Some(now_playing) = self.now_playing.get() {
+            now_playing.apply(self, &shown);
+        }
     }
 
     pub fn player_bar(&self) -> &PlayerBar {
@@ -294,7 +324,19 @@ impl MainWindow {
     /// Открыть страницу в стеке текущего раздела (REWRITE §2.3: детальные экраны — в стеке раздела).
     pub fn push(&self, page: &adw::NavigationPage) {
         self.close_now_playing();
-        self.nav(self.current.get()).push(page);
+        let nav = self.nav(self.current.get());
+        // Та же страница уже открыта (свой плейлист по тегу) — вернуться к ней, а не открыть вторую.
+        if let Some(tag) = page.tag() {
+            let stack = nav.navigation_stack();
+            let open = (0..stack.n_items())
+                .filter_map(|i| stack.item(i).and_downcast::<adw::NavigationPage>())
+                .find(|p| p.tag() == Some(tag.clone()));
+            if let Some(open) = open {
+                nav.pop_to_page(&open);
+                return;
+            }
+        }
+        nav.push(page);
     }
 
     pub fn show_tab(&self, tab: Tab) {
@@ -1096,10 +1138,7 @@ impl MainWindow {
     fn on_player_event(&self, event: Event) {
         match event {
             Event::State(state) => {
-                self.player_bar().apply(self, &state);
-                if let Some(now_playing) = self.now_playing.get() {
-                    now_playing.apply(self, &state);
-                }
+                self.show_state(&state);
                 if let Some(action) = self.window.lookup_action("shuffle").and_downcast::<gio::SimpleAction>() {
                     action.set_state(&state.shuffle.to_variant());
                 }
@@ -1108,7 +1147,10 @@ impl MainWindow {
                 }
                 self.state.replace(*state);
             }
-            Event::Queue(view) => self.apply_queue(&view),
+            Event::Queue(view) => {
+                self.apply_queue(&view);
+                self.last_queue.replace(Some(view));
+            }
             Event::Skipped(error) => self.toast(&crate::texts::skipped(&error)),
             Event::QueueReplaced(snapshot) => {
                 let toast = adw::Toast::builder().title(tr("QueueReplaced")).button_label(tr("Undo")).timeout(5).build();

@@ -153,11 +153,13 @@ impl TrackRow {
         self.imp().selection.replace(selection.map(std::rc::Rc::downgrade));
     }
 
-    /// Показать трек `track` из места `context`.
-    pub fn bind(&self, track: &Track, context: RowContext) {
+    /// Показать трек `track` из места `context` — со своими названиями пользователя (задание 0005);
+    /// действия строки получают исходный трек.
+    pub fn bind(&self, original: &Track, context: RowContext) {
         let imp = self.imp();
         let Some(window) = self.window() else { return };
         imp.context.set(context);
+        let track = &window.display(original);
         let fallback = thumbnails::for_video(&track.video_id, 120);
         if let Some(cover) = imp.cover.get() {
             cover.set(&window.ctx.services.images, track.thumbnail_url.as_deref().or(Some(&fallback)), 120);
@@ -184,7 +186,14 @@ impl TrackRow {
         } else {
             self.remove_css_class("dim-label");
         }
-        imp.track.replace(Some(track.clone()));
+        imp.track.replace(Some(original.clone()));
+    }
+
+    /// Показать заново тот же трек (правка названия, язык).
+    pub fn rebind(&self) {
+        if let Some(track) = self.track() {
+            self.bind(&track, self.imp().context.get());
+        }
     }
 
     pub fn refresh_heart(&self, liked: bool) {

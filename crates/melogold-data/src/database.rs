@@ -3,14 +3,29 @@
 //! Схема повторяет Windows, чтобы правила синка, истории и текстов переносились один в один: треки,
 //! лайки, закладки, плейлисты с `sort_key` и плотной `position`, прослушивания с устройством,
 //! счётчики, тексты, загрузки, скрытое, состояние синхронизации и её снимок. У Linux пользователей
-//! прежних версий нет — новая база создаётся сразу в схеме 6; следующие версии — миграциями.
+//! прежних версий нет — новая база создаётся в схеме 6 и доводится миграциями до текущей.
+//!
+//! 7 — свои названия треков (задание 0005): `track_overrides` и снимок сервера `synced_overrides`.
 
 use std::path::Path;
 use std::sync::Mutex;
 
 use rusqlite::{Connection, Transaction};
 
-pub const SCHEMA_VERSION: i32 = 6;
+pub const SCHEMA_VERSION: i32 = 7;
+
+/// Миграции после схемы 6: (версия, SQL).
+const MIGRATIONS: &[(i32, &str)] = &[(
+    7,
+    "CREATE TABLE track_overrides (
+         video_id TEXT PRIMARY KEY,
+         title TEXT,
+         artists_text TEXT,
+         album_title TEXT,
+         updated_at INTEGER NOT NULL
+     );
+     CREATE TABLE synced_overrides (video_id TEXT PRIMARY KEY, title TEXT, artists_text TEXT, album_title TEXT);",
+)];
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -73,12 +88,21 @@ impl Database {
         if version > SCHEMA_VERSION {
             return Err(DbError::TooNew(version));
         }
-        if version < 1 {
-            let transaction = connection.transaction()?;
+        let transaction = connection.transaction()?;
+        let mut current = version;
+        if current < 1 {
             transaction.execute_batch(SCHEMA)?;
-            transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-            transaction.commit()?;
+            current = 6;
         }
+        let start = current;
+        for (target, sql) in MIGRATIONS.iter().filter(|(target, _)| *target > start) {
+            transaction.execute_batch(sql)?;
+            current = *target;
+        }
+        if current != version {
+            transaction.pragma_update(None, "user_version", current)?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 

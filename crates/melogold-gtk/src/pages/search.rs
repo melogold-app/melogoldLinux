@@ -327,7 +327,7 @@ fn append(inner: &Rc<Inner>, items: Vec<MusicItem>, new_group: bool) {
             let list = gtk::ListBox::builder().activate_on_single_click(false).build();
             list.add_css_class("boxed-list");
             // Треки выдачи выделяются, как в любом списке (задание 0004); альбомы и исполнители — нет.
-            let selection = Selection::for_list_box(&window, &list);
+            let selection = Selection::for_list_box(&window, &list, crate::library_view::RowContext::Plain);
             let items_of_list: Rc<RefCell<Vec<MusicItem>>> = Rc::default();
             let (weak, lookup) = (window.downgrade(), Rc::clone(&items_of_list));
             // Двойной щелчок или Enter играет, одиночный выделяет (§5.3).

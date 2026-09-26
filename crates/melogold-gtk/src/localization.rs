@@ -63,6 +63,17 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxSkip", "Пропустить", "Skip"),
     ("LinuxSectionSoonTrends", "В тренде и настроения появятся в следующем срезе", "Trending and moods are coming next"),
     ("LinuxSectionSoonNew", "Новые релизы и «Для вас» появятся позже", "New releases and For you are coming later"),
+    // Свои названия трека (задание 0005): у Android есть, у Windows пока нет.
+    ("LinuxEditDetails", "Изменить сведения…", "Edit details…"),
+    ("LinuxTrackDetails", "Сведения о треке", "Track details"),
+    ("LinuxTrackDetailsName", "Название", "Title"),
+    ("LinuxTrackDetailsArtist", "Исполнитель", "Artist"),
+    ("LinuxTrackDetailsAlbum", "Альбом", "Album"),
+    ("LinuxTrackDetailsReset", "Как на YouTube", "As on YouTube"),
+    ("LinuxTrackDetailsHint", "Пустое поле — как на YouTube", "An empty field is as on YouTube"),
+    ("LinuxSetAlbum", "Указать альбом…", "Set album…"),
+    ("LinuxSetAlbumTitle", "Указать альбом", "Set album"),
+    ("LinuxAlbumSetFormat", "Альбом указан: {0}", "Album set: {0}"),
     // Метка строки: трек целиком в кэше музыки и играет без сети (у Windows только раздел «В кэше · …»).
     ("LinuxInCache", "В кэше — играет без сети", "Cached — plays offline"),
     ("LinuxServerLinkOpened", "Ссылка на сервер: {0}. Вход появится вместе с аккаунтом", "Server link: {0}. Sign-in comes with accounts"),

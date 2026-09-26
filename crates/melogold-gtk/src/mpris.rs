@@ -5,11 +5,13 @@
 //! (показать окно, выйти, громкость, скорость, перемешивание, повтор), — в главный поток.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use melogold_core::app_info::APP_ID;
 use melogold_core::queue::RepeatMode;
 use melogold_core::thumbnails;
+use melogold_data::{Change, Library};
 use melogold_playback::engine::{Command, Event, PlayerHandle, State, Status};
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
@@ -82,6 +84,8 @@ struct Player {
     player: PlayerHandle,
     ui: async_channel::Sender<Request>,
     state: State,
+    /// Свои названия треков (задание 0005): рабочий стол показывает то же, что окно.
+    library: Arc<Library>,
 }
 
 /// Путь трека для MPRIS: из id элемента очереди — он у каждого элемента свой.
@@ -196,7 +200,7 @@ impl Player {
             }
         };
         put("mpris:trackid", Value::from(track_path(&self.state)));
-        let Some(track) = &self.state.track else { return map };
+        let Some(track) = self.state.track.as_ref().map(|t| self.library.display(t)) else { return map };
         put("xesam:title", Value::from(track.title.clone()));
         let artists: Vec<String> = match track.artists_text.clone() {
             Some(text) if !text.is_empty() => vec![text],
@@ -282,26 +286,48 @@ impl Player {
 }
 
 /// Поднять MPRIS; события плеера обновляют свойства.
-pub fn start(runtime: &tokio::runtime::Handle, player: PlayerHandle, ui: async_channel::Sender<Request>) {
+pub fn start(runtime: &tokio::runtime::Handle, player: PlayerHandle, library: Arc<Library>, ui: async_channel::Sender<Request>) {
     let events = player.subscribe();
     runtime.spawn(async move {
-        if let Err(error) = serve(player, ui, events).await {
+        if let Err(error) = serve(player, library, ui, events).await {
             tracing::warn!(%error, "MPRIS не поднялся: медиаклавиши и плеер рабочего стола не будут работать");
         }
     });
 }
 
-async fn serve(player: PlayerHandle, ui: async_channel::Sender<Request>, events: async_channel::Receiver<Event>) -> zbus::Result<()> {
+async fn serve(
+    player: PlayerHandle,
+    library: Arc<Library>,
+    ui: async_channel::Sender<Request>,
+    events: async_channel::Receiver<Event>,
+) -> zbus::Result<()> {
     let state = player.state();
+    // Правка названия играющего трека — новые метаданные.
+    let (edited, edits) = async_channel::unbounded();
+    library.subscribe(move |change| {
+        if change.has(Change::OVERRIDES) {
+            let _ = edited.try_send(());
+        }
+    });
     let connection = zbus::connection::Builder::session()?
         .name("org.mpris.MediaPlayer2.melogold")?
         .serve_at(PATH, Root { ui: ui.clone() })?
-        .serve_at(PATH, Player { player, ui, state })?
+        .serve_at(PATH, Player { player, ui, state, library })?
         .build()
         .await?;
     tracing::info!("MPRIS: org.mpris.MediaPlayer2.melogold");
     let iface = connection.object_server().interface::<_, Player>(PATH).await?;
-    while let Ok(event) = events.recv().await {
+    loop {
+        let event = tokio::select! {
+            event = events.recv() => match event {
+                Ok(event) => event,
+                Err(_) => break,
+            },
+            Ok(()) = edits.recv() => {
+                iface.get().await.metadata_changed(iface.signal_emitter()).await?;
+                continue;
+            }
+        };
         let emitter = iface.signal_emitter();
         match event {
             Event::State(state) => {

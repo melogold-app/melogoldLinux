@@ -192,6 +192,33 @@ pub fn maybe_start(window: &MainWindow) {
             1800,
         ),
         (
+            // Задание 0005: окно «Сведения о треке» у видео фаната.
+            "12h-details",
+            Box::new(|w| {
+                w.clear_selection();
+                let tracks = sample_tracks();
+                w.edit_details(&tracks[1]);
+            }),
+            1000,
+        ),
+        (
+            // Плейлист из разрозненных видео, собранный в один альбом.
+            "12i-album",
+            Box::new(|w| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    dialog.close();
+                }
+                let library = std::sync::Arc::clone(&w.ctx.services.library);
+                let ids: Vec<String> = sample_tracks().into_iter().map(|t| t.video_id).collect();
+                let _ = library.set_album(&ids, "Потерянный альбом");
+                let _ = library.set_override(&ids[2], Some("Богемская рапсодия"), Some("Queen"), Some("Потерянный альбом"));
+                if let Some(playlist) = w.library_view.playlists().first() {
+                    w.push(&crate::pages::library::local_playlist(w, playlist.id));
+                }
+            }),
+            1500,
+        ),
+        (
             "13-shortcuts",
             Box::new(|w| {
                 w.go_back();

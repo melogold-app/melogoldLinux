@@ -242,26 +242,27 @@ impl Toolbar {
         Some((sort, self.descending.borrow().unwrap_or(sort.descending())))
     }
 
-    /// Отфильтровать и упорядочить. `entries` — в порядке базы (новое сверху) со временем прослушивания.
-    fn apply(&self, entries: &[(Track, i64)]) -> Vec<Track> {
+    /// Отфильтровать и упорядочить. `entries` — в порядке базы (новое сверху) со временем прослушивания;
+    /// фильтр и сортировка — по тому, что видно (со своими названиями), а в список идут исходные треки.
+    fn apply(&self, entries: &[(Track, i64)], display: impl Fn(&Track) -> Track) -> Vec<Track> {
         let filter = self.filter.text().trim().to_lowercase();
-        let mut list: Vec<&(Track, i64)> = entries.iter().filter(|(t, _)| self.matches(t, &filter)).collect();
+        let shown: Vec<(Track, i64, &Track)> = entries.iter().map(|(t, time)| (display(t), *time, t)).collect();
+        let mut list: Vec<&(Track, i64, &Track)> = shown.iter().filter(|(t, ..)| self.matches(t, &filter)).collect();
         if let Some((sort, descending)) = self.current() {
             // Сначала по возрастанию (Android `sorted`), затем разворот, если по убыванию.
             match sort {
                 Sort::DateAdded | Sort::Recent => list.reverse(),
-                Sort::PlayTime => list.sort_by_key(|(_, time)| *time),
-                Sort::Title => list.sort_by_cached_key(|(t, _)| t.title.to_lowercase()),
-                Sort::Artist => {
-                    list.sort_by_cached_key(|(t, _)| (t.artists_text.as_deref().unwrap_or_default().to_lowercase(), t.title.to_lowercase()))
-                }
-                Sort::Duration => list.sort_by_key(|(t, _)| t.duration_ms.unwrap_or(0)),
+                Sort::PlayTime => list.sort_by_key(|(_, time, _)| *time),
+                Sort::Title => list.sort_by_cached_key(|(t, ..)| t.title.to_lowercase()),
+                Sort::Artist => list
+                    .sort_by_cached_key(|(t, ..)| (t.artists_text.as_deref().unwrap_or_default().to_lowercase(), t.title.to_lowercase())),
+                Sort::Duration => list.sort_by_key(|(t, ..)| t.duration_ms.unwrap_or(0)),
             }
             if descending {
                 list.reverse();
             }
         }
-        list.into_iter().map(|(t, _)| t.clone()).collect()
+        list.into_iter().map(|(_, _, original)| (*original).clone()).collect()
     }
 }
 
@@ -472,7 +473,7 @@ fn track_page(window: &MainWindow, title: &str, tag: Option<&str>, screen: &'sta
         let tracks: Vec<Track> = all.iter().map(|(t, _)| t.clone()).collect();
         subtitle.set_label(&summary(&tracks));
         toolbar.root.set_visible(!all.is_empty());
-        let shown = toolbar.apply(&all);
+        let shown = toolbar.apply(&all, |t| window.display(t));
         list.set_tracks(shown.clone());
         if all.is_empty() {
             let (icon, title, hint) = match screen {
@@ -497,6 +498,8 @@ fn track_page(window: &MainWindow, title: &str, tag: Option<&str>, screen: &'sta
 impl TrackPage {
     fn load(&self, window: &MainWindow, mask: Change, load: impl Fn(&Library) -> Vec<(Track, i64)> + Send + Sync + Copy + 'static) {
         let (weak, entries, show) = (window.downgrade(), Rc::clone(&self.entries), Rc::clone(&self.show));
+        // Свои названия меняют порядок сортировки и то, что находит фильтр.
+        let mask = Change(mask.0 | Change::OVERRIDES.0);
         live(window, &self.page, mask, move || {
             let Some(window) = weak.upgrade() else { return };
             let task = window.ctx.services.db(load);

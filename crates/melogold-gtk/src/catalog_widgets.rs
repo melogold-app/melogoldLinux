@@ -47,7 +47,7 @@ impl TrackList {
     pub fn with_rows(window: &MainWindow, tracks: &[Track], shown: usize, context: TrackContext, row: RowContext) -> TrackList {
         let list = gtk::ListBox::builder().activate_on_single_click(false).build();
         list.add_css_class("boxed-list");
-        let selection = Selection::for_list_box(window, &list);
+        let selection = Selection::for_list_box(window, &list, row);
         let all = Rc::new(RefCell::new(tracks.to_vec()));
         let (weak, shared) = (window.downgrade(), Rc::clone(&all));
         list.connect_row_activated(move |_, row| {
@@ -108,7 +108,7 @@ impl TrackListView {
         let factory = gtk::SignalListItemFactory::new();
         let view = gtk::ListView::builder().model(&model).factory(&factory).single_click_activate(false).show_separators(true).build();
         view.add_css_class("track-list");
-        let selection = Selection::for_list_view(window, &view, &model, Rc::clone(&tracks));
+        let selection = Selection::for_list_view(window, &view, &model, Rc::clone(&tracks), place);
         let weak = window.downgrade();
         factory.connect_setup(move |_, item| {
             let (Some(window), Some(item)) = (weak.upgrade(), item.downcast_ref::<gtk::ListItem>()) else { return };

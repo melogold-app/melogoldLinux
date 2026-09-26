@@ -2,14 +2,15 @@
 //! плейлисты, история, поиск, скрытое, загрузки, «Все треки». Каждое изменение — событие [`Change`]:
 //! экраны и синхронизация подписаны на него.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 
 use melogold_core::music::{AlbumItem, ArtistItem, ArtistRef, Track};
 use melogold_core::text::{format_duration, now_ms, parse_duration};
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 
 use crate::database::{Database, DbError};
+use crate::overrides::TrackOverride;
 
 /// Что изменилось — битами, как у Windows `LibraryChange`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -25,6 +26,8 @@ impl Change {
     pub const BLOCKS: Change = Change(64);
     pub const LYRICS: Change = Change(128);
     pub const DOWNLOADS: Change = Change(256);
+    /// Свои названия треков (задание 0005).
+    pub const OVERRIDES: Change = Change(512);
 
     pub fn has(self, other: Change) -> bool {
         self.0 & other.0 != 0
@@ -78,6 +81,8 @@ type Listener = Box<dyn Fn(Change) + Send + Sync>;
 pub struct Library {
     db: Database,
     listeners: std::sync::Mutex<Vec<Listener>>,
+    /// Правки в памяти: показ трека спрашивает их на каждой строке, а меняются они редко.
+    overrides: RwLock<HashMap<String, TrackOverride>>,
 }
 
 const TRACK_COLUMNS: &str =
@@ -179,7 +184,25 @@ fn new_id() -> String {
 
 impl Library {
     pub fn open(db: Database) -> Arc<Library> {
-        Arc::new(Library { db, listeners: std::sync::Mutex::default() })
+        let overrides = db
+            .read(|c| {
+                let mut statement = c.prepare("SELECT video_id, title, artists_text, album_title, updated_at FROM track_overrides")?;
+                let rows = statement.query_map([], |r| {
+                    Ok(TrackOverride {
+                        video_id: r.get(0)?,
+                        title: r.get(1)?,
+                        artists_text: r.get(2)?,
+                        album_title: r.get(3)?,
+                        updated_at: r.get(4)?,
+                    })
+                })?;
+                rows.map(|r| r.map(|o| (o.video_id.clone(), o))).collect::<rusqlite::Result<HashMap<_, _>>>()
+            })
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "правки треков не прочитались");
+                HashMap::new()
+            });
+        Arc::new(Library { db, listeners: std::sync::Mutex::default(), overrides: RwLock::new(overrides) })
     }
 
     pub fn database(&self) -> &Database {
@@ -627,20 +650,112 @@ impl Library {
     }
 
     /// Поиск по своей библиотеке («В библиотеке» при вводе).
+    /// «В библиотеке» при вводе в поиск: лайкнутое, прослушанное и из своих плейлистов, по названию и
+    /// исполнителю — и YouTube, и своим (задание 0005). Без учёта регистра и для кириллицы: `LIKE` SQLite
+    /// так умеет только для латиницы, поэтому сравнение — здесь.
     pub fn search_library(&self, query: &str, limit: usize) -> Result<Vec<Track>, DbError> {
-        let pattern = format!("%{}%", query.trim().replace(['%', '_'], ""));
-        self.db.read(|c| {
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidates = self.db.read(|c| {
             tracks(
                 c,
                 &format!(
                     "SELECT {TRACK_COLUMNS} FROM tracks
-                     WHERE (liked_at IS NOT NULL OR total_play_ms > 0 OR video_id IN (SELECT video_id FROM playlist_items))
-                       AND (title LIKE ?1 OR artists_text LIKE ?1)
-                     ORDER BY liked_at IS NULL, total_play_ms DESC LIMIT ?2"
+                     WHERE liked_at IS NOT NULL OR total_play_ms > 0 OR video_id IN (SELECT video_id FROM playlist_items)
+                     ORDER BY liked_at IS NULL, total_play_ms DESC"
                 ),
-                params![pattern, limit as i64],
+                [],
             )
-        })
+        })?;
+        let overrides = self.overrides.read().unwrap_or_else(|p| p.into_inner());
+        let matches = |track: &Track| {
+            let edit = overrides.get(&track.video_id);
+            [
+                Some(track.title.as_str()),
+                track.artists_text.as_deref(),
+                edit.and_then(|e| e.title.as_deref()),
+                edit.and_then(|e| e.artists_text.as_deref()),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|text| text.to_lowercase().contains(&needle))
+        };
+        Ok(candidates.into_iter().filter(|t| matches(t)).take(limit).collect())
+    }
+
+    // ── свои названия треков (задание 0005) ──
+
+    /// Трек, каким его показывать: с правкой пользователя, если она есть.
+    pub fn display(&self, track: &Track) -> Track {
+        match self.overrides.read().unwrap_or_else(|p| p.into_inner()).get(&track.video_id) {
+            Some(edit) => edit.apply(track),
+            None => track.clone(),
+        }
+    }
+
+    pub fn track_override(&self, video_id: &str) -> Option<TrackOverride> {
+        self.overrides.read().unwrap_or_else(|p| p.into_inner()).get(video_id).cloned()
+    }
+
+    pub fn track_overrides(&self) -> HashMap<String, TrackOverride> {
+        self.overrides.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// «Сведения о треке»: правка целиком, как у сервера — пустое поле без правки, все пустые — правки нет.
+    pub fn set_override(
+        &self,
+        video_id: &str,
+        title: Option<&str>,
+        artists_text: Option<&str>,
+        album_title: Option<&str>,
+    ) -> Result<(), DbError> {
+        let edit = TrackOverride::new(video_id, title, artists_text, album_title, now_ms());
+        self.write_overrides(vec![edit])
+    }
+
+    /// «Указать альбом…»: альбом всем, прочие поля правок остаются.
+    pub fn set_album(&self, video_ids: &[String], album_title: &str) -> Result<(), DbError> {
+        let now = now_ms();
+        let edits: Vec<TrackOverride> = video_ids
+            .iter()
+            .map(|id| {
+                let current = self.track_override(id).unwrap_or_default();
+                TrackOverride::new(id, current.title.as_deref(), current.artists_text.as_deref(), Some(album_title), now)
+            })
+            .collect();
+        self.write_overrides(edits)
+    }
+
+    fn write_overrides(&self, edits: Vec<TrackOverride>) -> Result<(), DbError> {
+        self.db.write(|t| {
+            for edit in &edits {
+                if edit.is_empty() {
+                    t.execute("DELETE FROM track_overrides WHERE video_id = ?1", [&edit.video_id])?;
+                } else {
+                    t.execute(
+                        "INSERT INTO track_overrides (video_id, title, artists_text, album_title, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT(video_id) DO UPDATE SET title = excluded.title, artists_text = excluded.artists_text,
+                             album_title = excluded.album_title, updated_at = excluded.updated_at",
+                        params![edit.video_id, edit.title, edit.artists_text, edit.album_title, edit.updated_at],
+                    )?;
+                }
+            }
+            Ok(())
+        })?;
+        {
+            let mut overrides = self.overrides.write().unwrap_or_else(|p| p.into_inner());
+            for edit in edits {
+                if edit.is_empty() {
+                    overrides.remove(&edit.video_id);
+                } else {
+                    overrides.insert(edit.video_id.clone(), edit);
+                }
+            }
+        }
+        self.notify(Change::OVERRIDES);
+        Ok(())
     }
 
     // ── «Не показывать» ──
@@ -842,6 +957,49 @@ mod tests {
         assert_eq!(lib.all_tracks_count().unwrap(), 2);
         lib.set_track_hidden(&track("c"), true).unwrap();
         assert_eq!(lib.all_tracks_count().unwrap(), 1, "скрытое во «Все треки» не входит");
+    }
+
+    #[test]
+    fn overrides_show_over_youtube_and_are_searched_both_ways() {
+        let lib = library();
+        let fan = Track {
+            video_id: "f".into(),
+            title: "Artist — Song (live, fan upload)".into(),
+            artists_text: Some("Fan".into()),
+            ..Default::default()
+        };
+        lib.set_liked(&[fan.clone(), track("k")], true).unwrap();
+        lib.set_override("f", Some("Песня"), Some("Исполнитель"), None).unwrap();
+        let shown = lib.display(&fan);
+        assert_eq!(
+            (shown.title.as_str(), shown.artists_text.as_deref(), shown.album_title.as_deref()),
+            ("Песня", Some("Исполнитель"), None)
+        );
+        // В базе у трека — то, что дал YouTube.
+        assert_eq!(lib.track("f").unwrap().unwrap().title, "Artist — Song (live, fan upload)");
+        // Поиск находит и по своему, и по оригинальному; регистр кириллицы не мешает.
+        let ids = |q: &str| lib.search_library(q, 10).unwrap().into_iter().map(|t| t.video_id).collect::<Vec<_>>();
+        assert_eq!(ids("песня"), ["f"]);
+        assert_eq!(ids("fan upload"), ["f"]);
+        assert_eq!(ids("КИНО"), ["k"]);
+        // «Указать альбом…» оставляет прочие поля; все пустые — правки нет.
+        lib.set_album(&["f".into(), "k".into()], " Потерянный альбом ").unwrap();
+        assert_eq!(lib.track_override("f").unwrap().title.as_deref(), Some("Песня"));
+        assert_eq!(lib.track_override("k").unwrap().album_title.as_deref(), Some("Потерянный альбом"));
+        lib.set_override("k", None, Some(" "), None).unwrap();
+        assert!(lib.track_override("k").is_none());
+        // Правки переживают перезапуск.
+        let reopened = Library::open(reopen(&lib));
+        assert_eq!(reopened.track_override("f").unwrap().album_title.as_deref(), Some("Потерянный альбом"));
+    }
+
+    /// Та же база заново — как при перезапуске (в памяти — через копию).
+    fn reopen(lib: &Library) -> Database {
+        let path = std::env::temp_dir().join(format!("melogold-test-{}-{}.db", std::process::id(), now_ms()));
+        lib.db.backup_to(&path).unwrap();
+        let db = Database::open(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        db
     }
 
     #[test]

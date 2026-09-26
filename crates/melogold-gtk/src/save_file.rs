@@ -25,7 +25,7 @@ impl MainWindow {
         let dialog = gtk::FileDialog::builder()
             .title(tr("MenuSaveFile"))
             .modal(true)
-            .initial_name(format!("{}.m4a", file_name(&track)))
+            .initial_name(format!("{}.m4a", file_name(&self.display(&track))))
             .filters(&filters)
             .default_filter(&filter)
             .build();
@@ -47,7 +47,9 @@ impl MainWindow {
         let video_id = track.video_id.clone();
         let bytes = self.ctx.services.run(async move { downloads.read_whole(&video_id).await }).await;
         let cover = self.cover_bytes(&track).await;
-        let tags = Tags { title: Some(track.title.clone()), artist: track.artists_text.clone(), album: track.album_title.clone(), cover };
+        // Теги — со своими названиями пользователя (задание 0005).
+        let shown = self.display(&track);
+        let tags = Tags { title: Some(shown.title), artist: shown.artists_text, album: shown.album_title, cover };
         let written = match bytes {
             Some(Ok(bytes)) => {
                 let target = path.clone();

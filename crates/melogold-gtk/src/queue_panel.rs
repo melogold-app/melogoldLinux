@@ -63,14 +63,16 @@ impl QueuePanel {
                 self.list.append(&row);
             }
             let current = Some(index) == view.current;
+            // Свои названия — только в подписях; в меню — исходный трек (задание 0005).
+            let shown = window.display(&item.track);
             let cover = Cover::new(40);
             cover.set(&window.ctx.services.images, item.track.thumbnail_url.as_deref(), 120);
-            let title = gtk::Label::builder().label(&item.track.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
+            let title = gtk::Label::builder().label(&shown.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
             if current {
                 title.add_css_class("accent");
                 title.add_css_class("heading");
             }
-            let subtitle = gtk::Label::builder().label(item.track.subtitle()).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
+            let subtitle = gtk::Label::builder().label(shown.subtitle()).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
             subtitle.add_css_class("dim-label");
             subtitle.add_css_class("caption");
             let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).valign(gtk::Align::Center).build();
@@ -91,7 +93,7 @@ impl QueuePanel {
                 content.append(&remove);
             }
             let row = gtk::ListBoxRow::builder().child(&content).build();
-            row.update_property(&[gtk::accessible::Property::Label(&format!("{}, {}", item.track.title, item.track.subtitle()))]);
+            row.update_property(&[gtk::accessible::Property::Label(&format!("{}, {}", shown.title, shown.subtitle()))]);
             let (player_click, id) = (player.clone(), item.id);
             let click = gtk::GestureClick::new();
             click.connect_released(move |_, _, _, _| player_click.send(Command::JumpTo(id)));

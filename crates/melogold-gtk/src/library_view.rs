@@ -92,7 +92,7 @@ impl LibraryView {
         rows.push(row.downgrade());
     }
 
-    fn live_rows(&self) -> Vec<TrackRow> {
+    pub fn live_rows(&self) -> Vec<TrackRow> {
         let mut rows = self.rows.borrow_mut();
         rows.retain(|r| r.upgrade().is_some());
         rows.iter().filter_map(glib::WeakRef::upgrade).collect()
@@ -150,6 +150,9 @@ impl MainWindow {
             }
             if let Some(playlists) = playlists {
                 *view.playlists.borrow_mut() = playlists;
+            }
+            if change.has(Change::OVERRIDES) {
+                window.refresh_display();
             }
             window.notify_library(change);
         });
@@ -265,6 +268,7 @@ impl MainWindow {
         }
         playlists.append_section(None, &existing);
         first.append_submenu(Some(tr("MenuAddToPlaylist")), &playlists);
+        first.append_item(&item(tr("LinuxEditDetails"), "win.track-edit-details", None));
         // «Скачать» по состоянию загрузки (Android `DownloadEntry`).
         if track.is_live() {
             first.append_item(&item(tr("MenuDownloadLive"), "win.disabled", None));
@@ -406,6 +410,7 @@ impl MainWindow {
                 RowContext::Plain | RowContext::Player => {}
             }),
             with_target("track-hide", |w, t| w.toggle_hidden(t.track, t.context == RowContext::Player)),
+            with_target("track-edit-details", |w, t| w.edit_details(&t.track)),
         ];
         self.window.add_action_entries(entries);
         // Пункт-объяснение («У трансляции нечего скачивать»): виден, но не нажимается.
@@ -428,6 +433,84 @@ impl MainWindow {
             with_playlist("playlist-rename", |w, id| w.rename_playlist(id)),
             with_playlist("playlist-delete", |w, id| w.delete_playlist(id)),
         ]);
+    }
+
+    /// «Сведения о треке» (задание 0005): свои название, исполнитель и альбом. В пустом поле серым —
+    /// как на YouTube; «Как на YouTube» снимает правку целиком.
+    pub fn edit_details(&self, track: &Track) {
+        let library = std::sync::Arc::clone(&self.ctx.services.library);
+        let current = library.track_override(&track.video_id).unwrap_or_default();
+        let dialog = adw::AlertDialog::new(Some(tr("LinuxTrackDetails")), Some(tr("LinuxTrackDetailsHint")));
+        let fields = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
+        let field = |label: &str, value: Option<&str>, youtube: Option<&str>| {
+            let caption = gtk::Label::builder().label(label).xalign(0.0).build();
+            caption.add_css_class("caption-heading");
+            let entry = gtk::Entry::builder()
+                .text(value.unwrap_or_default())
+                .placeholder_text(youtube.unwrap_or_default())
+                .activates_default(true)
+                .build();
+            entry.update_property(&[gtk::accessible::Property::Label(label)]);
+            let group = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
+            group.append(&caption);
+            group.append(&entry);
+            fields.append(&group);
+            entry
+        };
+        let title = field(tr("LinuxTrackDetailsName"), current.title.as_deref(), Some(&track.title));
+        let artist = field(tr("LinuxTrackDetailsArtist"), current.artists_text.as_deref(), track.artists_text.as_deref());
+        let album = field(tr("LinuxTrackDetailsAlbum"), current.album_title.as_deref(), track.album_title.as_deref());
+        dialog.set_extra_child(Some(&fields));
+        dialog.add_response("reset", tr("LinuxTrackDetailsReset"));
+        dialog.add_response("cancel", tr("Cancel"));
+        dialog.add_response("save", tr("SaveAsPlaylist"));
+        dialog.set_response_enabled("reset", !current.is_empty());
+        dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("save"));
+        dialog.set_close_response("cancel");
+        let video_id = track.video_id.clone();
+        dialog.connect_response(None, move |_, response| {
+            let texts = match response {
+                "save" => [title.text().to_string(), artist.text().to_string(), album.text().to_string()],
+                "reset" => Default::default(),
+                _ => return,
+            };
+            let (library, video_id) = (std::sync::Arc::clone(&library), video_id.clone());
+            // Запись — не в главном потоке; экраны обновит событие библиотеки.
+            std::thread::spawn(move || {
+                let field = |text: &str| Some(text.to_owned()).filter(|t| !t.trim().is_empty());
+                let [t, a, al] = texts;
+                if let Err(error) = library.set_override(&video_id, field(&t).as_deref(), field(&a).as_deref(), field(&al).as_deref()) {
+                    tracing::warn!(%error, "правка трека не записалась");
+                }
+            });
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    /// «Указать альбом…» выделенному (задание 0005): по умолчанию — общий альбом выделенного, иначе
+    /// название своего плейлиста, из которого выделяли.
+    pub fn set_album(&self, tracks: Vec<Track>, place: RowContext) {
+        let shown: Vec<Track> = tracks.iter().map(|t| self.display(t)).collect();
+        let mut initial = suggested_playlist_name(&shown);
+        if initial.is_empty() {
+            if let RowContext::Playlist(id) = place {
+                initial = self.library_view.playlists().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_default();
+            }
+        }
+        let weak = self.downgrade();
+        self.ask_text(tr("LinuxSetAlbumTitle"), tr("LinuxTrackDetailsAlbum"), &initial, move |album| {
+            let Some(window) = weak.upgrade() else { return };
+            let ids: Vec<String> = tracks.iter().map(|t| t.video_id.clone()).collect();
+            let text = album.clone();
+            let task = window.ctx.services.db(move |library| library.set_album(&ids, &text));
+            let weak = window.downgrade();
+            glib::spawn_future_local(async move {
+                if let (Some(window), Some(Ok(()))) = (weak.upgrade(), task.await) {
+                    window.toast(&trf("LinuxAlbumSetFormat", &[&album]));
+                }
+            });
+        });
     }
 
     /// «Другие версии»: тот же трек у других загрузчиков — поиск по исполнителю и названию.
@@ -630,8 +713,13 @@ impl MainWindow {
 
     /// Диалог с одним полем названия.
     pub fn ask_name(&self, title: &str, initial: &str, done: impl Fn(String) + 'static) {
+        self.ask_text(title, tr("NewPlaylistName"), initial, done);
+    }
+
+    /// Диалог с одним полем: `field` — подпись поля, пустое не сохраняется.
+    pub fn ask_text(&self, title: &str, field: &str, initial: &str, done: impl Fn(String) + 'static) {
         let dialog = adw::AlertDialog::new(Some(title), None);
-        let entry = adw::EntryRow::builder().title(tr("NewPlaylistName")).text(initial).activates_default(true).build();
+        let entry = adw::EntryRow::builder().title(field).text(initial).activates_default(true).build();
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build();
         list.add_css_class("boxed-list");
         list.append(&entry);

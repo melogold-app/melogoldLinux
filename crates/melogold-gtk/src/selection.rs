@@ -13,6 +13,7 @@ use gtk::{gdk, gio, glib};
 use melogold_core::music::Track;
 use melogold_playback::engine::Command;
 
+use crate::library_view::RowContext;
 use crate::localization::{plural, tr, trf};
 use crate::track_row::TrackRow;
 use crate::window::MainWindow;
@@ -29,6 +30,8 @@ pub struct Selection {
     contains: Box<dyn Fn(&TrackRow) -> bool>,
     /// Касания отмечают и снимают отметку (после долгого нажатия на сенсоре).
     touch_mode: Cell<bool>,
+    /// Откуда выделяли: у своего плейлиста «Указать альбом…» предлагает его название.
+    place: RowContext,
 }
 
 impl Selection {
@@ -46,7 +49,7 @@ impl Selection {
 
     /// Выделение `GtkListBox`: строки треков — `TrackRow` внутри строки списка; остальные строки
     /// (альбомы и исполнители в выдаче) в выделение не входят.
-    pub fn for_list_box(window: &MainWindow, list: &gtk::ListBox) -> Rc<Selection> {
+    pub fn for_list_box(window: &MainWindow, list: &gtk::ListBox, place: RowContext) -> Rc<Selection> {
         list.set_selection_mode(gtk::SelectionMode::Multiple);
         let track_rows = |list: &gtk::ListBox| -> Vec<Track> {
             list.selected_rows().iter().filter_map(|row| row.child().and_downcast::<TrackRow>()).filter_map(|row| row.track()).collect()
@@ -74,6 +77,7 @@ impl Selection {
             }),
             contains: Box::new(|row| row.parent().and_downcast::<gtk::ListBoxRow>().is_some_and(|r| r.is_selected())),
             touch_mode: Cell::new(false),
+            place,
         });
         let (weak, sel) = (window.downgrade(), Rc::downgrade(&selection));
         list.connect_selected_rows_changed(move |_| {
@@ -100,6 +104,7 @@ impl Selection {
         view: &gtk::ListView,
         model: &gtk::MultiSelection,
         tracks: Rc<RefCell<Vec<Track>>>,
+        place: RowContext,
     ) -> Rc<Selection> {
         let positions = |model: &gtk::MultiSelection| -> Vec<u32> {
             let bitset = model.selection();
@@ -126,6 +131,7 @@ impl Selection {
             }),
             contains: Box::new(move |row| m5.upgrade().is_some_and(|m| m.is_selected(row.position()))),
             touch_mode: Cell::new(false),
+            place,
         });
         let (weak, sel) = (window.downgrade(), Rc::downgrade(&selection));
         model.connect_selection_changed(move |_, _, _| {
@@ -289,6 +295,10 @@ impl SelectionBar {
         let (download, label) = button("SelectionDownload", "folder-download-symbolic", "win.selection-download");
         labelled.push((label, "SelectionDownload"));
         extra.push(download.upcast());
+        let (album, album_label) = button("LinuxSetAlbum", "media-optical-cd-audio-symbolic", "win.selection-set-album");
+        album_label.set_label("");
+        album.update_property(&[gtk::accessible::Property::Label(tr("LinuxSetAlbum"))]);
+        extra.push(album.upcast());
         let separator = gtk::Separator::builder().orientation(gtk::Orientation::Vertical).margin_start(4).margin_end(4).build();
         content.append(&separator);
         extra.push(separator.upcast());
@@ -387,6 +397,7 @@ fn overflow_menu(window: &MainWindow) -> gio::Menu {
     menu.append_submenu(Some(tr("SelectionAddToPlaylist")), &playlist_menu(window));
     menu.append(Some(tr("SelectionNewPlaylist")), Some("win.selection-new-playlist"));
     menu.append(Some(tr("SelectionDownload")), Some("win.selection-download"));
+    menu.append(Some(tr("LinuxSetAlbum")), Some("win.selection-set-album"));
     menu.append(Some(tr("SelectionSelectAll")), Some("win.selection-select-all"));
     menu
 }
@@ -402,6 +413,7 @@ pub fn menu(window: &MainWindow) -> gio::Menu {
     collect.append(Some(tr("SelectionLike")), Some("win.selection-like"));
     collect.append_submenu(Some(tr("SelectionAddToPlaylist")), &playlist_menu(window));
     collect.append(Some(tr("SelectionDownload")), Some("win.selection-download"));
+    collect.append(Some(tr("LinuxSetAlbum")), Some("win.selection-set-album"));
     menu.append_section(None, &collect);
     let select = gio::Menu::new();
     select.append(Some(tr("SelectionSelectAll")), Some("win.selection-select-all"));
@@ -512,6 +524,10 @@ impl MainWindow {
                 w.set_liked(tracks, true);
             }),
             simple("selection-new-playlist", |w, tracks| w.new_playlist(tracks)),
+            simple("selection-set-album", |w, tracks| {
+                let place = w.selection.borrow().as_ref().map(|s| s.place).unwrap_or_default();
+                w.set_album(tracks, place);
+            }),
             // Скачанное, скачивающееся и трансляции пропускаются.
             simple("selection-download", |w, tracks| {
                 let count = w.ctx.services.downloads.download(&tracks);

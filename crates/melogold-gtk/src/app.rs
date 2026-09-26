@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
@@ -83,7 +84,7 @@ pub fn run(args: Vec<String>) -> glib::ExitCode {
             // MPRIS — только у настоящего окна: снимки не должны забирать медиаклавиши у рабочего Melogold.
             if !snapshot_mode() {
                 let (sender, requests) = async_channel::unbounded();
-                crate::mpris::start(&ctx.services.handle(), ctx.services.player.clone(), sender);
+                crate::mpris::start(&ctx.services.handle(), ctx.services.player.clone(), Arc::clone(&ctx.services.library), sender);
                 let weak = created.downgrade();
                 glib::spawn_future_local(async move {
                     while let Ok(request) = requests.recv().await {
