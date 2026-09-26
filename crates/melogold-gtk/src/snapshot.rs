@@ -18,7 +18,8 @@ use melogold_core::settings::Tab;
 
 use crate::window::MainWindow;
 
-type Step = (&'static str, Box<dyn Fn(&MainWindow)>);
+/// Шаг: имя снимка, что сделать, сколько ждать до снимка (сеть — дольше).
+type Step = (&'static str, Box<dyn Fn(&MainWindow)>, u64);
 
 pub fn maybe_start(window: &MainWindow) {
     let Some(directory) = std::env::var_os("MELOGOLD_SCREENSHOT_DIR").map(PathBuf::from) else { return };
@@ -47,11 +48,11 @@ pub fn maybe_start(window: &MainWindow) {
     }
 
     let steps: Vec<Step> = vec![
-        ("01-trends", Box::new(|w| w.show_tab(Tab::Trends))),
-        ("02-new", Box::new(|w| w.show_tab(Tab::WhatsNew))),
-        ("03-library", Box::new(|w| w.show_tab(Tab::Library))),
-        ("04-settings", Box::new(|w| w.show_tab(Tab::Settings))),
-        ("05-diagnostics", Box::new(|w| w.push(&crate::pages::diagnostics::page(w)))),
+        ("01-trends", Box::new(|w| w.show_tab(Tab::Trends)), 700),
+        ("02-new", Box::new(|w| w.show_tab(Tab::WhatsNew)), 700),
+        ("03-library", Box::new(|w| w.show_tab(Tab::Library)), 700),
+        ("04-settings", Box::new(|w| w.show_tab(Tab::Settings)), 700),
+        ("05-diagnostics", Box::new(|w| w.push(&crate::pages::diagnostics::page(w))), 700),
         (
             "06-sidebar",
             Box::new(|w| {
@@ -61,22 +62,83 @@ pub fn maybe_start(window: &MainWindow) {
                     w.split_view().set_show_sidebar(true);
                 }
             }),
+            700,
         ),
         (
-            "07-shortcuts",
+            "07-search",
             Box::new(|w| {
                 w.split_view().set_show_sidebar(!w.split_view().is_collapsed());
+                w.search_for("Кино Группа крови");
+            }),
+            4000,
+        ),
+        (
+            "08-playing",
+            Box::new(|w| {
+                let track = melogold_core::music::Track {
+                    video_id: "dQw4w9WgXcQ".into(),
+                    title: "Never Gonna Give You Up".into(),
+                    artists_text: Some("Rick Astley".into()),
+                    album_title: Some("Whenever You Need Somebody".into()),
+                    thumbnail_url: Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg".into()),
+                    video_type: Some("video".into()),
+                    ..Default::default()
+                };
+                w.ctx
+                    .services
+                    .player
+                    .send(melogold_playback::engine::Command::PlaySingle { track, start: std::time::Duration::from_secs(42) });
+            }),
+            6000,
+        ),
+        (
+            "09-queue",
+            Box::new(|w| {
+                let _ = WidgetExt::activate_action(&w.window, "win.queue", None);
+            }),
+            1500,
+        ),
+        (
+            "10-now-playing",
+            Box::new(|w| {
+                let _ = WidgetExt::activate_action(&w.window, "win.queue", None);
+                w.show_now_playing();
+            }),
+            1500,
+        ),
+        (
+            // Задание 0001: трек закрыт в стране. Скрипт снимков ставит MELOGOLD_FAKE_GEO=cYKAr38pZcY:RU.
+            "11-geo",
+            Box::new(|w| {
+                w.go_back();
+                let track = melogold_core::music::Track {
+                    video_id: "cYKAr38pZcY".into(),
+                    title: "Photosynthesis".into(),
+                    artists_text: Some("Saba".into()),
+                    ..Default::default()
+                };
+                w.ctx.services.player.send(melogold_playback::engine::Command::PlaySingle { track, start: std::time::Duration::ZERO });
+            }),
+            7000,
+        ),
+        ("12-geo-now-playing", Box::new(|w| w.show_now_playing()), 1200),
+        (
+            "13-shortcuts",
+            Box::new(|w| {
+                w.go_back();
+                w.ctx.services.player.send(melogold_playback::engine::Command::Pause);
                 crate::shortcuts::present(Some(w.window.upcast_ref()));
             }),
+            700,
         ),
     ];
 
     let window = window.clone();
     glib::spawn_future_local(async move {
         glib::timeout_future(Duration::from_millis(1200)).await;
-        for (name, step) in steps {
+        for (name, step, wait) in steps {
             step(&window);
-            glib::timeout_future(Duration::from_millis(700)).await;
+            glib::timeout_future(Duration::from_millis(wait)).await;
             let path = directory.join(format!("{name}.png"));
             match capture(&window.window, &path) {
                 Some(()) => println!("снимок: {}", path.display()),

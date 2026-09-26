@@ -1,14 +1,26 @@
 //! Melogold для Linux: клиент YouTube Music и YouTube с общей библиотекой на всех устройствах.
 
+// Обработчики GTK живут в `Rc<RefCell<Option<Box<dyn Fn…>>>>` и подобном — это их обычная форма,
+// а не запутанность; псевдонимы на каждый такой тип читались бы хуже.
+#![allow(clippy::type_complexity)]
+
 mod app;
+mod images;
 mod localization;
 mod logging;
+mod mpris;
+mod now_playing;
 mod pages;
+mod player_bar;
+mod queue_panel;
+mod services;
 mod settings_store;
 mod shortcuts;
 #[cfg(debug_assertions)]
 mod snapshot;
 mod strings_generated;
+mod texts;
+mod widgets;
 mod window;
 
 use gtk::{gio, glib};

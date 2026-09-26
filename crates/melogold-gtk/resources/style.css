@@ -1,0 +1,36 @@
+/* Своих стилей — минимум: всё остальное — стандартные классы libadwaita (docs/PROMPT.md §2). */
+
+.cover {
+  border-radius: 6px;
+  background-color: alpha(currentColor, 0.08);
+}
+
+.cover.round {
+  border-radius: 9999px;
+}
+
+.cover.large {
+  border-radius: 12px;
+}
+
+.cover-button {
+  padding: 0;
+}
+
+.explicit-badge {
+  font-size: 0.7em;
+  font-weight: bold;
+  padding: 0 4px;
+  border-radius: 3px;
+  background-color: alpha(currentColor, 0.15);
+}
+
+.play-button {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.now-playing-play {
+  min-width: 56px;
+  min-height: 56px;
+}

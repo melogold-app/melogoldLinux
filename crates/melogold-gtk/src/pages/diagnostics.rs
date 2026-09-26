@@ -2,10 +2,13 @@
 //! «Проверить извлечение» приходит со срезом воспроизведения.
 
 use adw::prelude::*;
-use gtk::gio;
+use gtk::{gio, glib};
 use melogold_core::app_info::VERSION;
 
 use crate::localization::tr;
+
+/// Трек для проверки извлечения: стабильный, открыт во всех странах.
+const TEST_VIDEO: &str = "dQw4w9WgXcQ";
 use crate::window::MainWindow;
 
 pub fn page(window: &MainWindow) -> adw::NavigationPage {
@@ -25,6 +28,39 @@ pub fn page(window: &MainWindow) -> adw::NavigationPage {
         versions.add(&row);
     }
     page.add(&versions);
+
+    // «Проверить извлечение» (REWRITE §3.5.10): время, itag и клиент или класс ошибки.
+    let extraction = adw::PreferencesGroup::new();
+    let check = adw::ActionRow::builder().title(tr("LinuxCheckExtraction")).subtitle(tr("LinuxCheckExtractionHint")).build();
+    let run = gtk::Button::builder().label(tr("LinuxCheck")).valign(gtk::Align::Center).build();
+    let weak = window.downgrade();
+    let row = check.clone();
+    run.connect_clicked(move |button| {
+        let Some(window) = weak.upgrade() else { return };
+        button.set_sensitive(false);
+        row.set_subtitle(tr("UpdateChecking"));
+        let resolver = window.ctx.services.resolver.clone();
+        let task = window.ctx.services.run(async move {
+            // Свежий адрес, а не из кэша: проверяется извлечение, а не память.
+            resolver.invalidate(TEST_VIDEO);
+            let started = std::time::Instant::now();
+            let result = resolver.resolve(TEST_VIDEO).await;
+            (started.elapsed(), result)
+        });
+        let (row, button) = (row.clone(), button.clone());
+        glib::spawn_future_local(async move {
+            let text = match task.await {
+                Some((elapsed, Ok(info))) => format!("{} мс · itag {} · {}", elapsed.as_millis(), info.itag, info.source),
+                Some((elapsed, Err(error))) => format!("{} мс · {:?} · {}", elapsed.as_millis(), error.kind, error.message),
+                None => "—".into(),
+            };
+            row.set_subtitle(&text);
+            button.set_sensitive(true);
+        });
+    });
+    check.add_suffix(&run);
+    extraction.add(&check);
+    page.add(&extraction);
 
     let logs = adw::PreferencesGroup::builder().title(tr("LinuxLogs")).build();
     let folder = window.ctx.paths.logs();

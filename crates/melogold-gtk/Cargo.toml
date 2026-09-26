@@ -12,6 +12,14 @@ path = "src/main.rs"
 
 [dependencies]
 melogold-core = { path = "../melogold-core" }
+melogold-innertube = { path = "../melogold-innertube" }
+melogold-playback = { path = "../melogold-playback" }
+futures-util.workspace = true
+gst.workspace = true
+hex.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+zbus.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

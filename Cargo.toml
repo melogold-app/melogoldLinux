@@ -29,6 +29,9 @@ sha2 = "0.10"
 hex = "0.4"
 base64 = "0.22"
 async-channel = "2"
+# D-Bus: MPRIS и Secret Service, на рантайме tokio.
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # HTTP/2 и rustls: googlevideo отдаёт куски по одному соединению без новых рукопожатий.
 gst = { package = "gstreamer", version = "0.25" }
 gst-base = { package = "gstreamer-base", version = "0.25" }

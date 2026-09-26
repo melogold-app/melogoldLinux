@@ -7,6 +7,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+async-channel.workspace = true
+futures-util.workspace = true
 melogold-core = { path = "../melogold-core" }
 melogold-innertube = { path = "../melogold-innertube" }
 gst.workspace = true

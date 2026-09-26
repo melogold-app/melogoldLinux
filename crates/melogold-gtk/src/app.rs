@@ -13,14 +13,16 @@ use melogold_core::paths::AppPaths;
 use melogold_core::settings::{keys, ThemeMode};
 
 use crate::localization::{self, tr};
+use crate::services::Services;
 use crate::settings_store::SettingsStore;
 use crate::window::MainWindow;
 use crate::{logging, shortcuts};
 
-/// Общее для окна и страниц: пути, настройки. Живёт столько же, сколько приложение.
+/// Общее для окна и страниц: пути, настройки, сервисы. Живёт столько же, сколько приложение.
 pub struct AppContext {
     pub paths: AppPaths,
     pub settings: Rc<SettingsStore>,
+    pub services: Services,
 }
 
 pub fn snapshot_mode() -> bool {
@@ -60,7 +62,8 @@ pub fn run(args: Vec<String>) -> glib::ExitCode {
             );
             let settings = SettingsStore::load(paths.settings(), snapshot_mode());
             apply_theme(settings.get(&keys::THEME_MODE));
-            state.replace(Some(Rc::new(AppContext { paths, settings })));
+            let services = Services::start(&paths, &settings);
+            state.replace(Some(Rc::new(AppContext { paths, settings, services })));
             install_actions(app);
         }
     });
@@ -74,9 +77,22 @@ pub fn run(args: Vec<String>) -> glib::ExitCode {
                 return existing.clone();
             }
             let ctx = state.borrow().clone().expect("startup прошёл раньше activate");
-            let created = MainWindow::new(app, ctx);
+            let created = MainWindow::new(app, Rc::clone(&ctx));
             created.present();
             window.replace(Some(created.clone()));
+            // MPRIS — только у настоящего окна: снимки не должны забирать медиаклавиши у рабочего Melogold.
+            if !snapshot_mode() {
+                let (sender, requests) = async_channel::unbounded();
+                crate::mpris::start(&ctx.services.handle(), ctx.services.player.clone(), sender);
+                let weak = created.downgrade();
+                glib::spawn_future_local(async move {
+                    while let Ok(request) = requests.recv().await {
+                        if let Some(window) = weak.upgrade() {
+                            window.on_mpris(request);
+                        }
+                    }
+                });
+            }
             created
         }
     };
@@ -101,6 +117,7 @@ pub fn run(args: Vec<String>) -> glib::ExitCode {
     app.connect_shutdown(move |_| {
         if let Some(ctx) = state.borrow().as_ref() {
             ctx.settings.flush();
+            ctx.services.shutdown();
         }
     });
 

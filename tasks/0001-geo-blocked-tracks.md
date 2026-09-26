@@ -1,6 +1,6 @@
 # Трек закрыт в стране: понятная ошибка со страной YouTube
 
-Статус: открыто
+Статус: сделано
 
 Те же задания: `melogoldAndroid/tasks/0008-geo-blocked-tracks.md` (сделано, Android 0.1.8),
 `melogoldWindows/tasks/0010-geo-blocked-tracks.md`, `melogoldiOSmacOS/tasks/0010-geo-blocked-tracks.md`.
@@ -56,9 +56,16 @@
 
 ## 3. Linux
 
-Кода клиента пока нет (стек выбирает пользователь, `docs/PROMPT.md` §3). Задание делается вместе со срезом
-воспроизведения: ошибка «закрыт в стране» — со страной и числом стран, как в п. 2, текст ru/en с формами
-множественного числа, строка в журнале.
+Сделано в срезе воспроизведения:
+
+- диагноз — `crates/melogold-playback/src/resolver.rs` (`diagnose`, `classify`), запрос WEB и страна из
+  `visitorData` — `crates/melogold-innertube/src/player.rs`; строка в журнале на каждый отказ;
+- тексты — `crates/melogold-gtk/src/texts.rs`: в панели плеера коротко («Недоступно: Россия» · Повторить), в
+  «Сейчас играет» целиком с кнопками «Повторить · Пропустить · Другие версии», в плашке пропуска — «Недоступно
+  в стране «Россия»»; названия стран — CLDR (`scripts/sync-countries.py`);
+- отладочная сборка: `MELOGOLD_FAKE_GEO=<videoId>:<страна>` — поток «не получен», страна подменена, остальное —
+  настоящий ответ YouTube. Снимок `scripts/snapshots.sh` (шаги `11-geo`, `12-geo-now-playing`) показывает
+  «…открыл трек в 122 других странах…» для `cYKAr38pZcY`.
 
 ## 4. Проверка
 

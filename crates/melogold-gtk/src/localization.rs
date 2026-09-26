@@ -53,6 +53,14 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxSystem", "Система", "System"),
     ("LinuxLogs", "Журналы", "Logs"),
     ("LinuxLogsFolder", "Папка журналов", "Logs folder"),
+    ("LinuxCheckExtraction", "Проверить извлечение", "Check extraction"),
+    (
+        "LinuxCheckExtractionHint",
+        "Получает поток тестового трека: время, формат и клиент",
+        "Gets a test track stream: time, format and client",
+    ),
+    ("LinuxCheck", "Проверить", "Check"),
+    ("LinuxSkip", "Пропустить", "Skip"),
     ("LinuxSectionSoonTrends", "В тренде и настроения появятся в следующем срезе", "Trending and moods are coming next"),
     ("LinuxSectionSoonNew", "Новые релизы и «Для вас» появятся позже", "New releases and For you are coming later"),
     ("LinuxSectionSoonLibrary", "Избранное, плейлисты и история появятся позже", "Favorites, playlists and history are coming later"),
@@ -65,6 +73,12 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
 ];
 
 static LANG: OnceLock<Lang> = OnceLock::new();
+static FORCED: OnceLock<bool> = OnceLock::new();
+
+/// Язык выбран явно (настройка, `MELOGOLD_LANG`, снимки), а не взят у системы.
+pub fn is_forced() -> bool {
+    FORCED.get().copied().unwrap_or(false)
+}
 
 /// Язык процесса: выбранный в «Язык приложения» (или язык снимков), иначе язык системы.
 ///
@@ -72,6 +86,7 @@ static LANG: OnceLock<Lang> = OnceLock::new();
 /// libadwaita («Search shortcuts», «Close») берутся через gettext, и без этого окно
 /// выходило бы на двух языках сразу.
 pub fn init(forced: Option<Lang>) -> Lang {
+    let _ = FORCED.set(forced.is_some());
     if let Some(lang) = forced {
         // Один поток, GTK ещё не запущен: переменная окружения меняется безопасно.
         std::env::set_var("LANGUAGE", if lang == Lang::Ru { "ru" } else { "en" });
@@ -81,10 +96,6 @@ pub fn init(forced: Option<Lang>) -> Lang {
 
 pub fn lang() -> Lang {
     *LANG.get_or_init(detect)
-}
-
-pub fn is_russian() -> bool {
-    lang() == Lang::Ru
 }
 
 /// Порядок как у gettext: `LANGUAGE` (первый из списка), затем `LC_ALL`, `LC_MESSAGES`, `LANG`.
@@ -104,7 +115,12 @@ fn detect() -> Lang {
 }
 
 fn lookup(key: &str) -> Option<&'static str> {
-    let pick = |ru: &'static str, en: &'static str| if is_russian() { ru } else { en };
+    lookup_in(lang(), key)
+}
+
+/// Строка на заданном языке — для тестов обоих языков в одном процессе.
+pub fn lookup_in(lang: Lang, key: &str) -> Option<&'static str> {
+    let pick = |ru: &'static str, en: &'static str| if lang == Lang::Ru { ru } else { en };
     if let Some((_, ru, en)) = LINUX_ONLY.iter().find(|(k, ..)| *k == key) {
         return Some(pick(ru, en));
     }
@@ -133,19 +149,32 @@ fn format_args_into(template: &str, args: &[&dyn Display]) -> String {
 }
 
 /// «21 трек», «3 трека», «5 треков»: ключ с суффиксом формы, `{0}` — число.
-#[allow(dead_code)] // первые счётчики — в срезе 2
+#[allow(dead_code)] // счётчики библиотеки — срез 4
 pub fn plural(key: &'static str, count: i64) -> String {
-    let form = plurals::form(count, is_russian());
+    plural_in(lang(), key, count)
+}
+
+pub fn plural_in(lang: Lang, key: &'static str, count: i64) -> String {
+    let form = plurals::form(count, lang == Lang::Ru);
     let full = format!("{key}_{}", form.suffix());
-    let template = lookup(&full).unwrap_or(key);
-    format_args_into(template, &[&format_count(count)])
+    let template = lookup_in(lang, &full).unwrap_or(key);
+    format_args_into(template, &[&format_count_in(lang, count)])
+}
+
+/// Строка с подстановками на заданном языке.
+pub fn trf_in(lang: Lang, key: &'static str, args: &[&dyn Display]) -> String {
+    format_args_into(lookup_in(lang, key).unwrap_or(key), args)
 }
 
 /// Число с разделителем разрядов: «12 345» (неразрывный пробел) и «12,345».
-#[allow(dead_code)]
+#[allow(dead_code)] // счётчики библиотеки — срез 4
 pub fn format_count(count: i64) -> String {
+    format_count_in(lang(), count)
+}
+
+fn format_count_in(lang: Lang, count: i64) -> String {
     let digits = count.unsigned_abs().to_string();
-    let separator = if is_russian() { '\u{a0}' } else { ',' };
+    let separator = if lang == Lang::Ru { '\u{a0}' } else { ',' };
     let mut out = String::new();
     for (index, digit) in digits.chars().enumerate() {
         if index > 0 && (digits.len() - index) % 3 == 0 {

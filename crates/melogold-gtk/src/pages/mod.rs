@@ -1,6 +1,7 @@
 //! Страницы разделов. Каждая — `AdwNavigationPage` в стеке своего раздела.
 
 pub mod diagnostics;
+pub mod search;
 pub mod settings;
 
 use adw::prelude::*;
@@ -9,6 +10,21 @@ use adw::prelude::*;
 pub fn placeholder(title: &str, icon: &str, description: &str) -> adw::NavigationPage {
     let status = adw::StatusPage::builder().icon_name(icon).title(title).description(description).build();
     adw::NavigationPage::builder().title(title).tag("root").child(&status).build()
+}
+
+/// Страница альбома, исполнителя, канала или плейлиста — со срезом «Каталог».
+pub fn placeholder_for(item: &melogold_core::music::MusicItem) -> adw::NavigationPage {
+    use melogold_core::music::MusicItem;
+    let (title, icon) = match item {
+        MusicItem::Album(a) => (a.title.clone(), "media-optical-cd-audio-symbolic"),
+        MusicItem::Artist(a) => (a.name.clone(), "avatar-default-symbolic"),
+        MusicItem::Playlist(p) => (p.title.clone(), "view-list-bullet-symbolic"),
+        MusicItem::Mood(m) => (m.title.clone(), "view-grid-symbolic"),
+        MusicItem::Track(t) => (t.title.clone(), "audio-x-generic-symbolic"),
+    };
+    let status =
+        adw::StatusPage::builder().icon_name(icon).title(&title).description(crate::localization::tr("LinuxSectionSoonTrends")).build();
+    adw::NavigationPage::builder().title(&title).child(&status).build()
 }
 
 /// Строка-ссылка наружу: открывает адрес в браузере.

@@ -6,5 +6,6 @@
     <file preprocess="xml-stripblanks">icons/scalable/actions/new-releases-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/library-symbolic.svg</file>
     <file>icons/256x256/apps/app.melogold.Melogold.png</file>
+    <file>style.css</file>
   </gresource>
 </gresources>

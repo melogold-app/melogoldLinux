@@ -31,6 +31,15 @@ pub struct TrackStream {
     fragments: Mutex<HashMap<usize, FragmentCell>>,
 }
 
+impl std::fmt::Debug for TrackStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrackStream")
+            .field("video_id", &self.reader.info().video_id)
+            .field("fragments", &self.index.fragments.len())
+            .finish()
+    }
+}
+
 impl TrackStream {
     /// Начало файла и таблица фрагментов. Длинный индекс (часовые видео) дочитывается.
     pub async fn open(reader: Arc<RangeReader>) -> Result<Arc<TrackStream>, StreamError> {

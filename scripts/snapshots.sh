@@ -45,7 +45,7 @@ for config in "${configs[@]}"; do
         XDG_DATA_HOME="${home}/data" XDG_CONFIG_HOME="${home}/config" XDG_CACHE_HOME="${home}/cache" \
         MELOGOLD_SCREENSHOT_DIR="${dir}" MELOGOLD_SCREENSHOT_SIZE="${size}" \
         MELOGOLD_SCREENSHOT_SCHEME="${scheme}" MELOGOLD_SCREENSHOT_LANG="${lang}" \
-        MELOGOLD_AUDIO_SINK=fakesink RUST_LOG="${RUST_LOG:-warn}" \
+        MELOGOLD_AUDIO_SINK=fakesink MELOGOLD_FAKE_GEO=cYKAr38pZcY:RU RUST_LOG="${RUST_LOG:-warn}" \
         timeout 120 "${repo}/target/debug/melogold"
 done
 echo "снимки: ${out}"
