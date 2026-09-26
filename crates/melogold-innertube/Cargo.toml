@@ -1,0 +1,19 @@
+[package]
+name = "melogold-innertube"
+description = "Клиент YouTube Music и YouTube (InnerTube) для Melogold"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+melogold-core = { path = "../melogold-core" }
+base64.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

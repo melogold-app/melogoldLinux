@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "comment": "Клиенты InnerTube player для потока, по порядку (docs/PROMPT.md §4). Приложение подтягивает этот файл с main: поломку на стороне YouTube можно чинить без релиза. Встроенный список в crates/melogold-playback/src/stream_clients.rs остаётся запасным.",
+  "clients": [
+    {
+      "name": "VISIONOS",
+      "id": 101,
+      "version": "1.02",
+      "host": "www.youtube.com",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+      "referer": "https://www.youtube.com/",
+      "deviceMake": "Apple",
+      "deviceModel": "RealityDevice17,1",
+      "osName": "visionOS",
+      "osVersion": "26.5.23O471"
+    }
+  ]
+}

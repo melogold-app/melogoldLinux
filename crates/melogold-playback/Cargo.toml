@@ -1,0 +1,25 @@
+[package]
+name = "melogold-playback"
+description = "Воспроизведение Melogold: поток, кэш, загрузки, плеер на GStreamer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+melogold-core = { path = "../melogold-core" }
+melogold-innertube = { path = "../melogold-innertube" }
+gst.workspace = true
+gst-base.workspace = true
+gst-audio.workspace = true
+gst-app.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

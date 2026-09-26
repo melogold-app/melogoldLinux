@@ -1,5 +1,5 @@
 // Создано scripts/sync-strings.py — руками не править.
-// Источник: melogoldWindows/tools/strings.tsv, коммит 5573e2d.
+// Источник: melogoldWindows/src/Melogold.App/Strings/*/Resources.resw, коммит 5573e2d.
 
 /// (ключ, русский, английский), по возрастанию ключа.
 pub static STRINGS: &[(&str, &str, &str)] = &[
@@ -157,6 +157,10 @@ pub static STRINGS: &[(&str, &str, &str)] = &[
     ("Filter", "Фильтр", "Filter"),
     ("FindMusic", "Найти музыку", "Find music"),
     ("ForYou", "Для вас", "For you"),
+    ("GeoOtherCountries_few", "в {0} других странах", "в {0} других странах"),
+    ("GeoOtherCountries_many", "в {0} других странах", "в {0} других странах"),
+    ("GeoOtherCountries_one", "в {0} другой стране", "in {0} other country"),
+    ("GeoOtherCountries_other", "в {0} других странах", "in {0} other countries"),
     ("History", "История", "History"),
     ("HistoryCleared", "История очищена", "History cleared"),
     ("HistoryDeviceAll", "Все устройства", "All devices"),
@@ -303,7 +307,6 @@ pub static STRINGS: &[(&str, &str, &str)] = &[
     ("MenuGoToAlbum", "Открыть альбом", "Go to album"),
     ("MenuGoToArtist", "Открыть исполнителя", "Go to artist"),
     ("MenuGoToChannel", "Открыть канал", "Go to channel"),
-    ("MenuMute", "Без звука", "Mute"),
     ("MenuOtherVersions", "Другие версии", "Other versions"),
     ("MenuPlayNext", "Играть следующим", "Play next"),
     ("MenuRemoveFromHistory", "Убрать из истории", "Remove from history"),
@@ -316,7 +319,6 @@ pub static STRINGS: &[(&str, &str, &str)] = &[
     ("MenuStartRadio", "Включить радио", "Start radio"),
     ("MenuStreamInfo", "Сведения о потоке", "Stream info"),
     ("MenuTrackRadio", "Включить радио по треку", "Start track radio"),
-    ("MenuUnmute", "Включить звук", "Unmute"),
     ("MiniPlayerExpand", "Развернуть", "Expand"),
     ("MinutesAgo_few", "{0} минуты назад", "{0} minutes ago"),
     ("MinutesAgo_many", "{0} минут назад", "{0} minutes ago"),
@@ -367,7 +369,11 @@ pub static STRINGS: &[(&str, &str, &str)] = &[
     ("PlayErrorAge", "Нужна проверка возраста — пока не поддерживается", "Age verification is required — not supported yet"),
     ("PlayErrorBot", "YouTube просит подтвердить, что вы не робот. Попробуйте позже или смените сеть", "YouTube wants to check you're not a robot. Try again later or switch networks"),
     ("PlayErrorExtractor", "Не удалось получить поток", "Couldn't get the stream"),
-    ("PlayErrorGeo", "Недоступно в вашем регионе", "Not available in your region"),
+    ("PlayErrorGeo", "Недоступно в вашей стране", "Unavailable in your country"),
+    ("PlayErrorGeoCountryFormat", "Недоступно в стране «{0}»: YouTube считает, что вы там, а правообладатель закрыл трек для этой страны. С VPN выберите сервер другой страны: некоторые серверы YouTube тоже относит к стране «{0}».", "Unavailable in {0}: YouTube places you there, and the rights holder closed this track for it. With a VPN, pick a server in another country: YouTube counts some VPN servers as {0} too."),
+    ("PlayErrorGeoCountryNoticeFormat", "Недоступно в стране «{0}»", "Unavailable in {0}"),
+    ("PlayErrorGeoCountryOpenFormat", "Недоступно в стране «{0}»: YouTube считает, что вы там, а правообладатель открыл трек {1}. С VPN выберите сервер другой страны: некоторые серверы YouTube тоже относит к стране «{0}».", "Unavailable in {0}: YouTube places you there, and the rights holder opened this track {1}. With a VPN, pick a server in another country: YouTube counts some VPN servers as {0} too."),
+    ("PlayErrorGeoCountryShortFormat", "Недоступно: {0}", "Unavailable in {0}"),
     ("PlayErrorNetwork", "Нет соединения. Проверьте сеть или VPN", "No connection. Check your network or VPN"),
     ("PlayErrorUnavailable", "Видео удалено или закрыто", "The video was removed or made private"),
     ("PlayerArtwork.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name", "Сейчас играет", "Now playing"),
@@ -393,6 +399,8 @@ pub static STRINGS: &[(&str, &str, &str)] = &[
     ("PlayerShuffle.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name", "Перемешать", "Shuffle"),
     ("PlayerShuffle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip", "Перемешать (Ctrl+H)", "Shuffle (Ctrl+H)"),
     ("PlayerVolume.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name", "Громкость", "Volume"),
+    ("PlayerVolumeButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name", "Громкость", "Volume"),
+    ("PlayerVolumeButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip", "Громкость (колесо мыши меняет её)", "Volume (mouse wheel changes it)"),
     ("PlayingNextFormat", "Играет следующим: {0}", "Playing next: {0}"),
     ("PlayingNextTracks_few", "Играют следующими: {0} трека", "Playing next: {0} tracks"),
     ("PlayingNextTracks_many", "Играют следующими: {0} треков", "Playing next: {0} tracks"),
