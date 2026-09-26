@@ -15,6 +15,8 @@
 - AppImage с автообновлением из [GitHub Releases](https://github.com/melogold-app/melogoldLinux/releases),
   а также пакеты deb и rpm.
 
+Как устроен клиент и как его писать — [docs/PROMPT.md](./docs/PROMPT.md); задания — [tasks/](./tasks/).
+
 Иконки приложения в формате темы hicolor — `packaging/icons/hicolor`.
 
 ## Лицензия
