@@ -185,6 +185,56 @@ pub struct NextPage {
     pub related_browse_id: Option<String>,
 }
 
+/// Страница альбома.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AlbumDetails {
+    pub album: AlbumItem,
+    pub description: Option<String>,
+    pub count_text: Option<String>,
+    pub tracks: Vec<Track>,
+    /// «Другие версии», «Ещё от исполнителя».
+    pub shelves: Vec<Shelf>,
+}
+
+/// Исполнитель YTM или канал обычного YouTube.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ArtistDetails {
+    pub browse_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub thumbnail_url: Option<String>,
+    pub subscribers_text: Option<String>,
+    pub is_channel: bool,
+    pub shelves: Vec<Shelf>,
+    /// Плейлист «Все треки» исполнителя, если YouTube его дал.
+    pub songs_playlist_id: Option<String>,
+    /// Радио исполнителя (`RDEM…`).
+    pub radio_playlist_id: Option<String>,
+}
+
+/// Плейлист YouTube с первой страницей треков и продолжением.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistDetails {
+    pub playlist: PlaylistItem,
+    pub description: Option<String>,
+    pub author_text: Option<String>,
+    pub count_text: Option<String>,
+    pub tracks: Vec<Track>,
+    pub continuation: Option<String>,
+}
+
+/// Канал обычного YouTube: шапка и вкладка «Видео».
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ChannelPage {
+    pub channel_id: String,
+    pub name: String,
+    pub thumbnail_url: Option<String>,
+    pub subscribers_text: Option<String>,
+    pub description: Option<String>,
+    pub videos: Vec<Track>,
+    pub continuation: Option<String>,
+}
+
 /// Убирает повторы, сохраняя порядок первого появления.
 pub fn distinct(items: Vec<MusicItem>) -> Vec<MusicItem> {
     let mut seen = std::collections::HashSet::new();

@@ -1,0 +1,405 @@
+{
+  "spec": "lyrics-formats",
+  "version": 1,
+  "source": "docs/spec/lyrics.md (R3.9). Читают LrcFormat и TtmlFormat (:core:domain), сервер и десктопы.",
+  "expectedShape": {
+    "timing": "Line|Word",
+    "language": "BCP 47 | null",
+    "agents": [
+      {
+        "id": "string",
+        "side": "Start|End",
+        "name": "string|null"
+      }
+    ],
+    "lines": [
+      {
+        "startMs": "long",
+        "endMs": "long",
+        "text": "string",
+        "words": "[[startMs, endMs, text]] — text keeps the following space",
+        "side": "Start|End",
+        "agent": "string|null",
+        "language": "string|null",
+        "background": "{startMs,endMs,words}|null",
+        "translation": "string|null",
+        "transliteration": "string|null"
+      }
+    ],
+    "null": "the input has no time-synced lyrics"
+  },
+  "cases": [
+    {
+      "id": "lrc-basic",
+      "input": "[ar:Кино]\n[ti:Группа крови]\n[00:12.00]Тёплое место, но улицы ждут\n[00:16.50]Отпечатков наших ног\n[00:21.00]\n",
+      "expected": {
+        "timing": "Line",
+        "language": null,
+        "agents": [],
+        "lines": [
+          {
+            "startMs": 12000,
+            "endMs": 16500,
+            "text": "Тёплое место, но улицы ждут",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 16500,
+            "endMs": 21000,
+            "text": "Отпечатков наших ног",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "lrc-offset-and-repeated-timestamps",
+      "input": "[offset:+500]\n[00:10.00][00:30.00]Chorus\n[00:20.00]Verse\n",
+      "expected": {
+        "timing": "Line",
+        "language": null,
+        "agents": [],
+        "lines": [
+          {
+            "startMs": 9500,
+            "endMs": 19500,
+            "text": "Chorus",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 19500,
+            "endMs": 29500,
+            "text": "Verse",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 29500,
+            "endMs": 34500,
+            "text": "Chorus",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "lrc-fractions",
+      "input": "[01:02.345]Hi\n[01:04.5]Bye\n",
+      "expected": {
+        "timing": "Line",
+        "language": null,
+        "agents": [],
+        "lines": [
+          {
+            "startMs": 62345,
+            "endMs": 64500,
+            "text": "Hi",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 64500,
+            "endMs": 69500,
+            "text": "Bye",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "lrc-enhanced-words",
+      "input": "[00:01.00]<00:01.00>Hello <00:01.50>world<00:02.20>\n[00:03.00]<00:03.00>Again\n",
+      "expected": {
+        "timing": "Word",
+        "language": null,
+        "agents": [],
+        "lines": [
+          {
+            "startMs": 1000,
+            "endMs": 2200,
+            "text": "Hello world",
+            "words": [
+              [
+                1000,
+                1500,
+                "Hello "
+              ],
+              [
+                1500,
+                2200,
+                "world"
+              ]
+            ],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 3000,
+            "endMs": 8000,
+            "text": "Again",
+            "words": [
+              [
+                3000,
+                8000,
+                "Again"
+              ]
+            ],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "lrc-walaoke-duet",
+      "input": "[00:01.00]M: I sing\n[00:02.00]F: You sing\n[00:03.00]D: We sing\n[00:04.00]And more\n[00:05.00]\n",
+      "expected": {
+        "timing": "Line",
+        "language": null,
+        "agents": [
+          {
+            "id": "M",
+            "side": "Start",
+            "name": null
+          },
+          {
+            "id": "F",
+            "side": "End",
+            "name": null
+          },
+          {
+            "id": "D",
+            "side": "Start",
+            "name": null
+          }
+        ],
+        "lines": [
+          {
+            "startMs": 1000,
+            "endMs": 2000,
+            "text": "I sing",
+            "words": [],
+            "side": "Start",
+            "agent": "M",
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 2000,
+            "endMs": 3000,
+            "text": "You sing",
+            "words": [],
+            "side": "End",
+            "agent": "F",
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 3000,
+            "endMs": 4000,
+            "text": "We sing",
+            "words": [],
+            "side": "Start",
+            "agent": "D",
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 4000,
+            "endMs": 5000,
+            "text": "And more",
+            "words": [],
+            "side": "Start",
+            "agent": "D",
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "ttml-word-duet-backing-translation",
+      "input": "<tt xmlns=\"http://www.w3.org/ns/ttml\" xmlns:ttm=\"http://www.w3.org/ns/ttml#metadata\" xmlns:itunes=\"http://music.apple.com/lyric-ttml-internal\" itunes:timing=\"Word\" xml:lang=\"en\"><head><metadata><ttm:agent type=\"person\" xml:id=\"v1\"/><ttm:agent type=\"person\" xml:id=\"v2\"><ttm:name type=\"full\">Singer Two</ttm:name></ttm:agent></metadata></head><body dur=\"00:10.000\"><div begin=\"00:01.000\" end=\"00:10.000\"><p begin=\"00:01.000\" end=\"00:03.000\" ttm:agent=\"v1\"><span begin=\"00:01.000\" end=\"00:01.400\">Hel</span><span begin=\"00:01.400\" end=\"00:02.000\">lo</span> <span begin=\"00:02.000\" end=\"00:03.000\">there</span><span ttm:role=\"x-bg\"><span begin=\"00:02.500\" end=\"00:03.000\">(ooh)</span></span></p><p begin=\"00:04.000\" end=\"00:06.000\" ttm:agent=\"v2\" xml:lang=\"ru\"><span begin=\"00:04.000\" end=\"00:06.000\">Привет</span><span ttm:role=\"x-translation\" xml:lang=\"en\">Hi</span><span ttm:role=\"x-roman\">Privet</span></p></div></body></tt>",
+      "expected": {
+        "timing": "Word",
+        "language": "en",
+        "agents": [
+          {
+            "id": "v1",
+            "side": "Start",
+            "name": null
+          },
+          {
+            "id": "v2",
+            "side": "End",
+            "name": "Singer Two"
+          }
+        ],
+        "lines": [
+          {
+            "startMs": 1000,
+            "endMs": 3000,
+            "text": "Hello there",
+            "words": [
+              [
+                1000,
+                1400,
+                "Hel"
+              ],
+              [
+                1400,
+                2000,
+                "lo "
+              ],
+              [
+                2000,
+                3000,
+                "there"
+              ]
+            ],
+            "side": "Start",
+            "agent": "v1",
+            "language": null,
+            "background": {
+              "startMs": 2500,
+              "endMs": 3000,
+              "words": [
+                [
+                  2500,
+                  3000,
+                  "(ooh)"
+                ]
+              ]
+            },
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 4000,
+            "endMs": 6000,
+            "text": "Привет",
+            "words": [
+              [
+                4000,
+                6000,
+                "Привет"
+              ]
+            ],
+            "side": "End",
+            "agent": "v2",
+            "language": "ru",
+            "background": null,
+            "translation": "Hi",
+            "transliteration": "Privet"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ttml-line-offset-times",
+      "input": "<tt xmlns=\"http://www.w3.org/ns/ttml\" xmlns:itunes=\"http://music.apple.com/lyric-ttml-internal\" itunes:timing=\"Line\"><body><div><p begin=\"1.5s\" end=\"3.25s\">Line one</p><p begin=\"00:00:04.000\" end=\"00:00:06.000\">Line  two</p></div></body></tt>",
+      "expected": {
+        "timing": "Line",
+        "language": null,
+        "agents": [],
+        "lines": [
+          {
+            "startMs": 1500,
+            "endMs": 3250,
+            "text": "Line one",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          },
+          {
+            "startMs": 4000,
+            "endMs": 6000,
+            "text": "Line  two",
+            "words": [],
+            "side": "Start",
+            "agent": null,
+            "language": null,
+            "background": null,
+            "translation": null,
+            "transliteration": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "plain-text-is-not-synced",
+      "input": "Просто текст\nбез времени\n",
+      "expected": null
+    },
+    {
+      "id": "lrc-without-sung-lines",
+      "input": "[ar:Someone]\n[00:01.00]\n[00:02.00]\n",
+      "expected": null
+    },
+    {
+      "id": "broken-xml",
+      "input": "<tt xmlns=\"http://www.w3.org/ns/ttml\"><body><p begin=\"1s\">oops</body></tt>",
+      "expected": null
+    }
+  ]
+}

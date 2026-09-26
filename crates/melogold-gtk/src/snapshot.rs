@@ -48,8 +48,8 @@ pub fn maybe_start(window: &MainWindow) {
     }
 
     let steps: Vec<Step> = vec![
-        ("01-trends", Box::new(|w| w.show_tab(Tab::Trends)), 700),
-        ("02-new", Box::new(|w| w.show_tab(Tab::WhatsNew)), 700),
+        ("01-trends", Box::new(|w| w.show_tab(Tab::Trends)), 4000),
+        ("02-new", Box::new(|w| w.show_tab(Tab::WhatsNew)), 4000),
         ("03-library", Box::new(|w| w.show_tab(Tab::Library)), 700),
         ("04-settings", Box::new(|w| w.show_tab(Tab::Settings)), 700),
         ("05-diagnostics", Box::new(|w| w.push(&crate::pages::diagnostics::page(w))), 700),
@@ -71,6 +71,19 @@ pub fn maybe_start(window: &MainWindow) {
                 w.search_for("Кино Группа крови");
             }),
             4000,
+        ),
+        ("07a-album", Box::new(|w| w.push(&crate::pages::catalog::album_page(w, "MPREb_OLmD8O5IYNS"))), 3500),
+        ("07b-artist", Box::new(|w| w.push(&crate::pages::catalog::artist_page(w, "UCRr1xG_2WIDs18a6cIiCxeA"))), 4000),
+        (
+            "07c-playlist",
+            Box::new(|w| w.push(&crate::pages::catalog::playlist_page(w, "RDCLAK5uy_n20FRYQXNt1p1wS55Nj2r14IouO5weaYU"))),
+            3500,
+        ),
+        ("07d-channel", Box::new(|w| w.push(&crate::pages::catalog::artist_page(w, "UCy_vnPBNh9FqtyH9Qc-aiSA"))), 5000),
+        (
+            "07e-moods",
+            Box::new(|w| w.push(&crate::pages::catalog::browse_page(w, "Настроения и жанры", "FEmusic_moods_and_genres", None))),
+            3500,
         ),
         (
             "08-playing",

@@ -1,0 +1,555 @@
+{
+  "spec": "title-cleaner",
+  "version": 1,
+  "source": "docs/REWRITE.md §4.10.8 (R1.2, первая версия). Читают TitleCleaner (:core:domain, R2.2) и десктопы.",
+  "input": {
+    "title": "название видео или трека",
+    "channel": "автор: artistsText у песни, канал у видео; может быть null",
+    "videoType": "song|video|ugc|live|null — как Song.videoType (§4.8.2)"
+  },
+  "expected": {
+    "artist": "string|null",
+    "title": "string"
+  },
+  "rules": [
+    "Порядок: эмодзи → 【…】 → « | …» → шумовые скобки → номер трека (ugc/live/null) → деление «Исполнитель - Название» → feat → кавычки и пробелы.",
+    "Эмодзи: символы со свойством Unicode Extended_Pictographic, региональные индикаторы (флаги), U+FE0F, U+200D, U+20E3, модификаторы тона кожи. Не \\p{IsEmoji}: туда входят цифры, # и *.",
+    "【…】 удаляется целиком с содержимым. Всё начиная с « | » (пробел, вертикальная черта) отрезается.",
+    "Скобки (…) и […] удаляются, только если содержимое целиком — шум (без учёта регистра): official [music|lyric] video|audio|visualizer|clip, official, [music|lyric] video, audio, lyric(s), visualizer, hd, hq, 4k, 8k, 1080p, 720p, mv, m/v, «официальное видео», «официальный клип», «клип», «премьера[ клипа][, …]», «текст[ песни]». (Live), (Remix), (Remastered 2011), (1988) остаются.",
+    "feat: удаляются группы (feat. X), [ft. X], (featuring X) и хвост « feat. X» / « ft. X» / « featuring X» — и в названии, и в части исполнителя.",
+    "Канал: снимается суффикс « - Topic» (также «–»/«—» и русское «тема»). Для сравнения канал и левая часть нормализуются: без feat, lowercase, только буквы и цифры, без хвоста vevo/official.",
+    "Деление по первому разделителю « - », « – », « — » (с пробелами; дефис без пробелов — не разделитель): левая часть совпала с каналом → artist = левая часть; иначе у song/video не делим (artist = канал); у ugc/live/null делим (artist = левая часть).",
+    "Без разделителя artist = канал (после снятия Topic) или null.",
+    "Случаи с tags: [\"extension\"] — предложения сверх §4.10.8 (номер трека «01. », кавычки «…»/\"…\" вокруг названия). Их можно выкинуть, не трогая остальные."
+  ],
+  "cases": [
+    {
+      "id": "song-clean",
+      "input": {
+        "title": "Группа крови",
+        "channel": "Кино",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Группа крови"
+      }
+    },
+    {
+      "id": "song-feat-group",
+      "input": {
+        "title": "Get Lucky (feat. Pharrell Williams and Nile Rodgers)",
+        "channel": "Daft Punk, Pharrell Williams & Nile Rodgers",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "Daft Punk, Pharrell Williams & Nile Rodgers",
+        "title": "Get Lucky"
+      }
+    },
+    {
+      "id": "song-feat-square",
+      "input": {
+        "title": "Instant Crush [feat. Julian Casablancas]",
+        "channel": "Daft Punk",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "Daft Punk",
+        "title": "Instant Crush"
+      }
+    },
+    {
+      "id": "song-featuring-group",
+      "input": {
+        "title": "Lose Yourself to Dance (featuring Pharrell Williams)",
+        "channel": "Daft Punk",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "Daft Punk",
+        "title": "Lose Yourself to Dance"
+      }
+    },
+    {
+      "id": "song-ft-tail",
+      "input": {
+        "title": "Low Life ft. The Weeknd",
+        "channel": "Future",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "Future",
+        "title": "Low Life"
+      }
+    },
+    {
+      "id": "song-dash-not-split",
+      "input": {
+        "title": "Get Lucky - Radio Edit",
+        "channel": "Daft Punk",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "Daft Punk",
+        "title": "Get Lucky - Radio Edit"
+      }
+    },
+    {
+      "id": "song-dash-live-not-split",
+      "input": {
+        "title": "Мама, мы все сошли с ума - Live",
+        "channel": "Кино",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Мама, мы все сошли с ума - Live"
+      }
+    },
+    {
+      "id": "song-keep-remix",
+      "input": {
+        "title": "Blinding Lights (Chromatics Remix)",
+        "channel": "The Weeknd",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "The Weeknd",
+        "title": "Blinding Lights (Chromatics Remix)"
+      }
+    },
+    {
+      "id": "song-keep-remaster",
+      "input": {
+        "title": "Bohemian Rhapsody (Remastered 2011)",
+        "channel": "Queen",
+        "videoType": "song"
+      },
+      "expected": {
+        "artist": "Queen",
+        "title": "Bohemian Rhapsody (Remastered 2011)"
+      }
+    },
+    {
+      "id": "omv-artist-prefix-audio-ft",
+      "input": {
+        "title": "Daft Punk - Get Lucky (Official Audio) ft. Pharrell Williams, Nile Rodgers",
+        "channel": "Daft Punk",
+        "videoType": "video"
+      },
+      "expected": {
+        "artist": "Daft Punk",
+        "title": "Get Lucky"
+      }
+    },
+    {
+      "id": "omv-visualizer",
+      "input": {
+        "title": "Tame Impala - Dracula (Official Visualizer)",
+        "channel": "Tame Impala",
+        "videoType": "video"
+      },
+      "expected": {
+        "artist": "Tame Impala",
+        "title": "Dracula"
+      }
+    },
+    {
+      "id": "omv-emoji-flag",
+      "input": {
+        "title": "Би-2 – Серебро 🇷🇺🎸❤️",
+        "channel": "Би-2",
+        "videoType": "video"
+      },
+      "expected": {
+        "artist": "Би-2",
+        "title": "Серебро"
+      }
+    },
+    {
+      "id": "vevo-channel",
+      "input": {
+        "title": "Daft Punk - Instant Crush (Official Video) ft. Julian Casablancas",
+        "channel": "DaftPunkVEVO",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Daft Punk",
+        "title": "Instant Crush"
+      }
+    },
+    {
+      "id": "vevo-feat-in-artist",
+      "input": {
+        "title": "Calvin Harris feat. Rihanna - This Is What You Came For (Official Video)",
+        "channel": "CalvinHarrisVEVO",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Calvin Harris",
+        "title": "This Is What You Came For"
+      }
+    },
+    {
+      "id": "vevo-lyric-video",
+      "input": {
+        "title": "Imagine Dragons - Bones (Lyric Video)",
+        "channel": "ImagineDragonsVEVO",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Imagine Dragons",
+        "title": "Bones"
+      }
+    },
+    {
+      "id": "topic-channel",
+      "input": {
+        "title": "Instant Crush",
+        "channel": "Daft Punk - Topic",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Daft Punk",
+        "title": "Instant Crush"
+      }
+    },
+    {
+      "id": "topic-channel-ru",
+      "input": {
+        "title": "Группа крови",
+        "channel": "Кино – тема",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Группа крови"
+      }
+    },
+    {
+      "id": "ugc-split-archive",
+      "input": {
+        "title": "Кино - Группа крови (1988)",
+        "channel": "Gavrik's Archive",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Группа крови (1988)"
+      }
+    },
+    {
+      "id": "ugc-split-official-video",
+      "input": {
+        "title": "Звери - Районы-кварталы (Official Video)",
+        "channel": "Music Archive RU",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Звери",
+        "title": "Районы-кварталы"
+      }
+    },
+    {
+      "id": "ugc-hyphen-in-artist",
+      "input": {
+        "title": "Би-2 - Полковнику никто не пишет (официальный клип)",
+        "channel": "Би-2",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Би-2",
+        "title": "Полковнику никто не пишет"
+      }
+    },
+    {
+      "id": "ugc-premiere",
+      "input": {
+        "title": "Баста - Выпускной (Премьера клипа, 2019)",
+        "channel": "Баста",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Баста",
+        "title": "Выпускной"
+      }
+    },
+    {
+      "id": "ugc-hd",
+      "input": {
+        "title": "Кино - Кукушка [HD]",
+        "channel": "Viktor Tsoi Fan",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Кукушка"
+      }
+    },
+    {
+      "id": "ugc-lyrics",
+      "input": {
+        "title": "The Weeknd - Blinding Lights (Lyrics)",
+        "channel": "7clouds",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "The Weeknd",
+        "title": "Blinding Lights"
+      }
+    },
+    {
+      "id": "ugc-audio-commas",
+      "input": {
+        "title": "Daft Punk - Harder, Better, Faster, Stronger (Audio)",
+        "channel": "Daft Punk Archive",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Daft Punk",
+        "title": "Harder, Better, Faster, Stronger"
+      }
+    },
+    {
+      "id": "ugc-pipe",
+      "input": {
+        "title": "Metallica - Nothing Else Matters | Official Music Video",
+        "channel": "Metallica",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Metallica",
+        "title": "Nothing Else Matters"
+      }
+    },
+    {
+      "id": "ugc-pipe-em-dash",
+      "input": {
+        "title": "Кино — Звезда по имени Солнце | Цой жив",
+        "channel": "Rock Archive",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Звезда по имени Солнце"
+      }
+    },
+    {
+      "id": "ugc-lenticular-tail",
+      "input": {
+        "title": "YOASOBI - 夜に駆ける【Official Music Video】",
+        "channel": "Ayase / YOASOBI",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "YOASOBI",
+        "title": "夜に駆ける"
+      }
+    },
+    {
+      "id": "ugc-lenticular-head",
+      "input": {
+        "title": "【MV】Ado - うっせぇわ",
+        "channel": "Ado",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Ado",
+        "title": "うっせぇわ"
+      }
+    },
+    {
+      "id": "ugc-emoji",
+      "input": {
+        "title": "🔥 Kino - Gruppa Krovi 🔥",
+        "channel": "Phonk Remixes",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Kino",
+        "title": "Gruppa Krovi"
+      }
+    },
+    {
+      "id": "ugc-keep-live",
+      "input": {
+        "title": "Кино - Группа крови (Live)",
+        "channel": "Кино",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Группа крови (Live)"
+      }
+    },
+    {
+      "id": "ugc-many-noise-groups",
+      "input": {
+        "title": "Кино - Кукушка (Official Video) [HD] (4K)",
+        "channel": "Кино",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Кукушка"
+      }
+    },
+    {
+      "id": "ugc-unspaced-hyphens",
+      "input": {
+        "title": "Ла-ла-ла",
+        "channel": "Кто-то",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кто-то",
+        "title": "Ла-ла-ла"
+      }
+    },
+    {
+      "id": "ugc-split-first-separator",
+      "input": {
+        "title": "Кино - Группа крови - Live 1988",
+        "channel": "Archive",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Группа крови - Live 1988"
+      }
+    },
+    {
+      "id": "ugc-whitespace",
+      "input": {
+        "title": "  Кино   -   Группа   крови  ",
+        "channel": "x",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Группа крови"
+      }
+    },
+    {
+      "id": "ugc-lowercase-hq",
+      "input": {
+        "title": "daft punk - one more time (hq)",
+        "channel": "random uploader",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "daft punk",
+        "title": "one more time"
+      }
+    },
+    {
+      "id": "ugc-mv-slash",
+      "input": {
+        "title": "IU - Blueming (M/V)",
+        "channel": "1theK (원더케이)",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "IU",
+        "title": "Blueming"
+      }
+    },
+    {
+      "id": "live-stream-emoji",
+      "input": {
+        "title": "lofi hip hop radio 📚 beats to relax/study to",
+        "channel": "Lofi Girl",
+        "videoType": "live"
+      },
+      "expected": {
+        "artist": "Lofi Girl",
+        "title": "lofi hip hop radio beats to relax/study to"
+      }
+    },
+    {
+      "id": "no-channel-split",
+      "input": {
+        "title": "Кино - Группа крови",
+        "channel": null,
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Группа крови"
+      }
+    },
+    {
+      "id": "no-channel-no-split",
+      "input": {
+        "title": "Группа крови",
+        "channel": null,
+        "videoType": null
+      },
+      "expected": {
+        "artist": null,
+        "title": "Группа крови"
+      }
+    },
+    {
+      "id": "ext-track-number",
+      "input": {
+        "title": "01. Группа крови",
+        "channel": "Gavrik's Archive",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Gavrik's Archive",
+        "title": "Группа крови"
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "id": "ext-track-number-then-split",
+      "input": {
+        "title": "05. Кино - Мама, мы все сошли с ума",
+        "channel": "Gavrik's Archive",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Мама, мы все сошли с ума"
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "id": "ext-guillemets",
+      "input": {
+        "title": "Кино — «Группа крови»",
+        "channel": "Архив",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Кино",
+        "title": "Группа крови"
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "id": "ext-double-quotes-official-channel",
+      "input": {
+        "title": "Queen - \"Bohemian Rhapsody\" (Official Video)",
+        "channel": "Queen Official",
+        "videoType": "ugc"
+      },
+      "expected": {
+        "artist": "Queen",
+        "title": "Bohemian Rhapsody"
+      },
+      "tags": [
+        "extension"
+      ]
+    }
+  ]
+}

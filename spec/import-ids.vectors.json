@@ -1,0 +1,9 @@
+{
+  "description": "Ids of plays imported from ViTune or ViMusic backups (REWRITE §4.5.3): UUIDv5 of \"videoId|timestampMs|playTimeMs\" in the namespace NS_MELOGOLD_IMPORT = 4a3b8c8a-1d9c-48f2-938b-3077d54ab4fb, lower case. Every client computes the same id, so the same backup imported on two devices does not double the history.",
+  "cases": [
+    { "id": "spec-example", "input": { "videoId": "dQw4w9WgXcQ", "timestampMs": 1726000000000, "playTimeMs": 215000 }, "expected": "5a9794ba-aeeb-5b22-9f88-c71cc8f16c17" },
+    { "id": "shortest-play", "input": { "videoId": "a1B2c3D4e5F", "timestampMs": 1697018116412, "playTimeMs": 1 }, "expected": "627aedb7-014b-57f8-ab56-d526656577a7" },
+    { "id": "longest-play", "input": { "videoId": "kJQP7kiw5Fk", "timestampMs": 1790335781157, "playTimeMs": 86400000 }, "expected": "75c10db8-a241-52cb-a4f9-cc964c7809b8" },
+    { "id": "year-2000", "input": { "videoId": "9bZkp7q19f0", "timestampMs": 946684800000, "playTimeMs": 250000 }, "expected": "38b324f3-bf49-5d27-a687-c818482111c3" }
+  ]
+}

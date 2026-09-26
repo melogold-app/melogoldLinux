@@ -25,6 +25,7 @@ use gtk::{gdk, gio, glib};
 use melogold_core::links::{self, MelogoldLink};
 use melogold_core::music::{MusicItem, Track};
 use melogold_core::settings::{keys, Tab};
+use melogold_core::youtube_links::{self, LinkTarget};
 use melogold_playback::engine::{Command, Event, QueueView, State};
 
 use crate::app::AppContext;
@@ -68,6 +69,9 @@ pub struct Inner {
     now_playing: OnceCell<NowPlaying>,
     queue_panel: OnceCell<QueuePanel>,
     state: RefCell<State>,
+    /// Узкое окно (порог 720): шапки коллекций ставят обложку сверху (§5.2).
+    compact: Cell<bool>,
+    headers: RefCell<Vec<glib::WeakRef<gtk::Box>>>,
 }
 
 struct Section {
@@ -214,6 +218,8 @@ impl MainWindow {
             now_playing: OnceCell::new(),
             queue_panel: OnceCell::new(),
             state: RefCell::default(),
+            compact: Cell::new(false),
+            headers: RefCell::default(),
         }));
         this.build_player();
         this.install_breakpoints();
@@ -332,7 +338,7 @@ impl MainWindow {
             }
             return;
         }
-        self.search_for(text);
+        self.open_youtube(youtube_links::parse(text));
     }
 
     /// Выдача поиска в стеке текущего раздела.
@@ -352,12 +358,80 @@ impl MainWindow {
         self.push(&pages::search::page(self, query));
     }
 
-    /// Строка выдачи: трек играет одиночным треком с радио (REWRITE §2.3), остальное открывается.
+    /// Строка выдачи или карточка: трек играет одиночным треком с радио (REWRITE §2.3), остальное открывается.
     pub fn activate_item(&self, item: &MusicItem) {
+        use pages::catalog;
         match item {
             MusicItem::Track(track) => self.ctx.services.player.send(Command::PlaySingle { track: track.clone(), start: Duration::ZERO }),
-            other => self.push(&pages::placeholder_for(other)),
+            MusicItem::Album(album) => self.push(&catalog::album_page(self, &album.browse_id)),
+            MusicItem::Artist(artist) => self.push(&catalog::artist_page(self, &artist.browse_id)),
+            MusicItem::Playlist(playlist) => self.push(&catalog::playlist_page(self, &playlist.playlist_id)),
+            MusicItem::Mood(mood) => self.push(&catalog::browse_page(self, &mood.title, &mood.browse_id, mood.params.as_deref())),
         }
+    }
+
+    /// Ссылка YouTube (REWRITE §2.3 «Ссылки и интенты»): видео играет (с `list=` — очередь плейлиста с
+    /// этого видео, `t=` — позиция), плейлист, альбом и канал открываются, `@handle` — через `resolve_url`.
+    fn open_youtube(&self, target: LinkTarget) {
+        use pages::catalog;
+        tracing::info!(вход = ?std::mem::discriminant(&target), "ссылка YouTube");
+        match target {
+            LinkTarget::Video { video_id, playlist_id, start_ms, .. } => self.play_video_link(video_id, playlist_id, start_ms),
+            // Миксы RD… — бесконечные очереди, а не плейлисты (кроме подборок RDCLAK).
+            LinkTarget::Playlist(id) if id.starts_with("RD") && !id.starts_with("RDCLAK") => self.toast(tr("LinkUnsupported")),
+            LinkTarget::Playlist(id) => self.push(&catalog::playlist_page(self, &id)),
+            LinkTarget::Album(id) => self.push(&catalog::album_page(self, &id)),
+            LinkTarget::Channel(id) => self.push(&catalog::artist_page(self, &id)),
+            LinkTarget::Handle(name) => self.resolve_channel(format!("https://www.youtube.com/@{name}")),
+            LinkTarget::LegacyChannel(url) => self.resolve_channel(url),
+            LinkTarget::Search(query) => self.search_for(&query),
+            LinkTarget::External { .. } => self.toast(tr("LinkImportLater")),
+            LinkTarget::Unsupported(youtube_links::EMPTY) => {}
+            LinkTarget::Unsupported(_) => self.toast(tr("LinkUnsupported")),
+        }
+    }
+
+    fn play_video_link(&self, video_id: String, playlist_id: Option<String>, start_ms: Option<i64>) {
+        let music = self.ctx.services.music.clone();
+        let player = self.ctx.services.player.clone();
+        let start = Duration::from_millis(start_ms.unwrap_or(0).max(0) as u64);
+        let task = self.ctx.services.run(async move {
+            if let Some(list) = playlist_id.filter(|l| !l.starts_with("RD")) {
+                if let Ok(tracks) = music.playlist_tracks(&list, 1000).await {
+                    if let Some(index) = tracks.iter().position(|t| t.video_id == video_id) {
+                        return Ok::<_, ()>((tracks, index));
+                    }
+                }
+            }
+            // Сведения о треке — из «Далее»: название, исполнитель, обложка.
+            let track = match music.next(&video_id, None).await {
+                Ok(page) => page.tracks.into_iter().find(|t| t.video_id == video_id),
+                Err(_) => None,
+            }
+            .unwrap_or_else(|| Track { video_id: video_id.clone(), title: video_id.clone(), ..Default::default() });
+            Ok((vec![track], usize::MAX))
+        });
+        glib::spawn_future_local(async move {
+            match task.await {
+                Some(Ok((tracks, index))) if index != usize::MAX => player.send(Command::PlayList { tracks, start: index, shuffle: false }),
+                Some(Ok((mut tracks, _))) if !tracks.is_empty() => player.send(Command::PlaySingle { track: tracks.remove(0), start }),
+                _ => {}
+            }
+        });
+    }
+
+    fn resolve_channel(&self, url: String) {
+        let music = self.ctx.services.music.clone();
+        let task = self.ctx.services.run(async move { music.resolve_url(&url).await });
+        let weak = self.downgrade();
+        glib::spawn_future_local(async move {
+            let Some(window) = weak.upgrade() else { return };
+            match task.await {
+                Some(Ok(Some(id))) => window.push(&pages::catalog::artist_page(&window, &id)),
+                Some(Ok(None)) => window.toast(tr("LinkUnsupported")),
+                _ => window.toast(tr("ErrorOffline")),
+            }
+        });
     }
 
     /// Меню «…» строки трека: действия получают трек параметром действия окна.
@@ -426,27 +500,63 @@ impl MainWindow {
                 }
             });
         };
+        // Шапки коллекций: уже 720 — обложка сверху. Порог действует один, поэтому сигналы всех трёх.
+        let headers_follow = |b: &adw::Breakpoint, compact: bool| {
+            let weak = self.downgrade();
+            b.connect_apply(move |_| {
+                if let Some(window) = weak.upgrade() {
+                    window.set_compact(compact);
+                }
+            });
+            let weak = self.downgrade();
+            b.connect_unapply(move |_| {
+                if let Some(window) = weak.upgrade() {
+                    window.set_compact(false);
+                }
+            });
+        };
         let medium = breakpoint("max-width: 1100sp");
         volume_as_button(&medium);
+        headers_follow(&medium, false);
         self.window.add_breakpoint(medium);
         let narrow = breakpoint("max-width: 720sp");
         volume_as_button(&narrow);
         two_rows(&narrow);
         menu_follows(&narrow, Hidden { modes: true, queue: false });
+        headers_follow(&narrow, true);
         self.window.add_breakpoint(narrow);
         let phone = breakpoint("max-width: 480sp");
         volume_as_button(&phone);
         two_rows(&phone);
         phone.add_setter(&bar.queue, "visible", Some(&false.to_value()));
         menu_follows(&phone, Hidden { modes: true, queue: true });
+        headers_follow(&phone, true);
         self.window.add_breakpoint(phone);
+    }
+
+    fn set_compact(&self, compact: bool) {
+        self.compact.set(compact);
+        let orientation = if compact { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal };
+        self.headers.borrow_mut().retain(|header| match header.upgrade() {
+            Some(header) => {
+                header.set_orientation(orientation);
+                true
+            }
+            None => false,
+        });
+    }
+
+    /// Шапка коллекции следует за порогом окна.
+    pub fn register_header(&self, header: &gtk::Box) {
+        header.set_orientation(if self.compact.get() { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal });
+        self.headers.borrow_mut().push(header.downgrade());
     }
 
     fn populate_sections(&self) {
         for section in &self.sections {
             let page = match section.tab {
-                Tab::Trends => pages::placeholder(tr("TrendsHeader"), "trending-up-symbolic", tr("LinuxSectionSoonTrends")),
-                Tab::WhatsNew => pages::placeholder(tr("NewHeader"), "new-releases-symbolic", tr("LinuxSectionSoonNew")),
+                Tab::Trends => pages::catalog::trends(self),
+                Tab::WhatsNew => pages::catalog::new_page(self),
                 Tab::Library => pages::placeholder(tr("LibraryHeader"), "library-symbolic", tr("LinuxSectionSoonLibrary")),
                 Tab::Settings => pages::settings::root(self),
             };
@@ -752,8 +862,10 @@ impl MainWindow {
             let chosen = window
                 .suggestions
                 .is_visible()
-                .then(|| window.suggestion_list.selected_row().and_then(|row| row.child()).and_downcast::<gtk::Label>().map(|l| l.label()))
-                .flatten();
+                .then(|| window.suggestion_list.selected_row().and_then(|row| row.child()).and_downcast::<gtk::Label>())
+                .flatten()
+                .filter(|l| l.widget_name() != "open-link")
+                .map(|l| l.label());
             let text = chosen.map(|t| t.to_string()).unwrap_or_else(|| entry.text().to_string());
             window.open_text(&text);
         });
@@ -766,7 +878,12 @@ impl MainWindow {
         let weak = self.downgrade();
         self.suggestion_list.connect_row_activated(move |_, row| {
             if let (Some(window), Some(label)) = (weak.upgrade(), row.child().and_downcast::<gtk::Label>()) {
-                window.search_for(&label.label());
+                if label.widget_name() == "open-link" {
+                    window.suggestions.popdown();
+                    window.open_text(&window.search.text());
+                } else {
+                    window.search_for(&label.label());
+                }
             }
         });
         let keys = gtk::EventControllerKey::new();
@@ -818,6 +935,25 @@ impl MainWindow {
         glib::timeout_add_local_once(Duration::from_millis(150), move || {
             let Some(window) = weak.upgrade() else { return };
             if window.suggestion_token.get() != token {
+                return;
+            }
+            // Ссылка YouTube в поле — первой строкой «Открыть ссылку: видео YouTube» (§5.4 «Поиск»).
+            let link_kind = match youtube_links::parse(&text) {
+                LinkTarget::Video { .. } => Some("LinkKindVideo"),
+                LinkTarget::Playlist(_) => Some("LinkKindPlaylist"),
+                LinkTarget::Album(_) => Some("LinkKindAlbum"),
+                LinkTarget::Channel(_) | LinkTarget::Handle(_) | LinkTarget::LegacyChannel(_) => Some("LinkKindChannel"),
+                _ => None,
+            };
+            if let Some(kind) = link_kind {
+                while let Some(child) = window.suggestion_list.first_child() {
+                    window.suggestion_list.remove(&child);
+                }
+                let label = gtk::Label::builder().label(trf("OpenLinkFormat", &[&tr(kind)])).xalign(0.0).build();
+                label.set_widget_name("open-link");
+                window.suggestion_list.append(&label);
+                window.suggestions.set_width_request(window.search.width());
+                window.suggestions.popup();
                 return;
             }
             let music = window.ctx.services.music.clone();

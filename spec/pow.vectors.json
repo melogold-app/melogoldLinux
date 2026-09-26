@@ -1,0 +1,75 @@
+{
+  "$comment": "Proof of work for registration (docs/API.md §4.3, docs/DESIGN.md §4.2). Checked by src/modules/auth/pow.test.ts; the same for every client.",
+  "license": "CC0-1.0",
+  "algorithm": {
+    "digest": "sha256(UTF-8(challenge + \":\" + nonce))",
+    "nonce": "decimal digits without leading zeros: \"0\", \"1\", \"2\", …; the client tries them in this order and sends the first that works (the server accepts any nonce of ^[0-9]{1,16}$ that works)",
+    "accept": "the digest starts with at least `bits` zero bits (most significant bit of the first byte first)",
+    "challenge": "opaque to the client: mgpow1.<b64url>.<b64url>, at most 256 characters, one use, 10 minutes"
+  },
+  "solutions": [
+    {
+      "challenge": "mgpow1.eyJuIjoiUjNKdl8xLTJ0QSIsImIiOjAsImV4cCI6MTc5MDE1ODIwMDAwMH0.Xk3q",
+      "bits": 0,
+      "nonce": "0",
+      "sha256": "62e263fb16cab4e16911de0900ab93e86311898694d13941eb3907214693ac06"
+    },
+    {
+      "challenge": "mgpow1.eyJuIjoiUjNKdl8xLTJ0QSIsImIiOjEsImV4cCI6MTc5MDE1ODIwMDAwMH0.Xk3q",
+      "bits": 1,
+      "nonce": "0",
+      "sha256": "575d68f68cd27507ebcb39971521f8c3fd2179d11cd50115318206b9f6a239bd"
+    },
+    {
+      "challenge": "mgpow1.eyJuIjoiUjNKdl8xLTJ0QSIsImIiOjQsImV4cCI6MTc5MDE1ODIwMDAwMH0.Xk3q",
+      "bits": 4,
+      "nonce": "22",
+      "sha256": "0c34e5ca7074511f49a50f558ff4173043ade662d0d52b0c79457ff060436848"
+    },
+    {
+      "challenge": "mgpow1.eyJuIjoiUjNKdl8xLTJ0QSIsImIiOjgsImV4cCI6MTc5MDE1ODIwMDAwMH0.Xk3q",
+      "bits": 8,
+      "nonce": "133",
+      "sha256": "0066cc463477b723fa3374c17c1fb73f5580e9248cf65cb8d2f7dab609d7bdc7"
+    },
+    {
+      "challenge": "mgpow1.eyJuIjoiUjNKdl8xLTJ0QSIsImIiOjEyLCJleHAiOjE3OTAxNTgyMDAwMDB9.Xk3q",
+      "bits": 12,
+      "nonce": "7237",
+      "sha256": "0001d46a6d998918c00bbfe347a049c0670b822a46729e92b44271558878c6d3"
+    },
+    {
+      "challenge": "mgpow1.eyJuIjoiUjNKdl8xLTJ0QSIsImIiOjE2LCJleHAiOjE3OTAxNTgyMDAwMDB9.Xk3q",
+      "bits": 16,
+      "nonce": "143704",
+      "sha256": "00002b0f5c11c90145992cda773a0f44cfd1305f7b832e884c290d4385120c46"
+    },
+    {
+      "challenge": "mgpow1.eyJuIjoiUjNKdl8xLTJ0QSIsImIiOjE4LCJleHAiOjE3OTAxNTgyMDAwMDB9.kQ3v",
+      "bits": 18,
+      "nonce": "473563",
+      "sha256": "00003e998d3d4300bf8760c2630a1f3f4c2edd29b5975734ad81f4c79075b299"
+    }
+  ],
+  "leadingZeroBits": [
+    { "sha256": "ff00000000000000000000000000000000000000000000000000000000000000", "bits": 0 },
+    { "sha256": "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "bits": 1 },
+    { "sha256": "0100000000000000000000000000000000000000000000000000000000000000", "bits": 7 },
+    { "sha256": "00ff000000000000000000000000000000000000000000000000000000000000", "bits": 8 },
+    { "sha256": "0000000180000000000000000000000000000000000000000000000000000000", "bits": 31 },
+    { "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "bits": 256 }
+  ],
+  "$difficultyComment": "Server side (REGISTRATION_POW_BITS, REGISTRATION_POW_SOFT_PER_HOUR, registrations in the last hour → bits of new challenges): +4 bits above the threshold, +8 above twice the threshold, base 0 switches on at 16, capped at 26. Clients never compute this; they use `bits` of the challenge.",
+  "difficulty": [
+    { "baseBits": 0, "softPerHour": 60, "registrationsLastHour": 0, "bits": 0 },
+    { "baseBits": 0, "softPerHour": 60, "registrationsLastHour": 60, "bits": 0 },
+    { "baseBits": 0, "softPerHour": 60, "registrationsLastHour": 61, "bits": 16 },
+    { "baseBits": 0, "softPerHour": 60, "registrationsLastHour": 120, "bits": 16 },
+    { "baseBits": 0, "softPerHour": 60, "registrationsLastHour": 121, "bits": 20 },
+    { "baseBits": 18, "softPerHour": 60, "registrationsLastHour": 0, "bits": 18 },
+    { "baseBits": 18, "softPerHour": 60, "registrationsLastHour": 61, "bits": 22 },
+    { "baseBits": 18, "softPerHour": 60, "registrationsLastHour": 121, "bits": 26 },
+    { "baseBits": 24, "softPerHour": 60, "registrationsLastHour": 121, "bits": 26 },
+    { "baseBits": 26, "softPerHour": 1, "registrationsLastHour": 5, "bits": 26 }
+  ]
+}

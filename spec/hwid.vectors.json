@@ -1,0 +1,45 @@
+{
+  "$comment": "Hardware id of a device (docs/API.md §1.6 Hwid, docs/DESIGN.md §4.6). Checked by src/modules/auth/hwid.test.ts; the same for every client.",
+  "license": "CC0-1.0",
+  "algorithm": "hwid = lowercase hex(sha256(UTF-8(\"melogold-hwid-v1|\" + platformId + \"|\" + serverId))); serverId is /server/info.serverId, so every server sees another hwid",
+  "platformIds": {
+    "android": "Settings.Secure.ANDROID_ID as returned",
+    "macos": "IOPlatformUUID as returned (upper case)",
+    "windows": "HKLM\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid + \"|\" + installSalt",
+    "linux": "contents of /etc/machine-id without the newline + \"|\" + installSalt",
+    "fallback": "a random UUID v4 kept in private storage excluded from backups (any platform)",
+    "installSalt": "a random UUID v4 created on the first start in the application data"
+  },
+  "vectors": [
+    {
+      "platform": "android",
+      "platformId": "9774d56d682e549c",
+      "serverId": "6f1c2c0e-8a3b-4f7e-9c1d-2b5e7a9f0c11",
+      "hwid": "4fc4dcb326cb59cfd2b32de2826cc753ac757aa33b73be2ea40cd5b219084ed8"
+    },
+    {
+      "platform": "macos",
+      "platformId": "3A7F6C2E-9B14-5D8A-B0C3-4E2F1A6D9C85",
+      "serverId": "6f1c2c0e-8a3b-4f7e-9c1d-2b5e7a9f0c11",
+      "hwid": "f161ead854b045807badb7a4fb3cdb30ffd11cd9e962ea58551b80ffa429d141"
+    },
+    {
+      "platform": "windows",
+      "platformId": "8d2c4f1a-6b3e-4a7d-9c0f-2e5b8a1d4c7f|0f9e8d7c-6b5a-4938-8271-605f4e3d2c1b",
+      "serverId": "6f1c2c0e-8a3b-4f7e-9c1d-2b5e7a9f0c11",
+      "hwid": "b923dddc102f0418d02c9cc205fa68098975d209d03e12c86560dd276e99db32"
+    },
+    {
+      "platform": "linux",
+      "platformId": "4f1c9e2a7b3d4e5f8a6b0c1d2e3f4a5b|a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "serverId": "6f1c2c0e-8a3b-4f7e-9c1d-2b5e7a9f0c11",
+      "hwid": "0a3a98374d1a55e38d6e35fd214cb38ab583461b6bae9fd452d225dfef0318b0"
+    },
+    {
+      "platform": "fallback",
+      "platformId": "e2a1b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",
+      "serverId": "6f1c2c0e-8a3b-4f7e-9c1d-2b5e7a9f0c11",
+      "hwid": "3be8d7ce56795854054d9a553350bac848e4eaf4475941cbd887daea5c53667c"
+    }
+  ]
+}

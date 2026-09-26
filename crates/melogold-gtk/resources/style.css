@@ -5,12 +5,13 @@
   background-color: alpha(currentColor, 0.08);
 }
 
-.cover.round {
-  border-radius: 9999px;
-}
-
 .cover.large {
   border-radius: 12px;
+}
+
+/* Исполнитель и канал — кругом, и крупным тоже: правило ниже «крупного», чтобы его не перебивало. */
+.cover.round {
+  border-radius: 9999px;
 }
 
 .cover-button {
@@ -33,4 +34,22 @@
 .now-playing-play {
   min-width: 56px;
   min-height: 56px;
+}
+
+.card-button {
+  padding: 6px;
+}
+
+.mood-tile {
+  padding: 0;
+  min-height: 44px;
+}
+
+.mood-tile > box > label {
+  padding: 10px 12px 10px 0;
+}
+
+.mood-stripe {
+  border-radius: 6px 0 0 6px;
+  background-color: alpha(currentColor, 0.2);
 }

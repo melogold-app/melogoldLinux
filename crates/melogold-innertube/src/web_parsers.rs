@@ -2,7 +2,7 @@
 //! `WebParsers.cs`: `videoRenderer`, `channelRenderer`, `lockupViewModel` (видео и плейлисты в
 //! новой разметке). Shorts, полки Shorts и промо отбрасываются.
 
-use melogold_core::music::{ArtistItem, ArtistRef, ItemsPage, MusicItem, PlaylistItem, Track};
+use melogold_core::music::{ArtistItem, ArtistRef, ChannelPage, ItemsPage, MusicItem, PlaylistItem, Track};
 use melogold_core::text::parse_duration;
 use serde_json::Value;
 
@@ -27,7 +27,6 @@ pub fn search_page(sections: Option<&Value>) -> ItemsPage {
     page
 }
 
-#[allow(dead_code)] // канал — срез 3
 pub fn grid_page(contents: Option<&Value>) -> ItemsPage {
     let mut page = ItemsPage::default();
     for entry in contents.items() {
@@ -154,5 +153,51 @@ fn lockup(r: &Value) -> Option<MusicItem> {
             }))
         }
         _ => None,
+    }
+}
+
+/// Канал обычного YouTube (клиент WEB): шапка и вкладка «Видео».
+pub fn channel_page(channel_id: &str, response: &Value) -> ChannelPage {
+    let header = at!(response, "header", "pageHeaderRenderer", "content", "pageHeaderViewModel");
+    let metadata = at!(response, "metadata", "channelMetadataRenderer");
+    let name = at!(metadata, "title")
+        .string()
+        .or_else(|| at!(header, "title", "dynamicTextViewModel", "text", "content").string())
+        .or_else(|| at!(response, "header", "pageHeaderRenderer", "pageTitle").string())
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let avatar = at!(metadata, "avatar", "thumbnails")
+        .best_thumbnail()
+        .or_else(|| at!(header, "image", "decoratedAvatarViewModel", "avatar", "avatarViewModel", "image", "sources").best_thumbnail());
+    let subscribers = at!(header, "metadata", "contentMetadataViewModel", "metadataRows")
+        .items()
+        .iter()
+        .flat_map(|row| at!(row, "metadataParts").items().iter())
+        .filter_map(|part| at!(part, "text", "content").string())
+        .find(|t| t.chars().any(|c| c.is_ascii_digit()) && !t.starts_with('@'));
+    let selected = at!(response, "contents", "twoColumnBrowseResultsRenderer", "tabs")
+        .items()
+        .iter()
+        .filter_map(|t| at!(t, "tabRenderer"))
+        .find(|t| at!(*t, "selected").flag());
+    let page = grid_page(at!(selected, "content", "richGridRenderer", "contents"));
+    let owner = ArtistRef { id: Some(channel_id.to_owned()), name: name.clone() };
+    let videos = page
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            MusicItem::Track(track) => Some(Track { artists: vec![owner.clone()], artists_text: Some(name.clone()), ..track }),
+            _ => None,
+        })
+        .collect();
+    ChannelPage {
+        channel_id: channel_id.to_owned(),
+        name,
+        thumbnail_url: avatar,
+        subscribers_text: subscribers,
+        description: at!(metadata, "description").string(),
+        videos,
+        continuation: page.continuation,
     }
 }

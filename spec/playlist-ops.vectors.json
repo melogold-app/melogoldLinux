@@ -1,0 +1,670 @@
+{
+  "$comment": "Melogold playlist order vectors (docs/DESIGN.md §3.7, §3.13.3): fractional-indexing order keys, longest increasing subsequence and the pure anchor functions every client port implements bit-for-bit the same way. Hand-authored from the reference TypeScript implementation (src/modules/sync/playlists/{sort-keys,lis,anchors}.ts); a client conformance suite runs its own port against these cases. Keys compare ordinally (byte order): C# string.CompareOrdinal, Swift Array(a.utf8), Kotlin and Rust as-is.",
+  "license": "CC0-1.0",
+  "sortKeys": {
+    "alphabet": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    "maxLength": 48,
+    "keyBetween": [
+      {
+        "a": null,
+        "b": null,
+        "key": "a0"
+      },
+      {
+        "a": "a0",
+        "b": null,
+        "key": "a1"
+      },
+      {
+        "a": null,
+        "b": "a0",
+        "key": "Zz"
+      },
+      {
+        "a": "a0",
+        "b": "a1",
+        "key": "a0V"
+      },
+      {
+        "a": "a1",
+        "b": "a2",
+        "key": "a1V"
+      },
+      {
+        "a": null,
+        "b": "Zz",
+        "key": "Zy"
+      },
+      {
+        "a": "a0",
+        "b": "b00",
+        "key": "a1"
+      },
+      {
+        "a": "a0V",
+        "b": "a1",
+        "key": "a0l"
+      },
+      {
+        "a": "a0",
+        "b": "a0V",
+        "key": "a0G"
+      }
+    ],
+    "appendChainFromNull": [
+      "a0",
+      "a1",
+      "a2",
+      "a3",
+      "a4",
+      "a5",
+      "a6",
+      "a7",
+      "a8",
+      "a9",
+      "aA",
+      "aB",
+      "aC",
+      "aD",
+      "aE",
+      "aF",
+      "aG",
+      "aH",
+      "aI",
+      "aJ",
+      "aK",
+      "aL",
+      "aM",
+      "aN",
+      "aO",
+      "aP",
+      "aQ",
+      "aR",
+      "aS",
+      "aT"
+    ],
+    "prependChainToA0": [
+      "Zz",
+      "Zy",
+      "Zx",
+      "Zw",
+      "Zv",
+      "Zu",
+      "Zt",
+      "Zs",
+      "Zr",
+      "Zq",
+      "Zp",
+      "Zo",
+      "Zn",
+      "Zm",
+      "Zl",
+      "Zk",
+      "Zj",
+      "Zi",
+      "Zh",
+      "Zg",
+      "Zf",
+      "Ze",
+      "Zd",
+      "Zc",
+      "Zb",
+      "Za",
+      "ZZ",
+      "ZY",
+      "ZX",
+      "ZW"
+    ],
+    "bisectChainBetweenA0AndA1": [
+      "a0V",
+      "a0l",
+      "a0t",
+      "a0x",
+      "a0z",
+      "a0zV",
+      "a0zl",
+      "a0zt"
+    ],
+    "keysBetween": [
+      {
+        "a": null,
+        "b": null,
+        "n": 0,
+        "keys": []
+      },
+      {
+        "a": null,
+        "b": null,
+        "n": 1,
+        "keys": [
+          "a0"
+        ]
+      },
+      {
+        "a": null,
+        "b": null,
+        "n": 5,
+        "keys": [
+          "a0",
+          "a1",
+          "a2",
+          "a3",
+          "a4"
+        ]
+      },
+      {
+        "a": "a0",
+        "b": null,
+        "n": 4,
+        "keys": [
+          "a1",
+          "a2",
+          "a3",
+          "a4"
+        ]
+      },
+      {
+        "a": null,
+        "b": "a0",
+        "n": 4,
+        "keys": [
+          "Zw",
+          "Zx",
+          "Zy",
+          "Zz"
+        ]
+      },
+      {
+        "a": "a0",
+        "b": "b00",
+        "n": 4,
+        "keys": [
+          "a0G",
+          "a0V",
+          "a1",
+          "a2"
+        ]
+      },
+      {
+        "a": "a0",
+        "b": "a1",
+        "n": 9,
+        "keys": [
+          "a04",
+          "a08",
+          "a0G",
+          "a0O",
+          "a0V",
+          "a0Z",
+          "a0d",
+          "a0l",
+          "a0t"
+        ]
+      }
+    ],
+    "errors": [
+      {
+        "a": "b0",
+        "b": "a0"
+      },
+      {
+        "a": "a0",
+        "b": "a0"
+      },
+      {
+        "a": "a!",
+        "b": null
+      },
+      {
+        "a": "a",
+        "b": null
+      },
+      {
+        "a": "a00",
+        "b": null
+      }
+    ],
+    "compareOrdinal": [
+      {
+        "a": "a0",
+        "b": "a1",
+        "cmp": -1
+      },
+      {
+        "a": "b00",
+        "b": "a1",
+        "cmp": 1
+      },
+      {
+        "a": "A0",
+        "b": "a0",
+        "cmp": -1
+      },
+      {
+        "a": "a0",
+        "b": "a0",
+        "cmp": 0
+      }
+    ]
+  },
+  "lis": [
+    {
+      "values": [],
+      "indices": []
+    },
+    {
+      "values": [
+        1
+      ],
+      "indices": [
+        0
+      ]
+    },
+    {
+      "values": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "values": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "indices": [
+        4
+      ]
+    },
+    {
+      "values": [
+        3,
+        1,
+        2,
+        0,
+        5,
+        4
+      ],
+      "indices": [
+        1,
+        2,
+        5
+      ]
+    },
+    {
+      "values": [
+        1,
+        3,
+        2,
+        4,
+        2,
+        5
+      ],
+      "indices": [
+        0,
+        2,
+        3,
+        5
+      ]
+    },
+    {
+      "values": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "indices": [
+        3
+      ]
+    },
+    {
+      "values": [
+        10,
+        9,
+        2,
+        5,
+        3,
+        7,
+        101,
+        18
+      ],
+      "indices": [
+        2,
+        4,
+        5,
+        7
+      ]
+    }
+  ],
+  "anchors": {
+    "anchorIndex": [
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "anchors": {},
+        "index": 3
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "anchors": {
+          "after": "a"
+        },
+        "index": 1
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "anchors": {
+          "before": "b"
+        },
+        "index": 1
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "anchors": {
+          "after": "zz",
+          "before": "b"
+        },
+        "index": 1
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "anchors": {
+          "after": "zz",
+          "before": "zz"
+        },
+        "index": 3
+      },
+      {
+        "list": [],
+        "anchors": {
+          "after": "a"
+        },
+        "index": 0
+      }
+    ],
+    "applyAdd": [
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "ids": [
+          "d",
+          "b",
+          "e"
+        ],
+        "anchors": {
+          "after": "a"
+        },
+        "result": [
+          "a",
+          "d",
+          "e",
+          "b",
+          "c"
+        ]
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "ids": [
+          "d"
+        ],
+        "anchors": {
+          "before": "b"
+        },
+        "result": [
+          "a",
+          "d",
+          "b",
+          "c"
+        ]
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "ids": [
+          "d",
+          "e"
+        ],
+        "anchors": {},
+        "result": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e"
+        ]
+      },
+      {
+        "list": [],
+        "ids": [
+          "a",
+          "a",
+          "b"
+        ],
+        "anchors": {},
+        "result": [
+          "a",
+          "b"
+        ]
+      },
+      {
+        "list": [
+          "a",
+          "b"
+        ],
+        "ids": [
+          "c"
+        ],
+        "anchors": {
+          "before": "a"
+        },
+        "result": [
+          "c",
+          "a",
+          "b"
+        ]
+      }
+    ],
+    "applyRemove": [
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "videoId": "b",
+        "result": [
+          "a",
+          "c"
+        ]
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "videoId": "z",
+        "result": [
+          "a",
+          "b",
+          "c"
+        ]
+      }
+    ],
+    "applyMove": [
+      {
+        "list": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ],
+        "videoId": "a",
+        "anchors": {
+          "before": "d"
+        },
+        "result": [
+          "b",
+          "c",
+          "a",
+          "d"
+        ]
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ],
+        "videoId": "z",
+        "anchors": {
+          "before": "d"
+        },
+        "result": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ]
+      },
+      {
+        "list": [
+          "a",
+          "b",
+          "c"
+        ],
+        "videoId": "a",
+        "anchors": {},
+        "result": [
+          "b",
+          "c",
+          "a"
+        ]
+      }
+    ],
+    "applyReplace": [
+      {
+        "list": [
+          "a",
+          "b"
+        ],
+        "ids": [
+          "b",
+          "c",
+          "b"
+        ],
+        "result": [
+          "b",
+          "c"
+        ]
+      },
+      {
+        "list": [
+          "a",
+          "b"
+        ],
+        "ids": [],
+        "result": []
+      }
+    ],
+    "applyImport": [
+      {
+        "list": [
+          "a",
+          "b"
+        ],
+        "ids": [
+          "b",
+          "c",
+          "d"
+        ],
+        "result": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ]
+      },
+      {
+        "list": [],
+        "ids": [
+          "a",
+          "b"
+        ],
+        "result": [
+          "a",
+          "b"
+        ]
+      }
+    ],
+    "applyCreate": [
+      {
+        "list": [],
+        "ids": [
+          "a",
+          "b",
+          "a"
+        ],
+        "result": [
+          "a",
+          "b"
+        ]
+      },
+      {
+        "list": [
+          "x"
+        ],
+        "ids": [
+          "a",
+          "b"
+        ],
+        "result": [
+          "x"
+        ]
+      }
+    ]
+  }
+}

@@ -445,7 +445,6 @@ pub fn items_of(contents: Option<&Value>) -> Vec<MusicItem> {
 }
 
 /// Полки `sectionListRenderer.contents`: списки, карусели, сетки.
-#[allow(dead_code)] // каталог — срез 3
 pub fn shelves(section_contents: Option<&Value>) -> Vec<Shelf> {
     let mut shelves = Vec::new();
     let more_of = |browse: Option<&Value>| (at!(browse, "browseId").string(), at!(browse, "params").string());

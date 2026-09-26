@@ -5,6 +5,7 @@
 #![allow(clippy::type_complexity)]
 
 mod app;
+mod catalog_widgets;
 mod images;
 mod localization;
 mod logging;

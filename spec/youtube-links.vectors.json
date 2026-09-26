@@ -1,0 +1,801 @@
+{
+  "spec": "youtube-links",
+  "version": 1,
+  "source": "docs/REWRITE.md §4.9 (R1.2, первая версия). Читают YouTubeLinkParser (Kotlin, R2.3) и десктопы.",
+  "expectedShape": {
+    "Video": {
+      "type": "Video",
+      "videoId": "string",
+      "playlistId": "string|null",
+      "index": "int|null",
+      "startMs": "long|null"
+    },
+    "Playlist": {
+      "type": "Playlist",
+      "playlistId": "string (без префикса VL)"
+    },
+    "Album": {
+      "type": "Album",
+      "browseId": "MPREb_…"
+    },
+    "Channel": {
+      "type": "Channel",
+      "channelId": "UC…"
+    },
+    "Handle": {
+      "type": "Handle",
+      "handle": "string без «@», percent-decoded"
+    },
+    "LegacyChannel": {
+      "type": "LegacyChannel",
+      "url": "https://www.youtube.com/{c|user}/{имя}"
+    },
+    "Search": {
+      "type": "Search",
+      "query": "string"
+    },
+    "External": {
+      "type": "External",
+      "service": "apple|yandex|spotify",
+      "url": "извлечённая ссылка без изменений"
+    },
+    "Unsupported": {
+      "type": "Unsupported",
+      "reason": "empty|invalid_video_id|missing_parameter|private_playlist|clip|post|unknown_path|unknown_host|unsupported_external"
+    }
+  },
+  "rules": [
+    "Вход обрезается по краям. Пустой вход → Unsupported(empty).",
+    "Вход, начинающийся с «vnd.youtube:» (без учёта регистра), — это videoId до первого «?», «&» или «#».",
+    "Иначе берётся первое совпадение (?i)https?://\\S+; с конца срезаются символы .,;:!?)]}>»\"'…. Нет ссылки → Search(текст): пробельные серии схлопываются в один пробел, длина — не больше 200 единиц UTF-16 без разрыва суррогатной пары.",
+    "Хост сравнивается без учёта регистра. Хосты YouTube: youtube.com, www., m., music.youtube.com, youtu.be, youtube-nocookie.com (и www.). Похожие хосты (youtube.com.evil.example) → Unsupported(unknown_host).",
+    "Обёртки разворачиваются и разбираются заново (до 3 уровней): consent.youtube.com?continue=, google.com/url?q= (или url=), youtube.com/attribution_link?u= (относительный путь дополняется до https://www.youtube.com).",
+    "videoId — ^[A-Za-z0-9_-]{11}$, иначе Unsupported(invalid_video_id). Нет videoId → Unsupported(missing_parameter); исключение — /watch без v, но с list → Playlist.",
+    "t и start: «90», «90s», «1m30s», «1h2m3s» → миллисекунды; пустое или нечисловое значение → null. index — целое как в ссылке (у YouTube с 1), иначе null.",
+    "list при видео: LL, WL, LM (личные списки аккаунта) отбрасываются → playlistId = null. На /playlist такие id → Unsupported(private_playlist).",
+    "browse/VL… → Playlist без «VL»; browse/MPREb_… → Album; browse/UC… и /channel/UC… (с любым хвостом) → Channel.",
+    "OLAK5uy_… возвращается как Playlist: альбом по первому треку находит резолвер (R2.9), не парсер.",
+    "/@имя (с любым хвостом) → Handle(имя) после percent-decoding. /c/имя и /user/имя → LegacyChannel с каноническим URL без хвоста и query.",
+    "Значения query декодируются (+ → пробел). /hashtag/x → Search(\"#x\").",
+    "External: music.apple.com с сегментом playlist; music.yandex.ru|com с сегментом playlists или путём /album/…; open.spotify.com/playlist/…. Прочие ссылки этих хостов → Unsupported(unsupported_external).",
+    "Остальные пути YouTube → Unsupported(unknown_path); /clip → clip; /post → post."
+  ],
+  "cases": [
+    {
+      "id": "watch-basic",
+      "input": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-no-www",
+      "input": "https://youtube.com/watch?v=dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-mobile",
+      "input": "https://m.youtube.com/watch?v=dQw4w9WgXcQ&feature=youtu.be",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-music",
+      "input": "https://music.youtube.com/watch?v=xtxjm7ciwmc&feature=share",
+      "expected": {
+        "type": "Video",
+        "videoId": "xtxjm7ciwmc",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-http-uppercase",
+      "input": "HTTP://WWW.YOUTUBE.COM/watch?v=dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-v-not-first",
+      "input": "https://www.youtube.com/watch?app=desktop&v=dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-list-index-t-seconds",
+      "input": "https://www.youtube.com/watch?v=2afMy3JYFzQ&list=PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE&index=3&t=90",
+      "expected": {
+        "type": "Video",
+        "videoId": "2afMy3JYFzQ",
+        "playlistId": "PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE",
+        "index": 3,
+        "startMs": 90000
+      }
+    },
+    {
+      "id": "watch-t-seconds-suffix",
+      "input": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=45s",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": 45000
+      }
+    },
+    {
+      "id": "watch-t-minutes-seconds",
+      "input": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m30s",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": 90000
+      }
+    },
+    {
+      "id": "watch-t-hours",
+      "input": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1h2m3s",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": 3723000
+      }
+    },
+    {
+      "id": "watch-t-empty",
+      "input": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-t-garbage",
+      "input": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=abc",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-list-radio",
+      "input": "https://music.youtube.com/watch?v=xtxjm7ciwmc&list=RDAMVMxtxjm7ciwmc",
+      "expected": {
+        "type": "Video",
+        "videoId": "xtxjm7ciwmc",
+        "playlistId": "RDAMVMxtxjm7ciwmc",
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-list-liked-dropped",
+      "input": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=LL&index=2",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": 2,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-list-liked-music-dropped",
+      "input": "https://music.youtube.com/watch?v=xtxjm7ciwmc&list=LM",
+      "expected": {
+        "type": "Video",
+        "videoId": "xtxjm7ciwmc",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "watch-invalid-id",
+      "input": "https://www.youtube.com/watch?v=abc",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "invalid_video_id"
+      }
+    },
+    {
+      "id": "watch-without-v-with-list",
+      "input": "https://www.youtube.com/watch?list=PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE"
+      }
+    },
+    {
+      "id": "watch-without-v",
+      "input": "https://www.youtube.com/watch?feature=share",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "missing_parameter"
+      }
+    },
+    {
+      "id": "youtu-be",
+      "input": "https://youtu.be/dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "youtu-be-si-t",
+      "input": "https://youtu.be/dQw4w9WgXcQ?si=AbCdEfGhIjKlMnOp&t=42",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": 42000
+      }
+    },
+    {
+      "id": "youtu-be-list",
+      "input": "https://youtu.be/xtxjm7ciwmc?list=PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE",
+      "expected": {
+        "type": "Video",
+        "videoId": "xtxjm7ciwmc",
+        "playlistId": "PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE",
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "youtu-be-http",
+      "input": "http://youtu.be/dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "shorts",
+      "input": "https://www.youtube.com/shorts/dQw4w9WgXcQ?si=Xy12",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "shorts-mobile",
+      "input": "https://m.youtube.com/shorts/dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "live",
+      "input": "https://www.youtube.com/live/dQw4w9WgXcQ?feature=share",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "embed-start",
+      "input": "https://www.youtube.com/embed/dQw4w9WgXcQ?start=30",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": 30000
+      }
+    },
+    {
+      "id": "embed-nocookie",
+      "input": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=10&autoplay=1",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": 10000
+      }
+    },
+    {
+      "id": "path-v",
+      "input": "https://www.youtube.com/v/dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "path-e",
+      "input": "https://www.youtube.com/e/dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "vnd-youtube",
+      "input": "vnd.youtube:dQw4w9WgXcQ",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "playlist",
+      "input": "https://www.youtube.com/playlist?list=PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE"
+      }
+    },
+    {
+      "id": "playlist-music-si",
+      "input": "https://music.youtube.com/playlist?list=PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE&si=q1w2e3",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE"
+      }
+    },
+    {
+      "id": "playlist-browse-vl",
+      "input": "https://music.youtube.com/browse/VLPLurittKGarBvW6lCCJYlTGd6U2bBfP8FE",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE"
+      }
+    },
+    {
+      "id": "playlist-editorial",
+      "input": "https://music.youtube.com/playlist?list=RDCLAK5uy_k-d1uyw-XSYfPS4vWLWPP0Oh5srgoYZsg",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "RDCLAK5uy_k-d1uyw-XSYfPS4vWLWPP0Oh5srgoYZsg"
+      }
+    },
+    {
+      "id": "playlist-album-olak",
+      "input": "https://music.youtube.com/playlist?list=OLAK5uy_nRndsUhiMCq2wRW3JCnDgDwD33CUalJZU",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "OLAK5uy_nRndsUhiMCq2wRW3JCnDgDwD33CUalJZU"
+      }
+    },
+    {
+      "id": "playlist-uploads",
+      "input": "https://www.youtube.com/playlist?list=UU_kRDKYrUlrbtrSiyu5Tflg",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "UU_kRDKYrUlrbtrSiyu5Tflg"
+      }
+    },
+    {
+      "id": "playlist-mix",
+      "input": "https://www.youtube.com/playlist?list=RDxtxjm7ciwmc",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "RDxtxjm7ciwmc"
+      }
+    },
+    {
+      "id": "playlist-liked-music",
+      "input": "https://music.youtube.com/playlist?list=LM",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "private_playlist"
+      }
+    },
+    {
+      "id": "playlist-watch-later",
+      "input": "https://www.youtube.com/playlist?list=WL",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "private_playlist"
+      }
+    },
+    {
+      "id": "playlist-missing-list",
+      "input": "https://www.youtube.com/playlist",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "missing_parameter"
+      }
+    },
+    {
+      "id": "album-browse",
+      "input": "https://music.youtube.com/browse/MPREb_OLmD8O5IYNS",
+      "expected": {
+        "type": "Album",
+        "browseId": "MPREb_OLmD8O5IYNS"
+      }
+    },
+    {
+      "id": "channel",
+      "input": "https://www.youtube.com/channel/UC_kRDKYrUlrbtrSiyu5Tflg",
+      "expected": {
+        "type": "Channel",
+        "channelId": "UC_kRDKYrUlrbtrSiyu5Tflg"
+      }
+    },
+    {
+      "id": "channel-tab",
+      "input": "https://www.youtube.com/channel/UC_kRDKYrUlrbtrSiyu5Tflg/videos",
+      "expected": {
+        "type": "Channel",
+        "channelId": "UC_kRDKYrUlrbtrSiyu5Tflg"
+      }
+    },
+    {
+      "id": "channel-music",
+      "input": "https://music.youtube.com/channel/UCL9NQ06h7I0CRUcGxPWMtkQ",
+      "expected": {
+        "type": "Channel",
+        "channelId": "UCL9NQ06h7I0CRUcGxPWMtkQ"
+      }
+    },
+    {
+      "id": "channel-music-browse",
+      "input": "https://music.youtube.com/browse/UCL9NQ06h7I0CRUcGxPWMtkQ",
+      "expected": {
+        "type": "Channel",
+        "channelId": "UCL9NQ06h7I0CRUcGxPWMtkQ"
+      }
+    },
+    {
+      "id": "handle",
+      "input": "https://www.youtube.com/@daftpunk",
+      "expected": {
+        "type": "Handle",
+        "handle": "daftpunk"
+      }
+    },
+    {
+      "id": "handle-tab-si",
+      "input": "https://m.youtube.com/@daftpunk/videos?si=abc",
+      "expected": {
+        "type": "Handle",
+        "handle": "daftpunk"
+      }
+    },
+    {
+      "id": "handle-cyrillic-encoded",
+      "input": "https://www.youtube.com/@%D0%9A%D0%B8%D0%BD%D0%BE%D0%93%D1%80%D1%83%D0%BF%D0%BF%D0%B0%D0%BA%D1%80%D0%BE%D0%B2%D0%B8-%D0%B74%D0%BC",
+      "expected": {
+        "type": "Handle",
+        "handle": "КиноГруппакрови-з4м"
+      }
+    },
+    {
+      "id": "legacy-c",
+      "input": "https://www.youtube.com/c/daftpunk",
+      "expected": {
+        "type": "LegacyChannel",
+        "url": "https://www.youtube.com/c/daftpunk"
+      }
+    },
+    {
+      "id": "legacy-user-tab",
+      "input": "https://m.youtube.com/user/daftpunkalive/videos",
+      "expected": {
+        "type": "LegacyChannel",
+        "url": "https://www.youtube.com/user/daftpunkalive"
+      }
+    },
+    {
+      "id": "search-music",
+      "input": "https://music.youtube.com/search?q=daft+punk",
+      "expected": {
+        "type": "Search",
+        "query": "daft punk"
+      }
+    },
+    {
+      "id": "search-results-cyrillic",
+      "input": "https://www.youtube.com/results?search_query=%D0%BA%D0%B8%D0%BD%D0%BE+%D0%B3%D1%80%D1%83%D0%BF%D0%BF%D0%B0+%D0%BA%D1%80%D0%BE%D0%B2%D0%B8",
+      "expected": {
+        "type": "Search",
+        "query": "кино группа крови"
+      }
+    },
+    {
+      "id": "search-hashtag",
+      "input": "https://www.youtube.com/hashtag/lofi",
+      "expected": {
+        "type": "Search",
+        "query": "#lofi"
+      }
+    },
+    {
+      "id": "search-missing-q",
+      "input": "https://music.youtube.com/search",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "missing_parameter"
+      }
+    },
+    {
+      "id": "external-apple-playlist",
+      "input": "https://music.apple.com/ru/playlist/russkiy-rok/pl.u-8aAVZAJCNB04q",
+      "expected": {
+        "type": "External",
+        "service": "apple",
+        "url": "https://music.apple.com/ru/playlist/russkiy-rok/pl.u-8aAVZAJCNB04q"
+      }
+    },
+    {
+      "id": "external-yandex-playlist",
+      "input": "https://music.yandex.ru/users/music-blog/playlists/2267",
+      "expected": {
+        "type": "External",
+        "service": "yandex",
+        "url": "https://music.yandex.ru/users/music-blog/playlists/2267"
+      }
+    },
+    {
+      "id": "external-yandex-album-com",
+      "input": "https://music.yandex.com/album/3420318",
+      "expected": {
+        "type": "External",
+        "service": "yandex",
+        "url": "https://music.yandex.com/album/3420318"
+      }
+    },
+    {
+      "id": "external-yandex-album-track",
+      "input": "https://music.yandex.ru/album/3420318/track/28556447",
+      "expected": {
+        "type": "External",
+        "service": "yandex",
+        "url": "https://music.yandex.ru/album/3420318/track/28556447"
+      }
+    },
+    {
+      "id": "external-spotify-playlist",
+      "input": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=0a1b2c3d4e",
+      "expected": {
+        "type": "External",
+        "service": "spotify",
+        "url": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=0a1b2c3d4e"
+      }
+    },
+    {
+      "id": "external-spotify-track",
+      "input": "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "unsupported_external"
+      }
+    },
+    {
+      "id": "external-apple-album",
+      "input": "https://music.apple.com/us/album/random-access-memories/617154241",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "unsupported_external"
+      }
+    },
+    {
+      "id": "unwrap-consent",
+      "input": "https://consent.youtube.com/m?continue=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ%26cbrd%3D1&gl=NL&hl=en",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "unwrap-consent-playlist",
+      "input": "https://consent.youtube.com/ml?continue=https://music.youtube.com/playlist?list%3DPLurittKGarBvW6lCCJYlTGd6U2bBfP8FE%26cbrd%3D1&hl=ru",
+      "expected": {
+        "type": "Playlist",
+        "playlistId": "PLurittKGarBvW6lCCJYlTGd6U2bBfP8FE"
+      }
+    },
+    {
+      "id": "unwrap-google-url",
+      "input": "https://www.google.com/url?q=https://youtu.be/dQw4w9WgXcQ&sa=D&source=editors",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "unwrap-attribution-link",
+      "input": "https://www.youtube.com/attribution_link?a=AbC&u=%2Fwatch%3Fv%3DdQw4w9WgXcQ%26feature%3Dshare",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "unsupported-clip",
+      "input": "https://www.youtube.com/clip/UgkxU4Zy1Kk3gUe2yVs8Rf9A5wRtuO6KxyVZ",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "clip"
+      }
+    },
+    {
+      "id": "unsupported-post",
+      "input": "https://www.youtube.com/post/UgkxAbCdEfGhIjKlMnOpQrStUvWxYz",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "post"
+      }
+    },
+    {
+      "id": "unsupported-root",
+      "input": "https://www.youtube.com/",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "unknown_path"
+      }
+    },
+    {
+      "id": "unsupported-feed",
+      "input": "https://www.youtube.com/feed/subscriptions",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "unknown_path"
+      }
+    },
+    {
+      "id": "unsupported-host",
+      "input": "https://example.com/watch?v=dQw4w9WgXcQ",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "unknown_host"
+      }
+    },
+    {
+      "id": "unsupported-lookalike-host",
+      "input": "https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "unknown_host"
+      }
+    },
+    {
+      "id": "share-trailing-dot",
+      "input": "Послушай: https://youtu.be/dQw4w9WgXcQ?si=AbC.",
+      "expected": {
+        "type": "Video",
+        "videoId": "dQw4w9WgXcQ",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "share-in-parentheses",
+      "input": "Кино — Группа крови (https://music.youtube.com/watch?v=xtxjm7ciwmc)",
+      "expected": {
+        "type": "Video",
+        "videoId": "xtxjm7ciwmc",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "share-title-newline-url",
+      "input": "Daft Punk - Get Lucky\nhttps://www.youtube.com/watch?v=5NV6Rdv1a3I&si=Qw12",
+      "expected": {
+        "type": "Video",
+        "videoId": "5NV6Rdv1a3I",
+        "playlistId": null,
+        "index": null,
+        "startMs": null
+      }
+    },
+    {
+      "id": "share-first-url-wins",
+      "input": "https://example.com/a и https://youtu.be/dQw4w9WgXcQ",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "unknown_host"
+      }
+    },
+    {
+      "id": "share-no-url",
+      "input": "Кино Группа крови",
+      "expected": {
+        "type": "Search",
+        "query": "Кино Группа крови"
+      }
+    },
+    {
+      "id": "share-no-url-whitespace",
+      "input": "  daft punk \n get lucky\t",
+      "expected": {
+        "type": "Search",
+        "query": "daft punk get lucky"
+      }
+    },
+    {
+      "id": "share-no-url-long",
+      "input": "яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя🎵 хвост",
+      "expected": {
+        "type": "Search",
+        "query": "яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя"
+      }
+    },
+    {
+      "id": "share-blank",
+      "input": " \n\t ",
+      "expected": {
+        "type": "Unsupported",
+        "reason": "empty"
+      }
+    }
+  ]
+}

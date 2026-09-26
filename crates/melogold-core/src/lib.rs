@@ -15,3 +15,4 @@ pub mod settings;
 pub mod system;
 pub mod text;
 pub mod thumbnails;
+pub mod youtube_links;
