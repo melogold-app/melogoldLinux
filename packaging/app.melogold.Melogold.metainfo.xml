@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Карточка в GNOME Software и Discover. Проверка — appstreamcli validate, см. CI. -->
+<component type="desktop-application">
+  <id>app.melogold.Melogold</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Melogold</name>
+  <summary>Music from YouTube Music and YouTube with one library</summary>
+  <summary xml:lang="ru">Музыка из YouTube Music и YouTube с общей библиотекой</summary>
+  <developer id="app.melogold">
+    <name>Melogold</name>
+  </developer>
+  <description>
+    <p>Melogold plays songs from YouTube Music and videos from YouTube side by side: search, trends, albums, artists, playlists and lyrics.</p>
+    <p xml:lang="ru">Melogold играет песни YouTube Music и видео YouTube наравне: поиск, тренды, альбомы, исполнители, плейлисты и тексты песен.</p>
+    <p>Sign in to a Melogold server to keep Favorites, playlists, history and your own lyrics the same on Android, Windows, Apple devices and Linux. The server stores only metadata; each device streams audio from YouTube itself.</p>
+    <p xml:lang="ru">Войдите на сервер Melogold, и Избранное, плейлисты, история и свои тексты будут одинаковыми на Android, Windows, устройствах Apple и Linux. Сервер хранит только сведения о треках, звук каждое устройство берёт с YouTube само.</p>
+  </description>
+  <launchable type="desktop-id">app.melogold.Melogold.desktop</launchable>
+  <provides>
+    <binary>melogold</binary>
+  </provides>
+  <url type="homepage">https://github.com/melogold-app/melogoldLinux</url>
+  <url type="bugtracker">https://github.com/melogold-app/melogoldLinux/issues</url>
+  <url type="vcs-browser">https://github.com/melogold-app/melogoldLinux</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-09-27" />
+  </releases>
+</component>

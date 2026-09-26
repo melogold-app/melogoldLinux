@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <!-- База ресурсов приложения: libadwaita сама подхватывает icons/ и style.css отсюда. -->
+  <gresource prefix="/app/melogold/Melogold">
+    <file preprocess="xml-stripblanks">icons/scalable/actions/trending-up-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/new-releases-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/library-symbolic.svg</file>
+    <file>icons/256x256/apps/app.melogold.Melogold.png</file>
+  </gresource>
+</gresources>

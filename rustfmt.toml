@@ -1,0 +1,3 @@
+# Длинные строки, как в Clementine и у Windows: цепочки билдеров GTK читаются одной строкой.
+max_width = 140
+use_small_heuristics = "Max"

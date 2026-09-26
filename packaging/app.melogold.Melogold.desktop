@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Melogold
+GenericName=Music Player
+GenericName[ru]=Музыкальный плеер
+Comment=Music from YouTube Music and YouTube with one library on all your devices
+Comment[ru]=Музыка из YouTube Music и YouTube с общей библиотекой на всех устройствах
+Exec=melogold %U
+Icon=app.melogold.Melogold
+Terminal=false
+Categories=AudioVideo;Audio;Player;GTK;
+Keywords=music;youtube;player;lyrics;
+Keywords[ru]=музыка;ютуб;плеер;текст;
+MimeType=x-scheme-handler/melogold;
+StartupNotify=true
+SingleMainWindow=true
+X-GNOME-UsesNotifications=true
