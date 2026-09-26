@@ -21,7 +21,7 @@
   - `melogoldiOSmacOS` — Swift, SwiftUI; методичка — `docs/PROMPT.md`;
   - `melogoldLinux` — этот репозиторий.
 - **Рабочий сервер:** `https://178-250-187-202.sslip.io`, регистрация открыта. Скоро у него будет нормальный домен, старый адрес продолжит работать. Адрес по умолчанию — константа сборки.
-- **Иконки** в формате темы hicolor — `packaging/icons/hicolor` (скруглённая плитка, как у Windows). Генератор — `melogoldWindows/tools/app-icons.py` и `melogoldAndroid/branding/icon/build.py`.
+- **Иконки** в формате темы hicolor — `packaging/icons/hicolor`: скруглённая плитка Windows с фоном (`melogoldWindows/tools/melogold-tile.png`), имя — `app.melogold.Melogold`. Пересобирает `scripts/sync-icon.py`; генераторы плитки — `melogoldWindows/tools/app-icons.py` и `melogoldAndroid/branding/icon/build.py`.
 
 ## 2. Как работает пользователь
 
