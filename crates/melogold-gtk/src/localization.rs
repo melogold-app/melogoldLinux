@@ -285,8 +285,9 @@ mod tests {
     #[test]
     fn format_helpers() {
         assert_eq!(format_args_into("{0} · {1}", &[&"a", &2]), "a · 2");
-        let _ = init(Some(Lang::Ru));
-        assert_eq!(format_count(1234567), "1\u{a0}234\u{a0}567");
-        assert_eq!(format_count(12), "12");
+        // Язык процесса мог выбрать другой тест раньше: разделитель проверяется по языку явно.
+        assert_eq!(format_count_in(Lang::Ru, 1234567), "1\u{a0}234\u{a0}567");
+        assert_eq!(format_count_in(Lang::En, 1234567), "1,234,567");
+        assert_eq!(format_count_in(Lang::Ru, 12), "12");
     }
 }
