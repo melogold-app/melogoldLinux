@@ -665,6 +665,31 @@ fn update_banner(window: &MainWindow) -> adw::Banner {
 }
 
 /// «Что нового в X»: заметки релиза и «Обновить»; без заметок — сразу обновление.
+/// Заметки выпуска пишутся Markdown-ом (они же — описание релиза на GitHub): пункты «- »
+/// становятся «•», `код` — моноширинным, остальное — как есть.
+fn notes_markup(notes: &str) -> String {
+    notes
+        .lines()
+        .map(|line| {
+            let (bullet, rest) = match line.trim_start().strip_prefix("- ").or_else(|| line.trim_start().strip_prefix("* ")) {
+                Some(rest) => ("• ", rest),
+                None => ("", line),
+            };
+            let mut out = String::from(bullet);
+            for (index, part) in rest.split('`').enumerate() {
+                let escaped = gtk::glib::markup_escape_text(part);
+                if index % 2 == 1 {
+                    out.push_str(&format!("<tt>{escaped}</tt>"));
+                } else {
+                    out.push_str(&escaped);
+                }
+            }
+            out
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) fn whats_new(window: &MainWindow) {
     let Some(manifest) = window.updates.available() else { return };
     let russian = crate::localization::lang() == crate::localization::Lang::Ru;
@@ -672,8 +697,21 @@ pub(crate) fn whats_new(window: &MainWindow) {
         window.updates.install(Some(window.window.upcast_ref()));
         return;
     };
-    let text = gtk::Label::builder().label(&notes).wrap(true).xalign(0.0).selectable(true).build();
-    let scroller = gtk::ScrolledWindow::builder().child(&text).max_content_height(360).propagate_natural_height(true).build();
+    let text = gtk::Label::builder()
+        .label(notes_markup(&notes))
+        .use_markup(true)
+        .wrap(true)
+        .wrap_mode(gtk::pango::WrapMode::WordChar)
+        .xalign(0.0)
+        .build();
+    // Без горизонтальной прокрутки: иначе высоту текста меряют по ширине в одну строку, и
+    // от заметок оставалось две строки.
+    let scroller = gtk::ScrolledWindow::builder()
+        .child(&text)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .max_content_height(360)
+        .propagate_natural_height(true)
+        .build();
     let dialog = adw::AlertDialog::builder().heading(trf("UpdateWhatsNewTitle", &[&manifest.version])).extra_child(&scroller).build();
     dialog.add_response("later", tr("UpdateLater"));
     let action = if matches!(window.updates.mode, Mode::AppImage(_)) { tr("UpdateAction") } else { tr("MenuDownload") };
