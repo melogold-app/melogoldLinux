@@ -1488,9 +1488,11 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "thiserror",
  "tracing",
+ "unicode-normalization",
  "url",
 ]
 
@@ -1499,6 +1501,7 @@ name = "melogold-data"
 version = "0.1.0"
 dependencies = [
  "melogold-core",
+ "regex",
  "rusqlite",
  "serde_json",
  "thiserror",
@@ -2319,6 +2322,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2792,6 +2806,15 @@ name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "untrusted"

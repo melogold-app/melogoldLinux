@@ -6,6 +6,7 @@
 
 mod account_view;
 mod app;
+mod backup_ui;
 mod catalog_widgets;
 mod images;
 mod library_view;
@@ -31,6 +32,7 @@ mod snapshot;
 mod strings_generated;
 mod texts;
 mod track_row;
+mod updates;
 mod widgets;
 mod window;
 

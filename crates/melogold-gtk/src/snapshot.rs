@@ -52,6 +52,8 @@ pub fn maybe_start(window: &MainWindow) {
         ("02-new", Box::new(|w| w.show_tab(Tab::WhatsNew)), 4000),
         ("03-library", Box::new(|w| w.show_tab(Tab::Library)), 700),
         ("04-settings", Box::new(|w| w.show_tab(Tab::Settings)), 700),
+        ("04a-settings-storage", Box::new(|w| scroll_settings(w, 0.62)), 1500),
+        ("04b-settings-about", Box::new(|w| scroll_settings(w, 1.0)), 700),
         ("05-diagnostics", Box::new(|w| w.push(&crate::pages::diagnostics::page(w))), 700),
         (
             "06-sidebar",
@@ -241,8 +243,23 @@ pub fn maybe_start(window: &MainWindow) {
             1500,
         ),
         (
+            // Задание Windows 0004: круг «Сохранить копию» → «Импорт копии» — итог с числами.
+            "12j-import",
+            Box::new(|w| {
+                w.go_back();
+                let path = std::env::temp_dir().join(format!("melogold-snapshot-{}.db", melogold_core::ids::new_uuid()));
+                if melogold_data::backup::export(&w.ctx.services.library, &path, "linux", "snapshot").is_ok() {
+                    w.run_import(path);
+                }
+            }),
+            2500,
+        ),
+        (
             "13-shortcuts",
             Box::new(|w| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    dialog.close();
+                }
                 w.go_back();
                 w.ctx.services.player.send(melogold_playback::engine::Command::Pause);
                 crate::shortcuts::present(Some(w.window.upcast_ref()));
@@ -340,6 +357,24 @@ fn capture(window: &adw::ApplicationWindow, path: &Path) -> Option<()> {
     let saved = renderer.render_texture(&node, None).save_to_png(path).ok();
     renderer.unrealize();
     saved
+}
+
+/// Настройки прокручены на долю `fraction` высоты (Хранилище, О приложении).
+fn scroll_settings(window: &MainWindow, fraction: f64) {
+    let Some(page) = window.nav(Tab::Settings).visible_page() else { return };
+    let mut stack = vec![page.upcast::<gtk::Widget>()];
+    while let Some(widget) = stack.pop() {
+        if let Some(scroller) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+            let adjustment = scroller.vadjustment();
+            adjustment.set_value((adjustment.upper() - adjustment.page_size()) * fraction);
+            return;
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            child = current.next_sibling();
+            stack.push(current);
+        }
+    }
 }
 
 /// Первый потомок нужного типа с классом CSS `class` (обход в глубину).

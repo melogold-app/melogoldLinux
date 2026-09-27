@@ -150,7 +150,16 @@ fn install_actions(app: &adw::Application) {
         .build();
     let about =
         gio::ActionEntry::builder("about").activate(|app: &adw::Application, _, _| present_about(app.active_window().as_ref())).build();
-    app.add_action_entries([quit, shortcuts, about]);
+    // Уведомление «Вышла новая версия»: окно и Настройки с полосой обновления.
+    let show_update = gio::ActionEntry::builder("show-update")
+        .activate(|app: &adw::Application, _, _| {
+            if let Some(window) = app.active_window().or_else(|| app.windows().into_iter().next()) {
+                window.present();
+                let _ = gtk::prelude::WidgetExt::activate_action(&window, "win.preferences", None);
+            }
+        })
+        .build();
+    app.add_action_entries([quit, shortcuts, about, show_update]);
 
     // Стандарт GNOME (docs/PROMPT.md §5.3): Ctrl+Q — выйти, Ctrl+? и F1 — сочетания.
     app.set_accels_for_action("app.quit", &["<Control>q"]);

@@ -145,3 +145,11 @@ listview.track-list > row {
 .playing-overlay {
   background: alpha(black, 0.5);
 }
+
+/* Точка у «Настроек»: вышла новая версия. */
+.update-badge {
+  background: @accent_bg_color;
+  border-radius: 999px;
+  min-width: 8px;
+  min-height: 8px;
+}

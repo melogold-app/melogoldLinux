@@ -377,6 +377,21 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
                 }
                 content.append(&grid);
             }
+            // Последняя строка — перенос библиотеки из ViTune или ViMusic (§5.4, задание Windows 0004).
+            let import = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).margin_top(24).build();
+            import.add_css_class("boxed-list");
+            let row =
+                adw::ActionRow::builder().title(tr("LibraryImport")).subtitle(tr("LibraryImportDescription")).activatable(true).build();
+            row.add_prefix(&gtk::Image::from_icon_name("document-open-symbolic"));
+            row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+            let weak = window.downgrade();
+            row.connect_activated(move |_| {
+                if let Some(window) = weak.upgrade() {
+                    window.import_backup();
+                }
+            });
+            import.append(&row);
+            content.append(&import);
             state.content();
         });
     });

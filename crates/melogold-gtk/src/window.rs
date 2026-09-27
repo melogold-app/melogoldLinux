@@ -39,6 +39,7 @@ use crate::player_bar::{Hidden, PlayerBar};
 use crate::queue_panel::QueuePanel;
 use crate::selection::{Selection, SelectionBar};
 use crate::services::playback_settings;
+use crate::updates::UpdateService;
 
 #[derive(Clone)]
 pub struct MainWindow(Rc<Inner>);
@@ -87,6 +88,10 @@ pub struct Inner {
     pub account_view: AccountView,
     /// Текст играющего трека (срез 6).
     pub lyrics: LyricsService,
+    /// Обновления из GitHub Releases (срез 8).
+    pub updates: UpdateService,
+    /// Точка у «Настроек»: вышла новая версия.
+    settings_badge: gtk::Box,
 }
 
 struct Section {
@@ -217,6 +222,17 @@ impl MainWindow {
         suggestions.set_parent(&search);
 
         let lyrics = LyricsService::new(Rc::clone(&ctx));
+        let updates = UpdateService::new(Rc::clone(&ctx));
+        let settings_badge = gtk::Box::builder().width_request(8).height_request(8).valign(gtk::Align::Center).visible(false).build();
+        settings_badge.add_css_class("update-badge");
+        if let Some(settings_row) = sections.iter().find(|s| s.tab == Tab::Settings) {
+            if let Some(content) = settings_row.row.child().and_downcast::<gtk::Box>() {
+                if let Some(label) = content.last_child() {
+                    label.set_hexpand(true);
+                }
+                content.append(&settings_badge);
+            }
+        }
         let this = MainWindow(Rc::new(Inner {
             window,
             ctx,
@@ -247,6 +263,8 @@ impl MainWindow {
             selection_bar,
             account_view: AccountView::default(),
             lyrics,
+            updates,
+            settings_badge,
         }));
         this.build_player();
         this.install_breakpoints();
@@ -264,6 +282,7 @@ impl MainWindow {
         this.connect_close();
         this.listen_player();
         this.show_tab(this.ctx.settings.get(&keys::LAST_TAB));
+        this.start_updates();
 
         #[cfg(debug_assertions)]
         crate::snapshot::maybe_start(&this);
@@ -392,6 +411,31 @@ impl MainWindow {
 
     pub fn now_playing_open(&self) -> bool {
         self.root_nav.visible_page().is_some_and(|p| p.tag().as_deref() == Some("now-playing"))
+    }
+
+    /// Проверка обновлений: нашлась версия — уведомление GNOME и точка у «Настроек».
+    fn start_updates(&self) {
+        if crate::app::snapshot_mode() {
+            return;
+        }
+        let weak = self.downgrade();
+        let refresh: Rc<dyn Fn()> = Rc::new(move || {
+            if let Some(window) = weak.upgrade() {
+                window.settings_badge.set_visible(window.updates.available().is_some());
+            }
+        });
+        self.updates.listen(&refresh);
+        // Слушатель живёт столько же, сколько окно.
+        let keep = RefCell::new(Some(refresh));
+        self.window.connect_destroy(move |_| {
+            keep.take();
+        });
+        let weak = self.downgrade();
+        self.updates.start(move |manifest| {
+            if let Some(window) = weak.upgrade() {
+                window.updates.announce(manifest);
+            }
+        });
     }
 
     /// Трек, который сейчас в плеере (для столбиков «играет» в строках).

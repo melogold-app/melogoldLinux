@@ -124,7 +124,9 @@ impl Services {
                 queue_path: Some(paths.data().join("queue.json")),
             },
         );
-        let images = Images::new(paths.images(), http.clone(), runtime.handle().clone());
+        let image_mb = settings.get(&keys::IMAGE_CACHE_MB);
+        let images =
+            Images::new(paths.images(), http.clone(), runtime.handle().clone(), if image_mb <= 0 { 0 } else { image_mb * 1024 * 1024 });
 
         // В фоне: visitorData (без него первый трек ждал бы лишний запрос) и свежий список клиентов потока.
         {

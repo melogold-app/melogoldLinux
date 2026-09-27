@@ -5,13 +5,18 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
+use std::sync::Arc;
 
 use gtk::{gdk, glib};
 use sha2::{Digest, Sha256};
 
 const MEMORY: usize = 300;
+
+/// Кэш обложек сам освобождается каждые столько записанных картинок.
+const TRIM_EVERY: u32 = 64;
 
 #[derive(Clone)]
 pub struct Images {
@@ -19,11 +24,48 @@ pub struct Images {
     http: reqwest::Client,
     runtime: tokio::runtime::Handle,
     memory: Rc<RefCell<(HashMap<String, gdk::Texture>, VecDeque<String>)>>,
+    /// Предел кэша на диске, байт; 0 — без ограничения.
+    max_bytes: Arc<AtomicI64>,
+    written: Arc<AtomicU32>,
 }
 
 impl Images {
-    pub fn new(dir: PathBuf, http: reqwest::Client, runtime: tokio::runtime::Handle) -> Images {
-        Images { dir, http, runtime, memory: Rc::default() }
+    pub fn new(dir: PathBuf, http: reqwest::Client, runtime: tokio::runtime::Handle, max_bytes: i64) -> Images {
+        let images =
+            Images { dir, http, runtime, memory: Rc::default(), max_bytes: Arc::new(AtomicI64::new(max_bytes)), written: Arc::default() };
+        images.trim();
+        images
+    }
+
+    /// Новый предел кэша (Настройки → «Максимальный размер»); лишнее уходит сразу.
+    pub fn set_max_bytes(&self, bytes: i64) {
+        self.max_bytes.store(bytes, Ordering::Relaxed);
+        self.trim();
+    }
+
+    /// Занято на диске, байт; считается не в главном потоке.
+    pub async fn size(&self) -> u64 {
+        let dir = self.dir.clone();
+        self.runtime.spawn_blocking(move || files(&dir).iter().map(|(_, size, _)| size).sum()).await.unwrap_or(0)
+    }
+
+    /// Кэш заполнился — место уступают картинки, которые дольше всех не показывали.
+    pub fn trim(&self) {
+        let (dir, max) = (self.dir.clone(), self.max_bytes.load(Ordering::Relaxed));
+        if max <= 0 {
+            return;
+        }
+        self.runtime.spawn_blocking(move || trim_dir(&dir, max as u64));
+    }
+
+    /// «Очистить»: всё с диска; в памяти показанное остаётся до перезапуска.
+    pub fn clear(&self) {
+        let dir = self.dir.clone();
+        self.runtime.spawn_blocking(move || {
+            for (path, _, _) in files(&dir) {
+                let _ = std::fs::remove_file(path);
+            }
+        });
     }
 
     fn remember(&self, url: &str, texture: &gdk::Texture) {
@@ -58,10 +100,14 @@ impl Images {
     /// Байты картинки: с диска или из сети (заодно на диск).
     pub async fn bytes(&self, url: String) -> Option<Vec<u8>> {
         let path = self.dir.join(format!("{}.img", hex::encode(&Sha256::digest(url.as_bytes())[..16])));
-        let http = self.http.clone();
+        let (http, max, written, dir) = (self.http.clone(), Arc::clone(&self.max_bytes), Arc::clone(&self.written), self.dir.clone());
         self.runtime
             .spawn(async move {
                 if let Ok(bytes) = tokio::fs::read(&path).await {
+                    // Показали — картинка свежая: при заполнении кэша уходят те, что дольше не показывали.
+                    if let Ok(file) = std::fs::File::options().append(true).open(&path) {
+                        let _ = file.set_modified(std::time::SystemTime::now());
+                    }
                     return Some(bytes);
                 }
                 let mut response = http.get(&url).send().await.ok()?;
@@ -78,6 +124,10 @@ impl Images {
                     let _ = tokio::fs::create_dir_all(parent).await;
                 }
                 let _ = tokio::fs::write(&path, &bytes).await;
+                let max = max.load(Ordering::Relaxed);
+                if max > 0 && written.fetch_add(1, Ordering::Relaxed) % TRIM_EVERY == TRIM_EVERY - 1 {
+                    tokio::task::spawn_blocking(move || trim_dir(&dir, max as u64));
+                }
                 Some(bytes)
             })
             .await
@@ -107,4 +157,33 @@ fn decode(bytes: Vec<u8>, frame: bool) -> Option<gdk::Texture> {
     let format =
         if cfg!(target_endian = "little") { gdk::MemoryFormat::B8g8r8a8Premultiplied } else { gdk::MemoryFormat::A8r8g8b8Premultiplied };
     Some(gdk::MemoryTexture::new(rect.width as i32, rect.height as i32, format, &glib::Bytes::from_owned(cropped), rect.width * 4).upcast())
+}
+
+/// Файлы кэша: путь, размер, когда показывали.
+fn files(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            meta.is_file().then(|| (entry.path(), meta.len(), meta.modified().unwrap_or(std::time::UNIX_EPOCH)))
+        })
+        .collect()
+}
+
+fn trim_dir(dir: &Path, max: u64) {
+    let mut all = files(dir);
+    let mut total: u64 = all.iter().map(|(_, size, _)| size).sum();
+    if total <= max {
+        return;
+    }
+    all.sort_by_key(|(_, _, modified)| *modified);
+    for (path, size, _) in all {
+        if total <= max {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(size);
+        }
+    }
 }
