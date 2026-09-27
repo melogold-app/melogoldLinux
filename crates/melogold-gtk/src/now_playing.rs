@@ -225,6 +225,18 @@ impl NowPlaying {
             Box::new(move || weak_window.upgrade().is_some_and(|w| w.is_playing())),
             Rc::new(move |ms| seek_player.send(Command::Seek(Duration::from_millis(ms.max(0) as u64)))),
         );
+        // В широком окне середина текущей строки — на уровне середины обложки: взгляд идёт от
+        // обложки к строке по одной линии (пользователь, 2026-09-27). В узком обложки рядом нет —
+        // строка посередине области.
+        let cover = overlay.downgrade();
+        synced.set_anchor(Box::new(move |scroller| {
+            let cover = cover.upgrade()?;
+            if !cover.is_mapped() || !scroller.is_mapped() {
+                return None;
+            }
+            let bounds = cover.compute_bounds(scroller)?;
+            Some(f64::from(bounds.y()) + f64::from(bounds.height()) / 2.0)
+        }));
         let lyrics = LyricsPanel::new(synced);
 
         let switcher = adw::ToggleGroup::builder().valign(gtk::Align::Center).visible(false).build();

@@ -414,6 +414,9 @@ fn ease_out_back(t: f64) -> f64 {
 
 // ── синхронный текст ──
 
+/// Точка для середины текущей строки от верха области прокрутки; `None` — посередине.
+pub type Anchor = Box<dyn Fn(&gtk::ScrolledWindow) -> Option<f64>>;
+
 pub struct SyncedView {
     pub root: gtk::Overlay,
     scroller: gtk::ScrolledWindow,
@@ -439,6 +442,10 @@ pub struct SyncedView {
     scroll_to: Cell<f64>,
     clock: RefCell<Option<glib::SourceId>>,
     resume: RefCell<Option<glib::SourceId>>,
+    /// Где встаёт середина текущей строки, от верха области; `None` у функции — посередине.
+    anchor: RefCell<Option<Anchor>>,
+    /// Точка, по которой сейчас стоят поля и прокрутка (`-1` — ещё не считалась).
+    anchor_y: Cell<f64>,
     position: Box<dyn Fn() -> Option<Duration>>,
     playing: Box<dyn Fn() -> bool>,
     seek: Rc<dyn Fn(i64)>,
@@ -502,6 +509,8 @@ impl SyncedView {
             scroll: RefCell::default(),
             scroll_from: Cell::new(0.0),
             scroll_to: Cell::new(0.0),
+            anchor: RefCell::default(),
+            anchor_y: Cell::new(-1.0),
             clock: RefCell::default(),
             resume: RefCell::default(),
             position,
@@ -582,14 +591,12 @@ impl SyncedView {
             }
         });
 
-        // Текущая строка — посередине области: сверху и снизу поля в половину высоты, чтобы
-        // и первая, и последняя строка могли встать на середину.
+        // Поля сверху и снизу — по точке, где встаёт текущая строка: так на неё встают и первая,
+        // и последняя строка.
         let weak = Rc::downgrade(self);
-        self.scroller.vadjustment().connect_page_size_notify(move |adjustment| {
+        self.scroller.vadjustment().connect_page_size_notify(move |_| {
             if let Some(view) = weak.upgrade() {
-                let half = (adjustment.page_size() / 2.0) as i32;
-                view.lines.set_margin_top(half);
-                view.lines.set_margin_bottom(half);
+                view.update_anchor(true);
             }
         });
 
@@ -625,6 +632,44 @@ impl SyncedView {
         });
         self.clock.replace(Some(id));
         self.tick();
+    }
+
+    /// Где встаёт середина текущей строки: функция получает область прокрутки и отвечает точкой от
+    /// её верха; `None` — посередине области. «Сейчас играет» в широком окне ставит строку на
+    /// уровень середины обложки (пользователь, 2026-09-27).
+    pub fn set_anchor(&self, anchor: Anchor) {
+        self.anchor.replace(Some(anchor));
+        self.update_anchor(true);
+    }
+
+    /// Точка для строки сейчас: от функции, но не ближе пятой части высоты к краю.
+    fn anchor_target(&self) -> f64 {
+        let page = self.scroller.vadjustment().page_size().max(f64::from(self.scroller.height()));
+        let wanted = self.anchor.borrow().as_ref().and_then(|anchor| anchor(&self.scroller));
+        match wanted {
+            Some(y) if page > 0.0 => y.clamp(page * 0.2, page * 0.8),
+            _ => page / 2.0,
+        }
+    }
+
+    /// Поля и прокрутка — по точке. `snap` — сразу (смена размера, первый показ); иначе точка
+    /// доезжает за несколько тактов: строка плавно следует за обложкой, когда та сдвигается.
+    fn update_anchor(&self, snap: bool) {
+        let target = self.anchor_target();
+        let current = self.anchor_y.get();
+        if current >= 0.0 && (target - current).abs() < 0.5 {
+            return;
+        }
+        let y = if snap || current < 0.0 || (target - current).abs() < 2.0 { target } else { current + (target - current) * 0.3 };
+        self.anchor_y.set(y);
+        let page = self.scroller.vadjustment().page_size().max(f64::from(self.scroller.height()));
+        // Поле сверху равно точке: сдвиг точки двигает строку ровно на столько же при той же
+        // прокрутке — перематывать не нужно, строка просто переезжает вместе с полем.
+        self.lines.set_margin_top(y.round() as i32);
+        self.lines.set_margin_bottom((page - y).max(0.0).round() as i32);
+        if snap {
+            self.pending.set(Some(true));
+        }
     }
 
     /// Подложка текущей строки в цвете обложки («Сейчас играет»); `None` — цвета темы.
@@ -702,6 +747,7 @@ impl SyncedView {
 
     fn tick(&self) {
         self.apply_size();
+        self.update_anchor(false);
         let views = self.views.borrow();
         if views.is_empty() {
             return;
@@ -789,8 +835,8 @@ impl SyncedView {
         fade.play();
     }
 
-    /// Середина текущей строки — посередине области, как у Windows (пользователь, 2026-09-27,
-    /// вместо «у верха» из задания 0007). До первой строки посередине стоит первая.
+    /// Середина текущей строки — в точке [`Self::set_anchor`], без неё посередине области
+    /// (пользователь, 2026-09-27, вместо «у верха» из задания 0007). До первой строки там стоит первая.
     fn scroll_to_active(&self, views: &[RowView], animated: bool) {
         let adjustment = self.scroller.vadjustment();
         let index = usize::try_from(self.active.get()).unwrap_or(0);
@@ -798,7 +844,8 @@ impl SyncedView {
             .get(index)
             .and_then(|view| view.root.compute_bounds(&self.canvas))
             .map(|b| f64::from(b.y()) + f64::from(b.height()) / 2.0);
-        let target = middle.map(|y| y - adjustment.page_size() / 2.0).unwrap_or(0.0);
+        let anchor = if self.anchor_y.get() >= 0.0 { self.anchor_y.get() } else { adjustment.page_size() / 2.0 };
+        let target = middle.map(|y| y - anchor).unwrap_or(0.0);
         let target = target.clamp(0.0, (adjustment.upper() - adjustment.page_size()).max(0.0));
         let scroll = self.scroll.borrow();
         let Some(scroll) = scroll.as_ref() else { return };

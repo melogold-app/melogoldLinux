@@ -1,5 +1,6 @@
 //! Живая проверка потока: `cargo run -p melogold-playback --example fetch -- <videoId> <файл>`.
-//! Резолвит трек клиентами из config/stream-clients.json и качает его кусками по 1 МБ.
+//! Резолвит трек клиентами из config/stream-clients.json (или из `MELOGOLD_STREAM_CLIENTS`) и качает
+//! его кусками по 1 МБ.
 
 use std::io::Write;
 use std::time::Instant;
@@ -13,7 +14,11 @@ async fn main() {
     let mut args = std::env::args().skip(1);
     let video_id = args.next().unwrap_or_else(|| "dQw4w9WgXcQ".into());
     let path = args.next().unwrap_or_else(|| format!("/tmp/{video_id}.m4a"));
-    let clients = melogold_playback::stream_clients::parse(include_str!("../../../config/stream-clients.json")).unwrap();
+    // MELOGOLD_STREAM_CLIENTS=<файл> — проверить другой список клиентов, не трогая config/.
+    let list = std::env::var("MELOGOLD_STREAM_CLIENTS")
+        .map(|path| std::fs::read_to_string(path).unwrap())
+        .unwrap_or_else(|_| include_str!("../../../config/stream-clients.json").to_owned());
+    let clients = melogold_playback::stream_clients::parse(&list).unwrap();
     let resolver = Resolver::new(InnerTube::new("en", "US"), clients);
     let started = Instant::now();
     let info = match resolver.resolve(&video_id).await {
