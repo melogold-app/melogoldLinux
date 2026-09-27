@@ -1,0 +1,25 @@
+[package]
+name = "melogold-server"
+description = "Сервер Melogold: API, аккаунт и токены, синхронизация библиотеки и истории, живые события"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+melogold-core = { path = "../melogold-core" }
+melogold-data = { path = "../melogold-data" }
+async-channel.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+# Токены — в связке ключей (Secret Service или портал в песочнице), не в файлах.
+oo7 = { version = "0.5", default-features = false, features = ["tokio", "native_crypto"] }
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

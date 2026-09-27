@@ -32,6 +32,18 @@ pub fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
+/// Не длиннее `max` единиц UTF-16 (API §1.4): суррогатная пара не рвётся.
+pub fn truncate_utf16(value: &str, max: usize) -> String {
+    let mut units = 0;
+    value
+        .chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            units <= max
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

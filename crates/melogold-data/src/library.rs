@@ -85,14 +85,14 @@ pub struct Library {
     overrides: RwLock<HashMap<String, TrackOverride>>,
 }
 
-const TRACK_COLUMNS: &str =
+pub(crate) const TRACK_COLUMNS: &str =
     "video_id, title, artists_text, artists_json, album_id, album_title, duration_ms, duration_text, thumbnail_url, explicit, video_type, metadata_stub, liked_at, total_play_ms";
 
 fn prefixed(prefix: &str) -> String {
     TRACK_COLUMNS.split(", ").map(|c| format!("{prefix}.{c}")).collect::<Vec<_>>().join(", ")
 }
 
-fn read_track(row: &Row, o: usize) -> rusqlite::Result<Track> {
+pub(crate) fn read_track(row: &Row, o: usize) -> rusqlite::Result<Track> {
     let artists_json: Option<String> = row.get(o + 3)?;
     let artists: Vec<ArtistRef> = artists_json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
     Ok(Track {
@@ -184,25 +184,14 @@ fn new_id() -> String {
 
 impl Library {
     pub fn open(db: Database) -> Arc<Library> {
-        let overrides = db
-            .read(|c| {
-                let mut statement = c.prepare("SELECT video_id, title, artists_text, album_title, updated_at FROM track_overrides")?;
-                let rows = statement.query_map([], |r| {
-                    Ok(TrackOverride {
-                        video_id: r.get(0)?,
-                        title: r.get(1)?,
-                        artists_text: r.get(2)?,
-                        album_title: r.get(3)?,
-                        updated_at: r.get(4)?,
-                    })
-                })?;
-                rows.map(|r| r.map(|o| (o.video_id.clone(), o))).collect::<rusqlite::Result<HashMap<_, _>>>()
-            })
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "правки треков не прочитались");
-                HashMap::new()
-            });
+        let overrides = load_overrides(&db);
         Arc::new(Library { db, listeners: std::sync::Mutex::default(), overrides: RwLock::new(overrides) })
+    }
+
+    /// Правки заново из базы (их поменял синк).
+    pub(crate) fn reload_overrides(&self) {
+        let fresh = load_overrides(&self.db);
+        *self.overrides.write().unwrap_or_else(|p| p.into_inner()) = fresh;
     }
 
     pub fn database(&self) -> &Database {
@@ -914,7 +903,28 @@ fn append_items(t: &Transaction, playlist_id: i64, list: &[Track]) -> rusqlite::
     Ok(added)
 }
 
-fn video_ids(t: &Transaction, playlist_id: i64) -> rusqlite::Result<Vec<String>> {
+/// Правки треков из базы: показ спрашивает их на каждой строке, поэтому они держатся в памяти.
+fn load_overrides(db: &Database) -> HashMap<String, TrackOverride> {
+    db.read(|c| {
+        let mut statement = c.prepare("SELECT video_id, title, artists_text, album_title, updated_at FROM track_overrides")?;
+        let rows = statement.query_map([], |r| {
+            Ok(TrackOverride {
+                video_id: r.get(0)?,
+                title: r.get(1)?,
+                artists_text: r.get(2)?,
+                album_title: r.get(3)?,
+                updated_at: r.get(4)?,
+            })
+        })?;
+        rows.map(|r| r.map(|o| (o.video_id.clone(), o))).collect::<rusqlite::Result<HashMap<_, _>>>()
+    })
+    .unwrap_or_else(|error| {
+        tracing::warn!(%error, "правки треков не прочитались");
+        HashMap::new()
+    })
+}
+
+pub(crate) fn video_ids(t: &Transaction, playlist_id: i64) -> rusqlite::Result<Vec<String>> {
     let mut statement = t.prepare("SELECT video_id FROM playlist_items WHERE playlist_id = ?1 ORDER BY position")?;
     let ids = statement.query_map([playlist_id], |r| r.get(0))?.collect();
     ids

@@ -6,11 +6,18 @@
 pub mod app_info;
 pub mod countries;
 mod countries_generated;
+pub mod devices;
+pub mod hwid;
+pub mod ids;
+pub mod iso;
 pub mod links;
 pub mod music;
 pub mod paths;
+pub mod playlist_diff;
 pub mod plurals;
+pub mod pow;
 pub mod queue;
+pub mod server_address;
 pub mod settings;
 pub mod system;
 pub mod text;

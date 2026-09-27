@@ -5,6 +5,7 @@ members = [
     "crates/melogold-data",
     "crates/melogold-innertube",
     "crates/melogold-playback",
+    "crates/melogold-server",
     "crates/melogold-gtk",
 ]
 
