@@ -235,6 +235,39 @@ impl YouTubeMusic {
         Ok(parsers::shelves(at!(&response, "contents", "sectionListRenderer", "contents")))
     }
 
+    // ── тексты ──
+
+    /// Обычный текст вкладки «Текст» (`MPLYt…`) и подпись источника; `None` — текста нет.
+    pub async fn lyrics(&self, browse_id: &str) -> Result<Option<(String, Option<String>)>, YouTubeError> {
+        let response = self.music("browse", json!({ "browseId": browse_id })).await?;
+        let shelf = Some(&response).find("musicDescriptionShelfRenderer");
+        let text = at!(shelf, "description").text().filter(|t| !t.trim().is_empty());
+        Ok(text.map(|t| (t, at!(shelf, "footer").text())))
+    }
+
+    /// Синхронный текст YouTube Music: ту же вкладку клиент ANDROID_MUSIC отдаёт со временем строк
+    /// (`timedLyricsData`). LRC или `None`, если времени у строк нет.
+    pub async fn timed_lyrics(&self, browse_id: &str) -> Result<Option<String>, YouTubeError> {
+        let response = self.client.post(&ClientProfile::android_music(), "browse", json!({ "browseId": browse_id })).await?;
+        let lines: Vec<String> = Some(&response)
+            .find("timedLyricsData")
+            .items()
+            .iter()
+            .filter_map(|line| {
+                let start = at!(line, "cueRange", "startTimeMilliseconds").i64()?;
+                let centis = start / 10;
+                Some(format!(
+                    "[{:02}:{:02}.{:02}]{}",
+                    centis / 6000,
+                    centis / 100 % 60,
+                    centis % 100,
+                    at!(line, "lyricLine").str().unwrap_or_default()
+                ))
+            })
+            .collect();
+        Ok((!lines.is_empty()).then(|| lines.join("\n")))
+    }
+
     // ── «Далее» ──
 
     /// Очередь «Далее»: радио по треку (`RDAMVM<videoId>`, REWRITE §4.10.5) или плейлист с этого трека.

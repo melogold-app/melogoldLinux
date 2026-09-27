@@ -3,6 +3,7 @@
 
 pub mod client;
 pub mod json;
+pub mod lyrics;
 pub mod music;
 mod music_parsers;
 pub mod player;
