@@ -84,7 +84,16 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxAlbumSetFormat", "Альбом указан: {0}", "Album set: {0}"),
     // Метка строки: трек целиком в кэше музыки и играет без сети (у Windows только раздел «В кэше · …»).
     ("LinuxInCache", "В кэше — играет без сети", "Cached — plays offline"),
-    ("LinuxServerLinkOpened", "Ссылка на сервер: {0}. Вход появится вместе с аккаунтом", "Server link: {0}. Sign-in comes with accounts"),
+    (
+        "LinuxInviteLater",
+        "Вход по приглашению другого устройства появится в следующей версии",
+        "Signing in with another device's invitation comes in a later version",
+    ),
+    (
+        "LinuxServerIdMismatch",
+        "По этому адресу — другой сервер, не тот, что в ссылке",
+        "This address leads to a different server than the link",
+    ),
     (
         "LinuxLinkRequest",
         "Откройте Melogold на другом устройстве → Добавить устройство → Сканировать",

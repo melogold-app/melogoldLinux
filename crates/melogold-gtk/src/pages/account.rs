@@ -936,9 +936,16 @@ fn decide(window: &MainWindow, step: &Rc<StepDialog>, link: &LinkDetails, verify
 /// Сервер (REWRITE §3.5.12, Android `ServerScreen`): адрес по правилам API §7.1, проверка
 /// `/server/info` и «Подключить», который выходит из аккаунта прежнего сервера.
 pub fn server_page(window: &MainWindow) -> adw::NavigationPage {
+    server_page_for(window, None, None)
+}
+
+/// Экран «Сервер» из ссылки `melogold://server?url=…&sid=…`: адрес заполнен, подключение — только
+/// кнопкой; `sid` из ссылки должен совпасть с сервером по адресу (API §7.2).
+pub fn server_page_for(window: &MainWindow, url: Option<&str>, expected_id: Option<String>) -> adw::NavigationPage {
     let f = form(tr("ServerTitle"), Some(tr("ServerText")));
     let account = &window.ctx.services.account;
-    let address = adw::EntryRow::builder().title(tr("ServerAddress")).text(account.server_url()).build();
+    let initial = url.map(str::to_owned).unwrap_or_else(|| account.server_url());
+    let address = adw::EntryRow::builder().title(tr("ServerAddress")).text(&initial).build();
     address.set_input_purpose(gtk::InputPurpose::Url);
     f.body.append(&boxed_list(&[address.upcast_ref()]));
     let hint = gtk::Label::builder().xalign(0.0).wrap(true).visible(false).build();
@@ -1039,8 +1046,12 @@ pub fn server_page(window: &MainWindow) -> adw::NavigationPage {
             update();
             let account = Arc::clone(&window.ctx.services.account);
             let url = parsed.url.clone();
+            let expected = expected_id.clone();
             let task = window.ctx.services.run(async move {
                 let info = account.check(&url).await?;
+                if expected.as_deref().is_some_and(|id| id != info.server_id) {
+                    return Err(ApiError::new(0, "server_id_mismatch", "The link names another server"));
+                }
                 if do_connect {
                     account.set_server(&url).await;
                 }
@@ -1064,6 +1075,7 @@ pub fn server_page(window: &MainWindow) -> adw::NavigationPage {
                         checked.replace(None);
                         let text = match e.code.as_str() {
                             "not_melogold" => tr("ServerNotMelogold"),
+                            "server_id_mismatch" => tr("LinuxServerIdMismatch"),
                             "client_outdated" | "server_outdated" => error_text(&e),
                             _ => tr("ServerUnreachable"),
                         };

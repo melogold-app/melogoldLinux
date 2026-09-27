@@ -401,12 +401,13 @@ impl MainWindow {
         if let Some(link) = links::parse(text) {
             tracing::info!("вход: ссылка melogold://");
             match link {
-                // Экран «Сервер» с подтверждением и вход по приглашению — в срезе 5 (аккаунт).
-                MelogoldLink::Server { url, .. } | MelogoldLink::Invite { server: url, .. } => {
+                // Экран «Сервер» с заполненным адресом и подтверждением: подключается только кнопкой (API §7.2).
+                MelogoldLink::Server { url, server_id } => {
                     self.show_tab(Tab::Settings);
-                    let host = url::Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or(url);
-                    self.toast(&trf("LinuxServerLinkOpened", &[&host]));
+                    self.nav(Tab::Settings).push(&pages::account::server_page_for(self, Some(&url), server_id));
                 }
+                // Вход по приглашению другого устройства (QR, API §4.6) — в 0.2.
+                MelogoldLink::Invite { .. } => self.toast(tr("LinuxInviteLater")),
                 MelogoldLink::Request { .. } => self.toast(tr("LinuxLinkRequest")),
                 MelogoldLink::Unsupported => self.toast(tr("LinkUnsupported")),
             }
