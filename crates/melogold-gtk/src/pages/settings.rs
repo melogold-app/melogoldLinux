@@ -367,10 +367,12 @@ fn storage_group(window: &MainWindow, page: &adw::PreferencesPage) -> adw::Prefe
     };
     let cache_row = |title: &str, sizes: &[i64], current: i64, fallback: i64, clear: &str| {
         let row = adw::ExpanderRow::builder().title(title).build();
-        let bar =
-            gtk::LevelBar::builder().min_value(0.0).max_value(1.0).margin_start(12).margin_end(12).margin_top(12).margin_bottom(12).build();
-        let bar_row = gtk::ListBoxRow::builder().child(&bar).activatable(false).selectable(false).build();
-        row.add_row(&bar_row);
+        // Полоса заполнения — в самой строке, а не внутри свёрнутой: занятость видна сразу
+        // (задание Windows 0009). Без лимита полосы нет.
+        let bar = gtk::LevelBar::builder().min_value(0.0).max_value(1.0).valign(gtk::Align::Center).width_request(96).build();
+        bar.add_css_class("cache-level");
+        row.add_suffix(&bar);
+        let bar_row = bar.clone();
         let size = adw::ComboRow::builder().title(tr("SettingsImageCacheSize.Header")).model(&size_names(sizes)).build();
         let index = sizes.iter().position(|mb| *mb == current).or_else(|| sizes.iter().position(|mb| *mb == fallback)).unwrap_or(0);
         size.set_selected(index as u32);
@@ -450,10 +452,9 @@ fn storage_group(window: &MainWindow, page: &adw::PreferencesPage) -> adw::Prefe
                 images_bar.set_value(if image_max > 0 { (image_bytes as f64 / image_max as f64).min(1.0) } else { 0.0 });
                 images_clear.set_sensitive(image_bytes > 0);
                 let song_max = settings.get(&keys::STREAM_CACHE_MB).max(0) as u64 * 1024 * 1024;
-                songs.set_subtitle(&if song_max > 0 {
-                    trf("CacheUsedOfFormat", &[&format_size(song_bytes), &format_size(song_max)])
-                } else {
-                    trf("CacheUsedOfUnlimitedFormat", &[&format_size(song_bytes)])
+                songs.set_subtitle(&match (song_bytes * 100).checked_div(song_max) {
+                    Some(percent) => trf("CacheUsedPercentFormat", &[&format_size(song_bytes), &percent.min(100)]),
+                    None => trf("CacheUsedPlainFormat", &[&format_size(song_bytes)]),
                 });
                 songs_bar_row.set_visible(song_max > 0);
                 songs_bar.set_value(if song_max > 0 { (song_bytes as f64 / song_max as f64).min(1.0) } else { 0.0 });
