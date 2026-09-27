@@ -1,0 +1,12 @@
+# Сборочный контейнер выпуска (docs/PROMPT.md §3 «Сборка и упаковка»): Fedora 43 — нижняя граница
+# glibc, GTK 4.20 и libadwaita 1.8. AppImage, deb и rpm собираются из одного бинаря отсюда.
+FROM registry.fedoraproject.org/fedora:43
+RUN dnf install -y --setopt=install_weak_deps=False \
+        git gcc rust cargo \
+        gtk4-devel libadwaita-devel glib2-devel \
+        gstreamer1-devel gstreamer1-plugins-base-devel \
+        gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugin-libav gstreamer1-plugins-bad-free \
+        gdk-pixbuf2 librsvg2 adwaita-icon-theme hicolor-icon-theme \
+        desktop-file-utils appstream rpm-build dpkg file findutils which curl \
+        squashfs-tools zsync \
+    && dnf clean all

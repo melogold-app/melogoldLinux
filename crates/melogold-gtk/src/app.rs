@@ -27,7 +27,8 @@ pub struct AppContext {
 }
 
 pub fn snapshot_mode() -> bool {
-    cfg!(debug_assertions) && std::env::var_os("MELOGOLD_SCREENSHOT_DIR").is_some()
+    // Снимки своего окна — и в выпуске: так проверяется сам AppImage (scripts/snapshots.sh).
+    std::env::var_os("MELOGOLD_SCREENSHOT_DIR").is_some()
 }
 
 pub fn run(args: Vec<String>) -> glib::ExitCode {

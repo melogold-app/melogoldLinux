@@ -8,6 +8,7 @@ mod account_view;
 mod app;
 mod backup_ui;
 mod catalog_widgets;
+mod desktop_integration;
 mod images;
 mod library_view;
 mod localization;
@@ -27,7 +28,6 @@ mod selection;
 mod services;
 mod settings_store;
 mod shortcuts;
-#[cfg(debug_assertions)]
 mod snapshot;
 mod strings_generated;
 mod texts;

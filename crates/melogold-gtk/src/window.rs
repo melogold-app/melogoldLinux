@@ -284,7 +284,6 @@ impl MainWindow {
         this.show_tab(this.ctx.settings.get(&keys::LAST_TAB));
         this.start_updates();
 
-        #[cfg(debug_assertions)]
         crate::snapshot::maybe_start(&this);
         this
     }

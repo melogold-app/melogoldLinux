@@ -144,6 +144,7 @@ impl Services {
             let _guard = runtime.enter();
             downloads.resume();
         }
+        crate::desktop_integration::ensure(runtime.handle());
         tracing::info!(hl = %hl, gl = %gl, "InnerTube");
 
         // Аккаунт: сессия — из связки ключей. Снимки окна связку пользователя не трогают.
@@ -155,7 +156,7 @@ impl Services {
             client_version: app_info::VERSION.to_owned(),
             language: if localization::lang() == Lang::Ru { "ru".into() } else { "en".into() },
         };
-        let snapshots = cfg!(debug_assertions) && std::env::var_os("MELOGOLD_SCREENSHOT_DIR").is_some();
+        let snapshots = crate::app::snapshot_mode();
         let store = if snapshots { SessionStore::file_only(paths.session_fallback()) } else { SessionStore::new(paths.session_fallback()) };
         let server_url = settings.get(&keys::SERVER_URL);
         let account = Account::new(identity, store, server_url);

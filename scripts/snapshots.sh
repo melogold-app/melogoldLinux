@@ -18,7 +18,11 @@ if [[ ${#configs[@]} -eq 0 ]]; then
     configs=("1280x800 light ru" "1280x800 dark en" "800x600 light ru" "360x640 light ru" "360x640 dark en")
 fi
 
-cargo build --quiet -p melogold-gtk --manifest-path "${repo}/Cargo.toml"
+# MELOGOLD_BINARY — снять не отладочную сборку, а готовый файл (например, dist/Melogold-x86_64.AppImage).
+binary="${MELOGOLD_BINARY:-${repo}/target/debug/melogold}"
+if [[ -z ${MELOGOLD_BINARY:-} ]]; then
+    cargo build --quiet -p melogold-gtk --manifest-path "${repo}/Cargo.toml"
+fi
 
 runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 socket="melogold-shots-$$"
@@ -46,6 +50,6 @@ for config in "${configs[@]}"; do
         MELOGOLD_SCREENSHOT_DIR="${dir}" MELOGOLD_SCREENSHOT_SIZE="${size}" \
         MELOGOLD_SCREENSHOT_SCHEME="${scheme}" MELOGOLD_SCREENSHOT_LANG="${lang}" \
         MELOGOLD_AUDIO_SINK=fakesink MELOGOLD_FAKE_GEO=cYKAr38pZcY:RU RUST_LOG="${RUST_LOG:-warn}" \
-        timeout 180 "${repo}/target/debug/melogold"
+        timeout 180 "${binary}"
 done
 echo "снимки: ${out}"

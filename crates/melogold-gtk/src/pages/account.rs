@@ -367,7 +367,6 @@ pub fn register_page(window: &MainWindow) -> adw::NavigationPage {
 }
 
 /// Страница с кодом восстановления (снимки окна; при регистрации код встаёт на место формы).
-#[cfg(debug_assertions)]
 pub fn recovery_code_page(window: &MainWindow, code: &str) -> adw::NavigationPage {
     let f = form(tr("AccountRecoveryTitle"), None);
     show_recovery_code(window, &f.page, &f.body, code);

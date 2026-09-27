@@ -1,0 +1,17 @@
+#!/bin/sh
+# Запуск Melogold из AppImage: свои GTK, libadwaita и GStreamer (с декодером AAC) — первыми,
+# драйверы видео, шрифты и звуковой сервер — системные.
+here="$(dirname "$(readlink -f "$0")")"
+export LD_LIBRARY_PATH="${here}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export GSETTINGS_SCHEMA_DIR="${here}/usr/share/glib-2.0/schemas"
+# Системные данные — раньше своих: тема значков и шрифты системы, свои — запасные.
+export XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}:${here}/usr/share"
+export GIO_MODULE_DIR="${here}/usr/lib/gio/modules"
+export GTK_PATH="${here}/usr/lib/gtk-4.0"
+export GST_PLUGIN_SYSTEM_PATH_1_0="${here}/usr/lib/gstreamer-1.0"
+export GST_PLUGIN_PATH_1_0=""
+export GST_PLUGIN_SCANNER_1_0="${here}/usr/libexec/gstreamer-1.0/gst-plugin-scanner"
+export GST_REGISTRY_1_0="${XDG_CACHE_HOME:-${HOME}/.cache}/melogold/gstreamer-registry.bin"
+# Ссылки melogold:// и значок в меню — на этот AppImage.
+export MELOGOLD_APPIMAGE_DIR="${here}"
+exec "${here}/usr/bin/melogold" "$@"
