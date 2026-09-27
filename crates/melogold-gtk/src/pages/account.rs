@@ -460,7 +460,7 @@ pub fn account_page(window: &MainWindow) -> adw::NavigationPage {
 
     let sync_group = adw::PreferencesGroup::builder().title(tr("AccountSyncGroup")).description(tr("AccountSyncWhat")).build();
     let sync_row = adw::ActionRow::builder().title(tr("AccountSyncNow")).activatable(true).build();
-    let sync_icon = gtk::Image::from_icon_name("emblem-synchronizing-symbolic");
+    let sync_icon = gtk::Image::from_icon_name("view-refresh-symbolic");
     sync_row.add_prefix(&sync_icon);
     sync_group.add(&sync_row);
     preferences.add(&sync_group);
@@ -499,7 +499,7 @@ pub fn account_page(window: &MainWindow) -> adw::NavigationPage {
             icon.set_icon_name(Some(if matches!(status, SyncStatus::Failed { .. }) {
                 "network-offline-symbolic"
             } else {
-                "emblem-synchronizing-symbolic"
+                "view-refresh-symbolic"
             }));
         })
     };

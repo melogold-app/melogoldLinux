@@ -10,7 +10,8 @@ Requires:       gtk4 >= 4.20
 Requires:       libadwaita >= 1.8
 Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
-Requires:       (gstreamer1-plugin-libav or gstreamer1-plugins-bad-free-extras or gstreamer1-plugin-fdkaac)
+# Декодер AAC: fdk-aac из bad-free обычно уже стоит; libav тянет ffmpeg.
+Requires:       (gstreamer1-plugins-bad-free or gstreamer1-plugin-libav)
 Recommends:     xdg-desktop-portal
 
 %global debug_package %{nil}
