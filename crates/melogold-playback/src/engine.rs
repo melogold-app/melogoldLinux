@@ -132,6 +132,11 @@ impl Default for Settings {
     }
 }
 
+/// Звука нет столько после «играть» — сторож загрузки смотрит, что случилось.
+const STALL_AFTER: Duration = Duration::from_secs(10);
+/// Этап загрузки дольше этого — в журнал, чтобы было видно, где стоит.
+const SLOW_STEP: Duration = Duration::from_secs(3);
+
 #[derive(Debug)]
 pub enum Command {
     /// Играть список с выбранного трека (альбом, плейлист, Избранное…).
@@ -187,6 +192,10 @@ pub enum Command {
     FeedFailed {
         generation: u64,
         error: StreamError,
+    },
+    /// Сторож загрузки: через [`STALL_AFTER`] после «играть» звука всё ещё нет.
+    StallCheck {
+        generation: u64,
     },
     Bus {
         generation: u64,
@@ -307,6 +316,8 @@ struct Engine {
     pending_start: Duration,
     /// Когда нажали «играть» — для замера «от нажатия до звука» (приёмка среза 2).
     load_started: Option<Instant>,
+    /// Трек, который сторож уже открыл заново: второй раз подряд — только запись в журнал.
+    stall_retried: Option<String>,
     listened: Duration,
     listening_since: Option<Instant>,
     listened_track: Option<Track>,
@@ -339,6 +350,7 @@ impl Engine {
             autoplay: Autoplay::default(),
             pending_start: Duration::ZERO,
             load_started: None,
+            stall_retried: None,
             listened: Duration::ZERO,
             listening_since: None,
             listened_track: None,
@@ -496,6 +508,11 @@ impl Engine {
             }
             Command::SaveQueue => self.save_queue(),
             Command::Shutdown => {}
+            Command::StallCheck { generation } => {
+                if generation == self.generation {
+                    self.on_stall_check();
+                }
+            }
             Command::Loaded { generation, result } => {
                 if generation == self.generation {
                     self.on_loaded(*result);
@@ -751,13 +768,24 @@ impl Engine {
             self.deps.http.clone(),
             self.tx.clone(),
         );
+        if play {
+            let tx = self.tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(STALL_AFTER).await;
+                let _ = tx.send(Command::StallCheck { generation });
+            });
+        }
         tokio::spawn(async move {
             let mut attempt = 0;
+            let opening = Instant::now();
             let result = loop {
                 let opened = match &preloaded {
                     Some(stream) if attempt == 0 && !stream.reader().is_cancelled() => Ok(Arc::clone(stream)),
                     _ => open(&resolver, &songs, downloads.as_ref(), &http, &track.video_id).await,
                 };
+                if opening.elapsed() > SLOW_STEP {
+                    tracing::info!(трек = %track.video_id, мс = opening.elapsed().as_millis() as u64, успех = opened.is_ok(), "поток открывался долго");
+                }
                 match opened {
                     Ok(stream) => break Ok(stream),
                     Err(error) if attempt < error.retries() => {
@@ -789,7 +817,12 @@ impl Engine {
             }
         };
         let start = std::mem::take(&mut self.pending_start);
-        let output = match Output::new(Arc::clone(&stream), start, self.rate(), Arc::clone(&self.shared.levels), failed) {
+        let building = Instant::now();
+        let output = Output::new(Arc::clone(&stream), start, self.rate(), Arc::clone(&self.shared.levels), failed);
+        if building.elapsed() > SLOW_STEP {
+            tracing::info!(трек = %track.video_id, мс = building.elapsed().as_millis() as u64, "вывод звука собирался долго");
+        }
+        let output = match output {
             Ok(output) => output,
             Err(message) => {
                 tracing::error!(%message, "вывод звука не собрался");
@@ -846,6 +879,7 @@ impl Engine {
                 };
                 if status == Status::Playing {
                     self.error = None;
+                    self.stall_retried = None;
                     if let Some(started) = self.load_started.take() {
                         let track = self.current_track().map(|t| t.video_id).unwrap_or_default();
                         tracing::info!(трек = %track, мс = started.elapsed().as_millis() as u64, "от нажатия до звука");
@@ -1099,6 +1133,30 @@ impl Engine {
         });
     }
 
+    /// Звука нет через [`STALL_AFTER`] после «играть». Трек целиком на диске (кэш или
+    /// скачанное) ждать нечего: загрузка открывается заново один раз — ровно то, что делал
+    /// человек, нажимая на трек ещё раз (27.09.2026: 64 с на «Получение потока» у трека из
+    /// кэша). У трека из сети долгая загрузка бывает честной — только запись в журнал.
+    fn on_stall_check(&mut self) {
+        if !self.play_when_ready || !matches!(self.status, Status::Resolving | Status::Buffering) {
+            return;
+        }
+        let Some(track) = self.current_track() else { return };
+        let stage = if self.status == Status::Resolving { "открытие потока" } else { "вывод звука" };
+        let local = self.deps.songs.is_complete(&track.video_id)
+            || self.deps.downloads.as_ref().is_some_and(|d| d.is_complete(&track.video_id));
+        if !local || self.stall_retried.as_deref() == Some(track.video_id.as_str()) {
+            tracing::warn!(трек = %track.video_id, этап = stage, локальный = local, "звука нет дольше 10 с");
+            return;
+        }
+        tracing::warn!(трек = %track.video_id, этап = stage, "трек с диска не заиграл за 10 с — открываю заново");
+        self.stall_retried = Some(track.video_id.clone());
+        let started = self.load_started;
+        let start = self.position().unwrap_or(self.pending_start);
+        self.load_current(true, start);
+        self.load_started = started;
+    }
+
     /// После перезапуска очередь и позиция восстанавливаются, без автостарта (docs/PROMPT.md §4).
     fn restore_saved(&mut self) {
         let Some(path) = &self.deps.queue_path else { return };
@@ -1126,10 +1184,19 @@ async fn open(
 ) -> Result<Arc<TrackStream>, StreamError> {
     let downloaded = downloads.and_then(|store| store.complete(video_id).map(|info| (Arc::clone(store), info)));
     let (store, info) = match downloaded {
-        Some(found) => found,
+        Some(found) => {
+            tracing::debug!(трек = %video_id, "открываю скачанное");
+            found
+        }
         None => match songs.complete(video_id) {
-            Some(info) => (Arc::clone(songs), info),
-            None => (Arc::clone(songs), resolver.resolve(video_id).await?),
+            Some(info) => {
+                tracing::debug!(трек = %video_id, "открываю из кэша");
+                (Arc::clone(songs), info)
+            }
+            None => {
+                tracing::debug!(трек = %video_id, "открываю из сети");
+                (Arc::clone(songs), resolver.resolve(video_id).await?)
+            }
         },
     };
     let entry = store.entry(&info);

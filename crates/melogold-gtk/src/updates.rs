@@ -107,6 +107,11 @@ impl UpdateService {
         self.set(UpdateState::Available);
     }
 
+    /// Снимки окна: полоса в состоянии загрузки или установки.
+    pub fn pretend_state(&self, state: UpdateState) {
+        self.set(state);
+    }
+
     /// Экран, который перерисовывается при смене состояния; живёт, пока жив `refresh`.
     pub fn listen(&self, refresh: &Rc<dyn Fn()>) {
         self.listeners.borrow_mut().push(Rc::downgrade(refresh));

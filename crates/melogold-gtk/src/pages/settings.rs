@@ -665,7 +665,7 @@ fn update_banner(window: &MainWindow) -> adw::Banner {
 }
 
 /// «Что нового в X»: заметки релиза и «Обновить»; без заметок — сразу обновление.
-fn whats_new(window: &MainWindow) {
+pub(crate) fn whats_new(window: &MainWindow) {
     let Some(manifest) = window.updates.available() else { return };
     let russian = crate::localization::lang() == crate::localization::Lang::Ru;
     let Some(notes) = manifest.notes_for(russian).map(str::to_owned) else {
