@@ -115,8 +115,7 @@ fn without_letterbox(pixels: &[Argb], width: usize, height: usize) -> Vec<Argb> 
         bottom -= 1;
     }
     let rows = bottom - top + 1;
-    let column_is_bar =
-        |x: usize| (top..=bottom).filter(|&y| is_bar(&pixels[y * width + x])).count() as f64 >= rows as f64 * BAR_MIN_SHARE;
+    let column_is_bar = |x: usize| (top..=bottom).filter(|&y| is_bar(&pixels[y * width + x])).count() as f64 >= rows as f64 * BAR_MIN_SHARE;
     let (mut left, mut right) = (0, width - 1);
     while left < right && column_is_bar(left) {
         left += 1;
@@ -180,7 +179,15 @@ mod tests {
     #[test]
     fn a_few_colored_pixels_are_not_enough() {
         // Чёрно-белая обложка с крошечной цветной подписью: меньше 5 % цветных.
-        let pixels = image(200, 200, |x, y| if x < 8 && y < 8 { [220, 30, 30] } else if (x / 20 + y / 20) % 2 == 0 { [0, 0, 0] } else { [255, 255, 255] });
+        let pixels = image(200, 200, |x, y| {
+            if x < 8 && y < 8 {
+                [220, 30, 30]
+            } else if (x / 20 + y / 20) % 2 == 0 {
+                [0, 0, 0]
+            } else {
+                [255, 255, 255]
+            }
+        });
         assert_eq!(seed(&pixels, 200, 200, 800), None);
     }
 

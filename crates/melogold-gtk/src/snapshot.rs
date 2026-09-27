@@ -81,11 +81,7 @@ pub fn maybe_start(window: &MainWindow) {
             }),
             700,
         ),
-        (
-            "04e-update-back",
-            Box::new(|w| w.updates.pretend_state(crate::updates::UpdateState::Available)),
-            300,
-        ),
+        ("04e-update-back", Box::new(|w| w.updates.pretend_state(crate::updates::UpdateState::Available)), 300),
         ("04a-settings-storage", Box::new(|w| scroll_settings(w, 0.62)), 1500),
         ("04b-settings-about", Box::new(|w| scroll_settings(w, 1.0)), 700),
         ("05-diagnostics", Box::new(|w| w.push(&crate::pages::diagnostics::page(w))), 700),

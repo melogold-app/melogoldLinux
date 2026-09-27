@@ -1143,8 +1143,8 @@ impl Engine {
         }
         let Some(track) = self.current_track() else { return };
         let stage = if self.status == Status::Resolving { "открытие потока" } else { "вывод звука" };
-        let local = self.deps.songs.is_complete(&track.video_id)
-            || self.deps.downloads.as_ref().is_some_and(|d| d.is_complete(&track.video_id));
+        let local =
+            self.deps.songs.is_complete(&track.video_id) || self.deps.downloads.as_ref().is_some_and(|d| d.is_complete(&track.video_id));
         if !local || self.stall_retried.as_deref() == Some(track.video_id.as_str()) {
             tracing::warn!(трек = %track.video_id, этап = stage, локальный = local, "звука нет дольше 10 с");
             return;
