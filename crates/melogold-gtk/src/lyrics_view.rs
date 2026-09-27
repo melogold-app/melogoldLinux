@@ -44,6 +44,8 @@ mod imp {
     #[derive(Default)]
     pub struct LyricsCanvas {
         pub pill: Cell<Option<graphene::Rect>>,
+        /// Подложка в цвете обложки (secondary container её схемы); `None` — цвета темы.
+        pub pill_color: Cell<Option<gdk::RGBA>>,
         pub alpha: Cell<f64>,
         pub radius: Cell<f32>,
     }
@@ -73,10 +75,10 @@ mod imp {
             if let (Some(rect), true) = (self.pill.get(), alpha > 0.005) {
                 // Без цвета обложки: белый 16 % на тёмном, чёрный 8 % на светлом (задание 0003).
                 let dark = adw::StyleManager::default().is_dark();
-                let color = if dark {
-                    gdk::RGBA::new(1.0, 1.0, 1.0, 0.16 * alpha as f32)
-                } else {
-                    gdk::RGBA::new(0.0, 0.0, 0.0, 0.08 * alpha as f32)
+                let color = match self.pill_color.get() {
+                    Some(color) => gdk::RGBA::new(color.red(), color.green(), color.blue(), color.alpha() * alpha as f32),
+                    None if dark => gdk::RGBA::new(1.0, 1.0, 1.0, 0.16 * alpha as f32),
+                    None => gdk::RGBA::new(0.0, 0.0, 0.0, 0.08 * alpha as f32),
                 };
                 let radius = self.radius.get();
                 let rounded = gsk::RoundedRect::from_rect(rect, radius);
@@ -625,6 +627,12 @@ impl SyncedView {
         self.tick();
     }
 
+    /// Подложка текущей строки в цвете обложки («Сейчас играет»); `None` — цвета темы.
+    pub fn set_pill_color(&self, color: Option<gdk::RGBA>) {
+        self.canvas.imp().pill_color.set(color);
+        self.canvas.queue_draw();
+    }
+
     pub fn set_lyrics(self: &Rc<Self>, rows: &Rc<Vec<LyricRow>>, offset_ms: i64, source: Option<&str>) {
         self.offset.set(offset_ms);
         match source_text(source) {
@@ -896,6 +904,10 @@ impl LyricsPanel {
     }
 
     /// Показать состояние; `find`, `edit` и `retry` — действия кнопок сообщения.
+    pub fn set_pill_color(&self, color: Option<gdk::RGBA>) {
+        self.synced.set_pill_color(color);
+    }
+
     pub fn show(&self, service: &LyricsService) {
         let state = service.state();
         while let Some(child) = self.status_actions.first_child() {

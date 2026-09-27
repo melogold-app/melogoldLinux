@@ -4,6 +4,7 @@
 //! повторяют `src/Melogold.Core` Windows и `:core:domain` Android, векторы — в `spec/`.
 
 pub mod app_info;
+pub mod artwork_colors;
 pub mod countries;
 mod countries_generated;
 pub mod devices;

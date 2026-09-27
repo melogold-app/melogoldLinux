@@ -19,3 +19,4 @@ unicode-normalization.workspace = true
 hex.workspace = true
 regex = "1"
 roxmltree = "0.20"
+material-colors = "0.4"

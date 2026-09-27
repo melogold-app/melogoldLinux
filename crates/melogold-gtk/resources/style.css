@@ -170,3 +170,8 @@ button.track-link:active {
 button.track-link:hover > label {
   text-decoration: underline;
 }
+
+/* «Сейчас играет» в цветах обложки: новый трек перетекает в свои цвета, а не мигает. */
+.now-playing-page {
+  transition: background-color 400ms ease-out, color 400ms ease-out;
+}

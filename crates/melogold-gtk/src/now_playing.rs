@@ -4,11 +4,13 @@
 //! «Обложка · Текст» в заголовке.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
+use melogold_core::artwork_colors;
 use melogold_core::queue::RepeatMode;
 use melogold_core::text::format_duration;
 use melogold_core::thumbnails;
@@ -52,6 +54,11 @@ pub struct Inner {
     position: gtk::Label,
     duration: gtk::Label,
     requested: RefCell<Option<String>>,
+    /// Цвета страницы из обложки (§5.1): свой поставщик стилей, зерно играющей обложки и
+    /// зёрна недавних — чтобы при возврате к треку цвет встал сразу.
+    tint: gtk::CssProvider,
+    seed: Cell<Option<artwork_colors::Rgb>>,
+    seeds: RefCell<HashMap<String, Option<artwork_colors::Rgb>>>,
     seeking: Cell<bool>,
     seek_token: Cell<u64>,
     updating: Cell<bool>,
@@ -272,6 +279,9 @@ impl NowPlaying {
             position,
             duration,
             requested: RefCell::default(),
+            tint: gtk::CssProvider::new(),
+            seed: Cell::new(None),
+            seeds: RefCell::default(),
             seeking: Cell::new(false),
             seek_token: Cell::new(0),
             updating: Cell::new(false),
@@ -331,6 +341,19 @@ impl NowPlaying {
         });
         window.lyrics.listen(&refresh);
         now_playing.lyrics_refresh.replace(Some(refresh));
+        // Цвета обложки — свой поставщик поверх стилей приложения; класс страницы решает, действуют ли.
+        gtk::style_context_add_provider_for_display(
+            &now_playing.page.display(),
+            &now_playing.tint,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+        );
+        now_playing.page.add_css_class("now-playing-page");
+        let weak = Rc::downgrade(&now_playing.0);
+        adw::StyleManager::default().connect_dark_notify(move |_| {
+            if let Some(inner) = weak.upgrade() {
+                NowPlaying(inner).apply_tint();
+            }
+        });
         now_playing.place(window);
         now_playing
     }
@@ -376,6 +399,58 @@ impl NowPlaying {
         window.update_lyrics_button();
     }
 
+    /// Зерно обложки — в фоне: пиксели уменьшенной копии, квантование и Score (миллисекунды,
+    /// но не в потоке окна).
+    fn tint_from(&self, url: &str, texture: &gtk::gdk::Texture) {
+        let mut downloader = gtk::gdk::TextureDownloader::new(texture);
+        downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
+        let (bytes, stride) = downloader.download_bytes();
+        let (width, height) = (texture.width().max(0) as usize, texture.height().max(0) as usize);
+        let (this, url) = (self.clone(), url.to_owned());
+        glib::spawn_future_local(async move {
+            let seed = gtk::gio::spawn_blocking(move || artwork_colors::seed(&bytes, width, height, stride)).await.ok().flatten();
+            {
+                let mut seeds = this.seeds.borrow_mut();
+                if seeds.len() > 32 {
+                    seeds.clear();
+                }
+                seeds.insert(url.clone(), seed);
+            }
+            if this.requested.borrow().as_deref() == Some(url.as_str()) {
+                this.set_seed(seed);
+            }
+        });
+    }
+
+    fn set_seed(&self, seed: Option<artwork_colors::Rgb>) {
+        self.seed.set(seed);
+        self.apply_tint();
+    }
+
+    /// Фон, текст и подложка строки в цветах обложки; серая обложка — цвета темы. Зависит от
+    /// темы: при смене светлой и тёмной вызывается заново.
+    fn apply_tint(&self) {
+        let Some(seed) = self.seed.get() else {
+            self.page.remove_css_class("now-playing-tinted");
+            self.lyrics.set_pill_color(None);
+            return;
+        };
+        let palette = artwork_colors::palette(seed, adw::StyleManager::default().is_dark());
+        let hex = |rgb: artwork_colors::Rgb| format!("#{rgb:06x}");
+        let (background, text, secondary) = (hex(palette.background), hex(palette.text), hex(palette.secondary_text));
+        self.tint.load_from_string(&format!(
+            ".now-playing-tinted {{ background-color: {background}; color: {text}; }}
+             .now-playing-tinted headerbar {{ background: none; box-shadow: none; color: {text}; }}
+             .now-playing-tinted .dim-label {{ color: {secondary}; opacity: 1; }}
+             .now-playing-tinted .lyrics-fade-top {{ background: linear-gradient(to bottom, {background}, alpha({background}, 0)); }}
+             .now-playing-tinted .lyrics-fade-bottom {{ background: linear-gradient(to top, {background}, alpha({background}, 0)); }}"
+        ));
+        self.page.add_css_class("now-playing-tinted");
+        let pill = palette.pill;
+        let channel = |shift: u32| ((pill >> shift) & 0xFF) as f32 / 255.0;
+        self.lyrics.set_pill_color(Some(gtk::gdk::RGBA::new(channel(16), channel(8), channel(0), 1.0)));
+    }
+
     pub fn set_liked(&self, liked: bool) {
         crate::library_view::set_heart(&self.heart, liked);
     }
@@ -393,6 +468,11 @@ impl NowPlaying {
                 let wide = thumbnails::is_wide(track.thumbnail_url.as_deref()) || (track.thumbnail_url.is_none() && track.is_video());
                 self.frame.set_ratio(if wide { 16.0 / 9.0 } else { 1.0 });
                 self.requested.replace(url.clone());
+                // Зерно этой обложки уже считали — цвет встаёт сразу, без ожидания картинки.
+                let known = url.as_ref().and_then(|u| self.seeds.borrow().get(u).copied());
+                if let Some(seed) = known {
+                    self.set_seed(seed);
+                }
                 self.picture.set_paintable(gtk::gdk::Paintable::NONE);
                 self.placeholder.set_visible(true);
                 if let Some(url) = url {
@@ -407,6 +487,7 @@ impl NowPlaying {
                                 this.frame.set_ratio(if ratio > 1.2 { 16.0 / 9.0 } else { 1.0 });
                                 this.picture.set_paintable(Some(&texture));
                                 this.placeholder.set_visible(false);
+                                this.tint_from(&url, &texture);
                             }
                         }
                     });
