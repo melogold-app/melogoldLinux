@@ -54,6 +54,8 @@ pub struct Inner {
     volume_value: gtk::Label,
     more: gtk::MenuButton,
     hidden: Cell<Hidden>,
+    /// Обложка, название и ♡ — правый щелчок по ним открывает то же меню, что «…» (§5.2).
+    track: gtk::Box,
     state: RefCell<State>,
     /// Пользователь тянет ползунок: позиция из плеера его не перебивает.
     seeking: Cell<bool>,
@@ -304,6 +306,7 @@ impl PlayerBar {
             volume_value,
             more,
             hidden: Cell::new(Hidden::default()),
+            track: track.clone(),
             state: RefCell::default(),
             seeking: Cell::new(false),
             seek_token: Cell::new(0),
@@ -379,6 +382,20 @@ impl PlayerBar {
         });
         self.volume_button.add_controller(scroll);
         self.update_volume_icon(&window.ctx.settings);
+
+        // Правый щелчок по треку — то же меню, что «…», у указателя.
+        let click = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
+        let (weak_window, weak_bar) = (window.downgrade(), Rc::downgrade(&self.0));
+        click.connect_pressed(move |gesture, _, x, y| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            if let (Some(window), Some(bar)) = (weak_window.upgrade(), weak_bar.upgrade()) {
+                if window.state_track().is_some() {
+                    let menu = player_menu(&window, bar.hidden.get());
+                    crate::library_view::popup(bar.track.upcast_ref(), &menu, Some((x, y)));
+                }
+            }
+        });
+        self.track.add_controller(click);
 
         // «…» собирается при открытии: пункты зависят от трека, его загрузки и ширины окна.
         let (weak_window, weak_bar) = (window.downgrade(), Rc::downgrade(&self.0));
@@ -556,13 +573,17 @@ pub fn player_menu(window: &MainWindow, hidden: Hidden) -> gio::Menu {
     if panel.n_items() > 0 {
         menu.append_section(None, &panel);
     }
+    // Последняя секция меню трека — «Не показывать этот трек»: у «…» она уходит в самый конец (§5.3).
+    let mut hide = None;
     if let Some(track) = window.state_track() {
         let target = crate::library_view::TrackTarget { track, context: crate::library_view::RowContext::Player, ..Default::default() };
         let track_menu = window.track_menu_for(&target);
-        for index in 0..track_menu.n_items() {
-            if let Some(section) = track_menu.item_link(index, gio::MENU_LINK_SECTION) {
-                menu.append_section(None, &section);
+        let sections: Vec<_> = (0..track_menu.n_items()).filter_map(|i| track_menu.item_link(i, gio::MENU_LINK_SECTION)).collect();
+        if let Some((last, rest)) = sections.split_last() {
+            for section in rest {
+                menu.append_section(None, section);
             }
+            hide = Some(last.clone());
         }
     }
     if let Some(lyrics) = lyrics_menu(window) {
@@ -573,6 +594,9 @@ pub fn player_menu(window: &MainWindow, hidden: Hidden) -> gio::Menu {
     info.append(Some(tr("MenuStreamInfo")), Some("win.stream-info"));
     info.append(Some(tr("MenuShortcuts")), Some("app.shortcuts"));
     menu.append_section(None, &info);
+    if let Some(hide) = hide {
+        menu.append_section(None, &hide);
+    }
     menu
 }
 
