@@ -459,19 +459,22 @@ fn lyrics_steps() -> Vec<Step> {
 <p begin="00:51.000" end="00:55.000" ttm:agent="v2">Never gonna give you up</p>
 <p begin="00:55.000" end="00:59.000" ttm:agent="v2">Never gonna let you down</p>
 </div></body></tt>"#;
-    let play = |video_id: &'static str, title: &'static str, start: u64| {
+    let play = |video_id: &'static str, title: &'static str, artist: &'static str, album: &'static str, start: u64| {
         move |w: &MainWindow| {
             let track = melogold_core::music::Track {
                 video_id: video_id.into(),
                 title: title.into(),
-                artists_text: Some("Rick Astley".into()),
-                album_title: Some("Whenever You Need Somebody".into()),
+                artists_text: Some(artist.into()),
+                album_title: Some(album.into()),
                 ..Default::default()
             };
             w.ctx.services.player.send(melogold_playback::engine::Command::PlaySingle { track, start: Duration::from_secs(start) });
         }
     };
-    let (first, second) = (play("dQw4w9WgXcQ", "Never Gonna Give You Up", 19), play("fJ9rUzIMcZQ", "Bohemian Rhapsody", 0));
+    let (first, second) = (
+        play("dQw4w9WgXcQ", "Never Gonna Give You Up", "Rick Astley", "Whenever You Need Somebody", 19),
+        play("fJ9rUzIMcZQ", "Bohemian Rhapsody", "Queen", "A Night at the Opera", 0),
+    );
     vec![
         (
             "17-lyrics",

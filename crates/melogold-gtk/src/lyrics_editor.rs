@@ -91,6 +91,7 @@ struct Editor {
     export_lrc: gio::SimpleAction,
     preview: Rc<SyncedView>,
     preview_stack: gtk::Stack,
+    preview_hint: adw::StatusPage,
     clock: RefCell<Option<glib::SourceId>>,
     /// Сам редактор — для строк, которые держат его слабо.
     this: RefCell<std::rc::Weak<Editor>>,
@@ -350,6 +351,7 @@ impl Editor {
             export_lrc,
             preview,
             preview_stack,
+            preview_hint: no_lines.clone(),
             clock: RefCell::default(),
             this: RefCell::default(),
         });
@@ -590,13 +592,19 @@ impl Editor {
     }
 
     fn show_preview(&self) {
-        match self.draft.borrow().to_synced() {
+        let draft = self.draft.borrow();
+        match draft.to_synced() {
             Some(lyrics) => {
                 let rows = Rc::new(rows::build(&lyrics));
                 self.preview.set_lyrics(&rows, 0, None);
                 self.preview_stack.set_visible_child_name("lyrics");
             }
-            None => self.preview_stack.set_visible_child_name("hint"),
+            None => {
+                // Текст есть, а времени у строк нет: звать надо на «Синхронизацию», а не на «Текст».
+                let key = if draft.lines.is_empty() { "LyricsEditorNoLines" } else { "LinuxLyricsEditorNotSynced" };
+                self.preview_hint.set_title(tr(key));
+                self.preview_stack.set_visible_child_name("hint");
+            }
         }
     }
 

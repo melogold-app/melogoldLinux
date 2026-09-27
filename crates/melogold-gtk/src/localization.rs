@@ -84,6 +84,7 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxAlbumSetFormat", "Альбом указан: {0}", "Album set: {0}"),
     // Метка строки: трек целиком в кэше музыки и играет без сети (у Windows только раздел «В кэше · …»).
     ("LinuxInCache", "В кэше — играет без сети", "Cached — plays offline"),
+    ("LinuxLyricsEditorNotSynced", "Отметьте строки на вкладке «Синхронизация»", "Mark the lines on the Sync tab"),
     (
         "LinuxInviteLater",
         "Вход по приглашению другого устройства появится в следующей версии",
