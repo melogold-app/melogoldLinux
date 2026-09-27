@@ -331,12 +331,12 @@ impl NowPlaying {
         if let Some(track) = &state.track {
             self.title.set_label(&track.title);
             self.subtitle.set_label(&track.subtitle());
-            // Кадр видео 16:9 — целиком прямоугольником, обложка песни — квадратом (§5.2, §5.5).
-            let wide = thumbnails::is_wide(track.thumbnail_url.as_deref()) || (track.thumbnail_url.is_none() && track.is_video());
-            self.frame.set_ratio(if wide { 16.0 / 9.0 } else { 1.0 });
             let source = track.thumbnail_url.clone().unwrap_or_else(|| thumbnails::for_video(&track.video_id, 544));
             let url = thumbnails::sized(Some(&source), 544);
             if *self.requested.borrow() != url {
+                // Пока картинка грузится: кадр видео 16:9 — прямоугольником, обложка песни — квадратом (§5.2, §5.5).
+                let wide = thumbnails::is_wide(track.thumbnail_url.as_deref()) || (track.thumbnail_url.is_none() && track.is_video());
+                self.frame.set_ratio(if wide { 16.0 / 9.0 } else { 1.0 });
                 self.requested.replace(url.clone());
                 self.picture.set_paintable(gtk::gdk::Paintable::NONE);
                 self.placeholder.set_visible(true);
@@ -346,6 +346,10 @@ impl NowPlaying {
                         let texture = images.load(url.clone()).await;
                         if this.requested.borrow().as_deref() == Some(url.as_str()) {
                             if let Some(texture) = texture {
+                                // Форма — по картинке без полей: шире 1,2:1 — 16:9, иначе квадрат
+                                // (обложка сингла из видео-«статики»; задание Windows 0007).
+                                let ratio = f64::from(texture.width()) / f64::from(texture.height().max(1));
+                                this.frame.set_ratio(if ratio > 1.2 { 16.0 / 9.0 } else { 1.0 });
                                 this.picture.set_paintable(Some(&texture));
                                 this.placeholder.set_visible(false);
                             }

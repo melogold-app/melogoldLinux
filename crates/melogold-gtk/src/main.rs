@@ -19,6 +19,7 @@ mod mpris;
 mod now_playing;
 mod pages;
 mod player_bar;
+mod playing_bars;
 mod queue_panel;
 mod save_file;
 mod selection;

@@ -21,6 +21,8 @@ pub struct Cover {
     picture: gtk::Picture,
     placeholder: gtk::Image,
     requested: Rc<RefCell<Option<String>>>,
+    /// Столбики «играет» поверх затемнённой обложки; создаются, когда трек заиграл.
+    playing: Rc<RefCell<Option<gtk::Box>>>,
 }
 
 impl Cover {
@@ -34,7 +36,28 @@ impl Cover {
         root.add_css_class("cover");
         root.set_valign(gtk::Align::Center);
         root.set_halign(gtk::Align::Center);
-        Cover { root, picture, placeholder, requested: Rc::default() }
+        Cover { root, picture, placeholder, requested: Rc::default(), playing: Rc::default() }
+    }
+
+    /// У играющего трека вместо обложки — столбики под звук (§5.3).
+    pub fn set_playing(&self, playing: bool) {
+        let mut overlay = self.playing.borrow_mut();
+        match (&*overlay, playing) {
+            (Some(shown), _) => shown.set_visible(playing),
+            (None, true) => {
+                let shade = gtk::Box::builder().can_target(false).build();
+                shade.add_css_class("playing-overlay");
+                shade.append(&crate::playing_bars::new());
+                shade.set_halign(gtk::Align::Fill);
+                shade.set_valign(gtk::Align::Fill);
+                if let Some(bars) = shade.first_child() {
+                    bars.set_hexpand(true);
+                }
+                self.root.add_overlay(&shade);
+                *overlay = Some(shade);
+            }
+            (None, false) => {}
+        }
     }
 
     /// Картинка по адресу нужного размера; пока грузится — нота.

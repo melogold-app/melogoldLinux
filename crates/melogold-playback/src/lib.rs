@@ -4,6 +4,7 @@
 pub mod downloads;
 pub mod engine;
 pub mod fmp4;
+pub mod levels;
 pub mod mp4_writer;
 pub mod output;
 pub mod reader;

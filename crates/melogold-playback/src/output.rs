@@ -1,7 +1,8 @@
 //! Вывод звука на GStreamer (docs/PROMPT.md §3 «Звук»).
 //!
 //! ```text
-//! appsrc (кадры AAC из fMP4) → avdec_aac → audioconvert → audioresample → scaletempo → volume → вывод
+//! appsrc (кадры AAC из fMP4) → avdec_aac → audioconvert → audioresample → scaletempo →
+//!   audioconvert → F32 (уровни для столбиков) → volume → audioconvert → вывод
 //! ```
 //!
 //! Кадры в `appsrc` кладёт отдельный поток: берёт фрагменты у [`TrackStream`] (диск, кэш, сеть) и
@@ -16,6 +17,7 @@ use std::time::Duration;
 use gst::prelude::*;
 use gst_app::{AppSrc, AppStreamType};
 
+use crate::levels::AudioLevels;
 use crate::resolver::StreamError;
 use crate::stream::{FragmentData, TrackStream};
 
@@ -81,6 +83,7 @@ impl Output {
         stream: Arc<TrackStream>,
         start: Duration,
         rate: f64,
+        levels: Arc<AudioLevels>,
         failed: impl Fn(StreamError) + Send + 'static,
     ) -> Result<Output, String> {
         let track = &stream.index().track;
@@ -110,11 +113,41 @@ impl Output {
         let resample = make("audioresample")?;
         let tempo = make("scaletempo")?;
         let convert_out = make("audioconvert")?;
+        let float = make("capsfilter")?;
+        float.set_property("caps", gst::Caps::builder("audio/x-raw").field("format", "F32LE").field("layout", "interleaved").build());
         let volume = make("volume")?;
+        let convert_sink = make("audioconvert")?;
         let sink = audio_sink()?;
+        // Уровни — до громкости: столбики показывают музыку, а не положение ползунка.
+        if let Some(pad) = float.static_pad("src") {
+            pad.add_probe(gst::PadProbeType::BUFFER, move |pad, info| {
+                if let (Some(buffer), Some(caps)) = (info.buffer(), pad.current_caps()) {
+                    let structure = caps.structure(0);
+                    let channels = structure.and_then(|s| s.get::<i32>("channels").ok()).unwrap_or(2).max(1) as usize;
+                    let rate = structure.and_then(|s| s.get::<i32>("rate").ok()).unwrap_or(48_000).max(1) as u32;
+                    if let Ok(map) = buffer.map_readable() {
+                        let samples: Vec<f32> =
+                            map.as_slice().chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+                        levels.feed(&samples, channels, rate);
+                    }
+                }
+                gst::PadProbeReturn::Ok
+            });
+        }
 
         let pipeline = gst::Pipeline::with_name("melogold");
-        let elements = [appsrc.upcast_ref::<gst::Element>(), &decoder, &convert, &resample, &tempo, &convert_out, &volume, &sink];
+        let elements = [
+            appsrc.upcast_ref::<gst::Element>(),
+            &decoder,
+            &convert,
+            &resample,
+            &tempo,
+            &convert_out,
+            &float,
+            &volume,
+            &convert_sink,
+            &sink,
+        ];
         pipeline.add_many(elements).map_err(|e| e.to_string())?;
         gst::Element::link_many(elements).map_err(|e| e.to_string())?;
 

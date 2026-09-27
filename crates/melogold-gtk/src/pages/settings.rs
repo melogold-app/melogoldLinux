@@ -21,6 +21,7 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
     let page = adw::PreferencesPage::new();
     page.add(&account_group(window));
     page.add(&appearance_group(window));
+    page.add(&playback_group(window));
     page.add(&about_group(window));
     adw::NavigationPage::builder().title(tr("NavSettings")).tag("root").child(&page).build()
 }
@@ -147,6 +148,64 @@ fn appearance_group(window: &MainWindow) -> adw::PreferencesGroup {
         }
     });
     group.add(&language);
+    group
+}
+
+/// Скорость воспроизведения — одна на все треки, тон не меняется; нормализация громкости.
+fn playback_group(window: &MainWindow) -> adw::PreferencesGroup {
+    const SPEEDS: [f64; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+    let group = adw::PreferencesGroup::builder().title(tr("SettingsPlayback.Text")).build();
+    let ru = crate::localization::lang() == crate::localization::Lang::Ru;
+    let labels: Vec<String> = SPEEDS
+        .iter()
+        .map(|speed| {
+            if *speed == 1.0 {
+                tr("SpeedNormal").to_owned()
+            } else {
+                let text = format!("{speed}×");
+                if ru {
+                    text.replace('.', ",")
+                } else {
+                    text
+                }
+            }
+        })
+        .collect();
+    let names = gtk::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
+    let speed = adw::ComboRow::builder().title(tr("SettingsSpeed.Header")).subtitle(tr("SettingsSpeed.Description")).model(&names).build();
+    let current = window.ctx.settings.get(&keys::SPEED);
+    let index =
+        SPEEDS.iter().enumerate().min_by(|a, b| (a.1 - current).abs().total_cmp(&(b.1 - current).abs())).map(|(i, _)| i).unwrap_or(2);
+    speed.set_selected(index as u32);
+    let weak = window.downgrade();
+    speed.connect_selected_notify(move |row| {
+        let Some(window) = weak.upgrade() else { return };
+        let value = SPEEDS.get(row.selected() as usize).copied().unwrap_or(1.0);
+        window.ctx.settings.set(&keys::SPEED, value);
+        window
+            .ctx
+            .services
+            .player
+            .send(melogold_playback::engine::Command::Settings(crate::services::playback_settings(&window.ctx.settings)));
+    });
+    group.add(&speed);
+
+    let normalize = adw::SwitchRow::builder()
+        .title(tr("SettingsNormalize.Header"))
+        .subtitle(tr("SettingsNormalize.Description"))
+        .active(window.ctx.settings.get(&keys::NORMALIZATION))
+        .build();
+    let weak = window.downgrade();
+    normalize.connect_active_notify(move |row| {
+        let Some(window) = weak.upgrade() else { return };
+        window.ctx.settings.set(&keys::NORMALIZATION, row.is_active());
+        window
+            .ctx
+            .services
+            .player
+            .send(melogold_playback::engine::Command::Settings(crate::services::playback_settings(&window.ctx.settings)));
+    });
+    group.add(&normalize);
     group
 }
 

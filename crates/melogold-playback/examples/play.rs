@@ -26,7 +26,7 @@ async fn main() {
     let reader = RangeReader::new(reqwest::Client::new(), Arc::clone(&resolver), info, Some((Arc::clone(&cache), entry)));
     let stream = TrackStream::open(reader).await.unwrap();
     println!("заголовки за {} мс, длительность {:?}", pressed.elapsed().as_millis(), stream.duration());
-    let output = Output::new(stream, Duration::ZERO, 1.0, |e| eprintln!("сбой чтения: {e}")).unwrap();
+    let output = Output::new(stream, Duration::ZERO, 1.0, Default::default(), |e| eprintln!("сбой чтения: {e}")).unwrap();
     output.set_volume(0.8, false);
     output.play();
     let bus = output.bus().unwrap();

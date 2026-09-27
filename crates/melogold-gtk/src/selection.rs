@@ -195,20 +195,38 @@ fn install_list_gestures(
     });
     list.add_controller(tap);
 
+    // Клавиши строки в фокусе: меню (клавиша меню, Shift+F10), Delete — убрать, Alt+↑ ↓ — порядок
+    // в своём плейлисте (§5.3).
     let keys = gtk::EventControllerKey::new();
-    let weak_list = list.downgrade();
+    let (weak_list, weak_window) = (list.downgrade(), window.downgrade());
     keys.connect_key_pressed(move |_, key, _, modifiers| {
-        let menu_key = key == gdk::Key::Menu || (key == gdk::Key::F10 && modifiers.contains(gdk::ModifierType::SHIFT_MASK));
-        if !menu_key {
+        let Some(row) = weak_list.upgrade().and_then(|l| gtk::prelude::RootExt::focus(&l.root()?)).and_then(|w| find_row(&w)) else {
             return glib::Propagation::Proceed;
-        }
-        let focused = weak_list.upgrade().and_then(|l| gtk::prelude::RootExt::focus(&l.root()?)).and_then(|w| find_row(&w));
-        match focused {
-            Some(row) => {
+        };
+        let alt = modifiers.contains(gdk::ModifierType::ALT_MASK);
+        let handled = match key {
+            gdk::Key::Menu => {
                 row.popup_menu(None);
-                glib::Propagation::Stop
+                true
             }
-            None => glib::Propagation::Proceed,
+            gdk::Key::F10 if modifiers.contains(gdk::ModifierType::SHIFT_MASK) => {
+                row.popup_menu(None);
+                true
+            }
+            gdk::Key::Delete | gdk::Key::KP_Delete if modifiers.is_empty() => row.remove_from_place(),
+            gdk::Key::Up | gdk::Key::Down if alt => match (row.context(), row.video_id(), weak_window.upgrade()) {
+                (crate::library_view::RowContext::Playlist(id), Some(video_id), Some(window)) => {
+                    window.move_in_playlist(id, &video_id, if key == gdk::Key::Up { -1 } else { 1 });
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
+        };
+        if handled {
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
         }
     });
     list.add_controller(keys);

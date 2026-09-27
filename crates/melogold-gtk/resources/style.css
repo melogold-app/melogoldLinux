@@ -140,3 +140,8 @@ listview.track-list > row {
 .lyrics-editor-controls {
   background: alpha(@card_bg_color, 0.5);
 }
+
+/* Столбики «играет» поверх обложки играющего трека. */
+.playing-overlay {
+  background: alpha(black, 0.5);
+}

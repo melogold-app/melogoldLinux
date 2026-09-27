@@ -14,6 +14,7 @@ pub fn present(parent: Option<&gtk::Window>) -> adw::ShortcutsDialog {
         (tr("ShortcutSections"), "<Control>1...<Control>3"),
         (tr("ShortcutSettings"), "<Control>comma"),
         (tr("Back"), "<Alt>Left Escape"),
+        (tr("ShortcutFullScreen"), "F11"),
         (tr("LinuxPrimaryMenuShortcut"), "F10"),
         (tr("ShortcutHelp"), "<Control>question F1"),
         (tr("LinuxCloseWindow"), "<Control>w"),
@@ -38,6 +39,17 @@ pub fn present(parent: Option<&gtk::Window>) -> adw::ShortcutsDialog {
         playback.add(adw::ShortcutsItem::new(title, accelerator));
     }
     dialog.add(playback);
+    let lists = adw::ShortcutsSection::new(Some(tr("ShortcutsGroupLists")));
+    for (title, accelerator) in [
+        (tr("ShortcutRowPlay"), "Return"),
+        (tr("ShortcutRowMenu"), "Menu <Shift>F10"),
+        (tr("ShortcutRowRemove"), "Delete"),
+        (tr("ShortcutRowMove"), "<Alt>Up <Alt>Down"),
+        (tr("ShortcutSelectAll"), "<Control>a"),
+    ] {
+        lists.add(adw::ShortcutsItem::new(title, accelerator));
+    }
+    dialog.add(lists);
     let editor = adw::ShortcutsSection::new(Some(tr("ShortcutsGroupEditor")));
     for (title, accelerator) in [
         (tr("ShortcutMark"), "Return"),

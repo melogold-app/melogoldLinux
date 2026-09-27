@@ -394,8 +394,18 @@ impl MainWindow {
         self.root_nav.visible_page().is_some_and(|p| p.tag().as_deref() == Some("now-playing"))
     }
 
+    /// Трек, который сейчас в плеере (для столбиков «играет» в строках).
+    pub fn current_video_id(&self) -> Option<String> {
+        self.state.borrow().track.as_ref().map(|t| t.video_id.clone())
+    }
+
     pub fn is_playing(&self) -> bool {
         self.state.borrow().playing
+    }
+
+    /// Состояние плеера (таймер сна для меню «…»).
+    pub fn player_state(&self) -> State {
+        self.state.borrow().clone()
     }
 
     /// Текст на экране: открыта «Сейчас играет», и текст виден.
@@ -426,8 +436,24 @@ impl MainWindow {
         let open = self.root_nav.visible_page().is_some_and(|p| p.tag().as_deref() == Some("now-playing"));
         if open {
             self.root_nav.pop_to_page(&self.main_page);
+            // «Во весь экран» — только у «Сейчас играет».
+            if self.window.is_fullscreen() {
+                self.window.unfullscreen();
+            }
         }
         open
+    }
+
+    /// F11: «Сейчас играет» во весь экран и обратно.
+    pub fn toggle_fullscreen(&self) {
+        if self.window.is_fullscreen() {
+            self.window.unfullscreen();
+            return;
+        }
+        self.show_now_playing();
+        if self.now_playing_open() {
+            self.window.fullscreen();
+        }
     }
 
     /// Ссылка или текст: из командной строки, второго экземпляра, перетаскивания, поля поиска.
@@ -758,6 +784,7 @@ impl MainWindow {
                 }),
             ),
             simple("now-playing", Box::new(|w| w.show_now_playing())),
+            simple("fullscreen", Box::new(|w| w.toggle_fullscreen())),
             simple("play-pause", send(|| Command::TogglePlay)),
             simple("next", send(|| Command::Next)),
             simple("previous", send(|| Command::Previous)),
@@ -809,6 +836,26 @@ impl MainWindow {
             })
             .build();
         self.window.add_action_entries([shift]);
+        // Таймер сна: минуты, 0 — «До конца трека».
+        let weak = self.downgrade();
+        let sleep = gio::ActionEntry::builder("sleep")
+            .parameter_type(Some(glib::VariantTy::INT32))
+            .activate(move |_: &adw::ApplicationWindow, _, parameter| {
+                let (Some(window), Some(minutes)) = (weak.upgrade(), parameter.and_then(|p| p.get::<i32>())) else { return };
+                let command =
+                    if minutes <= 0 { Command::SleepAtTrackEnd } else { Command::SetSleepTimer(Duration::from_secs(minutes as u64 * 60)) };
+                window.ctx.services.player.send(command);
+            })
+            .build();
+        let weak = self.downgrade();
+        let sleep_off = gio::ActionEntry::builder("sleep-off")
+            .activate(move |_: &adw::ApplicationWindow, _, _| {
+                if let Some(window) = weak.upgrade() {
+                    window.ctx.services.player.send(Command::CancelSleepTimer);
+                }
+            })
+            .build();
+        self.window.add_action_entries([sleep, sleep_off]);
 
         // Состояния: перемешать, без звука, очередь — у переключателей своё отмеченное состояние.
         let shuffle = gio::SimpleAction::new_stateful("shuffle", None, &false.to_variant());
@@ -912,6 +959,10 @@ impl MainWindow {
         let weak = self.downgrade();
         controller.connect_key_pressed(move |_, key, _, modifiers| {
             let Some(window) = weak.upgrade() else { return glib::Propagation::Proceed };
+            // Открыт диалог (редактор текста, поиск текста, сведения): клавиши — ему, Esc закрывает его.
+            if window.window.visible_dialog().is_some() {
+                return glib::Propagation::Proceed;
+            }
             let typing = gtk::prelude::GtkWindowExt::focus(&window.window).is_some_and(|w| w.is::<gtk::Text>() || w.is::<gtk::TextView>());
             let control = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
             let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
@@ -929,6 +980,7 @@ impl MainWindow {
                     return if window.clear_selection() || window.go_back() { glib::Propagation::Stop } else { glib::Propagation::Proceed };
                 }
                 (_, _, _, true) => return glib::Propagation::Proceed,
+                (gdk::Key::F11, false, false, _) => "win.fullscreen",
                 (gdk::Key::slash, false, _, _) => "win.search",
                 (gdk::Key::space, false, false, _) => "win.play-pause",
                 (gdk::Key::m | gdk::Key::M, false, _, _) => "win.mute",
@@ -1176,6 +1228,8 @@ impl MainWindow {
     // ── плеер ──
 
     fn listen_player(&self) {
+        let (player, weak) = (self.ctx.services.player.clone(), self.downgrade());
+        crate::playing_bars::set_source(move || (player.levels(), weak.upgrade().is_some_and(|w| w.is_playing())));
         let events = self.ctx.services.player.subscribe();
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
@@ -1201,6 +1255,13 @@ impl MainWindow {
         match event {
             Event::State(state) => {
                 self.show_state(&state);
+                let previous = self.current_video_id();
+                let current = state.track.as_ref().map(|t| t.video_id.clone());
+                if previous != current {
+                    for row in self.library_view.live_rows() {
+                        row.refresh_playing(current.as_deref());
+                    }
+                }
                 if let Some(action) = self.window.lookup_action("shuffle").and_downcast::<gio::SimpleAction>() {
                     action.set_state(&state.shuffle.to_variant());
                 }
@@ -1225,6 +1286,7 @@ impl MainWindow {
                 });
                 self.toasts.add_toast(toast);
             }
+            Event::SleepTimerFired => self.toast(tr("SleepTimerEnded")),
             Event::Seeked(_) | Event::Listened { .. } => {}
         }
     }

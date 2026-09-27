@@ -521,8 +521,8 @@ pub struct Hidden {
 }
 
 /// Меню «…» панели плеера — одно на всё (§5.3): спрятанное порогом, меню играющего трека (без
-/// очереди и ♡ — они рядом), группа «Текст», пока текст на экране, сведения о потоке и клавиши.
-/// Таймер добавит свой срез.
+/// очереди и ♡ — они рядом), группа «Текст», пока текст на экране, таймер сна, сведения о потоке и
+/// клавиши.
 pub fn player_menu(window: &MainWindow, hidden: Hidden) -> gio::Menu {
     let menu = gio::Menu::new();
     let panel = gio::Menu::new();
@@ -553,6 +553,7 @@ pub fn player_menu(window: &MainWindow, hidden: Hidden) -> gio::Menu {
     if let Some(lyrics) = lyrics_menu(window) {
         menu.append_section(None, &lyrics);
     }
+    menu.append_section(None, &sleep_menu(window));
     let info = gio::Menu::new();
     info.append(Some(tr("MenuStreamInfo")), Some("win.stream-info"));
     info.append(Some(tr("MenuShortcuts")), Some("app.shortcuts"));
@@ -596,4 +597,37 @@ fn lyrics_menu(window: &MainWindow) -> Option<gio::Menu> {
         menu.append_submenu(Some(&label), &offset);
     }
     Some(menu)
+}
+
+/// Таймер сна (§4): 15, 30, 45, 60 минут и «До конца трека»; заведённый — с остатком и «Выключить таймер».
+fn sleep_menu(window: &MainWindow) -> gio::Menu {
+    use crate::localization::{plural, trf};
+    let state = window.player_state();
+    let label = match (state.sleep_at_ms, state.sleep_at_track_end) {
+        (Some(at), _) => {
+            let minutes = ((at - melogold_core::text::now_ms()) as f64 / 60_000.0).ceil().max(1.0) as i64;
+            trf("SleepTimerLeftFormat", &[&plural("MinutesLeft", minutes)])
+        }
+        (None, true) => trf("SleepTimerLeftFormat", &[&tr("SleepUntilTrackEnd")]),
+        (None, false) => tr("SleepTimer").to_owned(),
+    };
+    let times = gio::Menu::new();
+    for minutes in [15, 30, 45, 60] {
+        let item = gio::MenuItem::new(Some(&plural("Minutes", minutes)), None);
+        item.set_action_and_target_value(Some("win.sleep"), Some(&(minutes as i32).to_variant()));
+        times.append_item(&item);
+    }
+    let end = gio::MenuItem::new(Some(tr("SleepUntilTrackEnd")), None);
+    end.set_action_and_target_value(Some("win.sleep"), Some(&0i32.to_variant()));
+    times.append_item(&end);
+    let submenu = gio::Menu::new();
+    submenu.append_section(None, &times);
+    if state.sleep_at_ms.is_some() || state.sleep_at_track_end {
+        let off = gio::Menu::new();
+        off.append(Some(tr("SleepTimerOff")), Some("win.sleep-off"));
+        submenu.append_section(None, &off);
+    }
+    let section = gio::Menu::new();
+    section.append_submenu(Some(&label), &submenu);
+    section
 }

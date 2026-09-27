@@ -67,6 +67,7 @@ impl QueuePanel {
             let shown = window.display(&item.track);
             let cover = Cover::new(40);
             cover.set(&window.ctx.services.images, item.track.thumbnail_url.as_deref(), 120);
+            cover.set_playing(current);
             let title = gtk::Label::builder().label(&shown.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
             if current {
                 title.add_css_class("accent");

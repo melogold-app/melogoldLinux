@@ -120,6 +120,28 @@ pub fn maybe_start(window: &MainWindow) {
             1500,
         ),
         (
+            // Задание Windows 0007: видео-«статика» — обложка сингла без чёрных полей, квадратом.
+            "10a-frame-bars",
+            Box::new(|w| {
+                let track = melogold_core::music::Track {
+                    video_id: "LLhpBVFh2Zg".into(),
+                    title: "БАРМАЛЕЙ".into(),
+                    artists_text: Some("GORILLA GLUE, LIL NAKUR".into()),
+                    thumbnail_url: Some("https://i.ytimg.com/vi/LLhpBVFh2Zg/hq720.jpg".into()),
+                    video_type: Some("video".into()),
+                    ..Default::default()
+                };
+                w.ctx.services.player.send(melogold_playback::engine::Command::PlaySingle { track, start: Duration::ZERO });
+                let weak = w.downgrade();
+                glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+                    if let Some(window) = weak.upgrade() {
+                        window.show_now_playing();
+                    }
+                });
+            }),
+            5000,
+        ),
+        (
             // Задание 0001: трек закрыт в стране. Скрипт снимков ставит MELOGOLD_FAKE_GEO=cYKAr38pZcY:RU.
             "11-geo",
             Box::new(|w| {
@@ -225,7 +247,7 @@ pub fn maybe_start(window: &MainWindow) {
                 w.ctx.services.player.send(melogold_playback::engine::Command::Pause);
                 crate::shortcuts::present(Some(w.window.upcast_ref()));
             }),
-            700,
+            1500,
         ),
         (
             "14-settings-account",

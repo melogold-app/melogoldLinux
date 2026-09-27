@@ -149,6 +149,21 @@ impl TrackRow {
         self.imp().position.set(position);
     }
 
+    pub fn context(&self) -> RowContext {
+        self.imp().context.get()
+    }
+
+    /// Delete: убрать из плейлиста, истории или очереди — тем же действием, что в меню.
+    pub fn remove_from_place(&self) -> bool {
+        let Some(track) = self.track() else { return false };
+        let context = self.context();
+        if matches!(context, RowContext::Plain | RowContext::Player) {
+            return false;
+        }
+        let target = TrackTarget { track, context, ..Default::default() };
+        self.activate_action("win.track-remove", Some(&target.variant())).is_ok()
+    }
+
     pub fn set_selection(&self, selection: Option<&std::rc::Rc<crate::selection::Selection>>) {
         self.imp().selection.replace(selection.map(std::rc::Rc::downgrade));
     }
@@ -174,6 +189,9 @@ impl TrackRow {
         imp.subtitle.set_visible(!subtitle.is_empty());
         imp.badge.set_visible(track.explicit);
         set_heart(&imp.heart, window.library_view.is_liked(&track.video_id));
+        if let Some(cover) = imp.cover.get() {
+            cover.set_playing(window.current_video_id().as_deref() == Some(track.video_id.as_str()));
+        }
         show_mark(&imp.mark, window.offline_state(&track.video_id));
         imp.duration.set_label(&if track.is_live() {
             "LIVE".to_owned()
@@ -193,6 +211,13 @@ impl TrackRow {
     pub fn rebind(&self) {
         if let Some(track) = self.track() {
             self.bind(&track, self.imp().context.get());
+        }
+    }
+
+    /// Играет ли трек строки: столбики вместо обложки.
+    pub fn refresh_playing(&self, current: Option<&str>) {
+        if let Some(cover) = self.imp().cover.get() {
+            cover.set_playing(current.is_some() && self.video_id().as_deref() == current);
         }
     }
 

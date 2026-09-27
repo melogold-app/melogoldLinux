@@ -45,6 +45,11 @@ pub fn fallback(url: &str) -> Option<String> {
         .then(|| format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"))
 }
 
+/// Кадр видео (`i.ytimg.com/vi/<id>/…`): у него срезаются чёрные поля ([`crate::frame_bars`]).
+pub fn is_video_frame(url: &str) -> bool {
+    ytimg_video_id(url).is_some()
+}
+
 /// Кадр видео 16:9 — при показе его обрезают до квадрата по середине (§5.5).
 pub fn is_wide(url: Option<&str>) -> bool {
     url.is_some_and(|u| ytimg_video_id(u).is_some())

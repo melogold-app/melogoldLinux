@@ -523,6 +523,31 @@ impl MainWindow {
     }
 
     /// «Убрать из плейлиста» (§5.6): строка пропадает сразу, из базы — через 5 с, если не нажали «Отменить».
+    /// Alt+↑ ↓: трек на место выше или ниже в своём плейлисте; фокус остаётся на нём.
+    pub fn move_in_playlist(&self, playlist: i64, video_id: &str, delta: i64) {
+        let id = video_id.to_owned();
+        let task = self.ctx.services.db(move |library| {
+            let order: Vec<String> = library.playlist_tracks(playlist).unwrap_or_default().into_iter().map(|t| t.video_id).collect();
+            let Some(index) = order.iter().position(|v| *v == id) else { return false };
+            let target = (index as i64 + delta).clamp(0, order.len().saturating_sub(1) as i64) as usize;
+            target != index && library.move_in_playlist(playlist, &id, target).is_ok()
+        });
+        let (weak, video_id) = (self.downgrade(), video_id.to_owned());
+        glib::spawn_future_local(async move {
+            if task.await != Some(true) {
+                return;
+            }
+            // Список перерисуется по изменению библиотеки — фокус догоняет трек.
+            glib::timeout_future(std::time::Duration::from_millis(150)).await;
+            let Some(window) = weak.upgrade() else { return };
+            if let Some(row) =
+                window.library_view.live_rows().into_iter().find(|r| r.is_mapped() && r.video_id().as_deref() == Some(&video_id))
+            {
+                row.grab_focus();
+            }
+        });
+    }
+
     fn remove_from_playlist(&self, playlist: i64, track: Track) {
         let key = removal_key_track(playlist, &track.video_id);
         self.library_view.removing.borrow_mut().insert(key.clone());

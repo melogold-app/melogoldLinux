@@ -82,6 +82,9 @@ pub struct State {
     pub volume: f64,
     pub muted: bool,
     pub speed: f64,
+    /// Таймер сна: когда сработает (мс эпохи) или «до конца трека».
+    pub sleep_at_ms: Option<i64>,
+    pub sleep_at_track_end: bool,
 }
 
 /// Очередь в порядке проигрывания (панель очереди).
@@ -103,6 +106,8 @@ pub enum Event {
     QueueReplaced(Box<QueueSnapshot>),
     /// Позиция сменилась скачком (MPRIS `Seeked`).
     Seeked(Duration),
+    /// Таймер сна сработал: воспроизведение на паузе.
+    SleepTimerFired,
     /// Сеанс трека закончился: ≥ 5 с реального звучания — одно прослушивание (история, срез 4).
     Listened {
         track: Track,
@@ -163,6 +168,11 @@ pub enum Command {
     Retry,
     /// «Отменить» после замены очереди: прежняя очередь, трек и позиция.
     RestoreQueue(Box<QueueSnapshot>),
+    /// Таймер сна (docs/PROMPT.md §4): пауза через столько.
+    SetSleepTimer(Duration),
+    /// «До конца трека»: следующий трек встаёт на паузу в начале.
+    SleepAtTrackEnd,
+    CancelSleepTimer,
     SaveQueue,
     Shutdown,
     // ── внутренние ──
@@ -189,6 +199,7 @@ pub enum Command {
         seed: Option<String>,
     },
     AutoplayFailed,
+    SleepFired(u64),
 }
 
 /// Общее окна и движка: позиция спрашивается у конвейера без очереди команд.
@@ -199,6 +210,8 @@ struct Shared {
     pending: Mutex<Duration>,
     subscribers: Mutex<Vec<async_channel::Sender<Event>>>,
     state: Mutex<State>,
+    /// Низы, середина, верх — для столбиков «играет».
+    levels: Arc<crate::levels::AudioLevels>,
 }
 
 #[derive(Clone)]
@@ -218,6 +231,11 @@ impl PlayerHandle {
             Some(pipeline) => pipeline.query_position::<gst::ClockTime>().map(|t| Duration::from_nanos(t.nseconds())),
             None => self.shared.pending.lock().ok().map(|p| *p),
         }
+    }
+
+    /// Уровни звука 0…1: низы, середина, верх (столбики «играет»).
+    pub fn levels(&self) -> (f32, f32, f32) {
+        self.shared.levels.levels()
     }
 
     /// Последний снимок состояния.
@@ -293,6 +311,9 @@ struct Engine {
     listening_since: Option<Instant>,
     listened_track: Option<Track>,
     last_saved: Instant,
+    sleep_at_ms: Option<i64>,
+    sleep_at_track_end: bool,
+    sleep_generation: u64,
 }
 
 impl Engine {
@@ -322,6 +343,9 @@ impl Engine {
             listening_since: None,
             listened_track: None,
             last_saved: Instant::now(),
+            sleep_at_ms: None,
+            sleep_at_track_end: false,
+            sleep_generation: 0,
         }
     }
 
@@ -443,6 +467,33 @@ impl Engine {
                 self.reset_autoplay();
                 self.queue_changed_then_load(position);
             }
+            Command::SetSleepTimer(duration) => {
+                self.stop_sleep_timer();
+                self.sleep_at_ms = Some(melogold_core::text::now_ms() + duration.as_millis() as i64);
+                let (tx, generation) = (self.tx.clone(), self.sleep_generation);
+                tokio::spawn(async move {
+                    tokio::time::sleep(duration).await;
+                    let _ = tx.send(Command::SleepFired(generation));
+                });
+                self.emit_state();
+            }
+            Command::SleepAtTrackEnd => {
+                self.stop_sleep_timer();
+                self.sleep_at_track_end = true;
+                self.emit_state();
+            }
+            Command::CancelSleepTimer => {
+                self.stop_sleep_timer();
+                self.emit_state();
+            }
+            Command::SleepFired(generation) => {
+                if generation == self.sleep_generation && self.sleep_at_ms.is_some() {
+                    self.stop_sleep_timer();
+                    self.pause();
+                    self.emit_state();
+                    self.broadcast(Event::SleepTimerFired);
+                }
+            }
             Command::SaveQueue => self.save_queue(),
             Command::Shutdown => {}
             Command::Loaded { generation, result } => {
@@ -518,6 +569,8 @@ impl Engine {
             volume: self.settings.volume,
             muted: self.settings.muted,
             speed: self.settings.speed,
+            sleep_at_ms: self.sleep_at_ms,
+            sleep_at_track_end: self.sleep_at_track_end,
         };
         if let Ok(mut shared) = self.shared.state.lock() {
             if *shared == state {
@@ -584,6 +637,12 @@ impl Engine {
             output.play();
         }
         self.emit_state();
+    }
+
+    fn stop_sleep_timer(&mut self) {
+        self.sleep_generation += 1;
+        self.sleep_at_ms = None;
+        self.sleep_at_track_end = false;
     }
 
     fn pause(&mut self) {
@@ -730,7 +789,7 @@ impl Engine {
             }
         };
         let start = std::mem::take(&mut self.pending_start);
-        let output = match Output::new(Arc::clone(&stream), start, self.rate(), failed) {
+        let output = match Output::new(Arc::clone(&stream), start, self.rate(), Arc::clone(&self.shared.levels), failed) {
             Ok(output) => output,
             Err(message) => {
                 tracing::error!(%message, "вывод звука не собрался");
@@ -796,7 +855,22 @@ impl Engine {
             }
             gst::MessageView::Eos(_) => {
                 self.finish_listening();
-                self.next(false);
+                if self.sleep_at_track_end {
+                    // «До конца трека»: следующий трек встаёт на паузу в начале.
+                    self.stop_sleep_timer();
+                    self.skips_in_row = 0;
+                    if self.queue.move_next(false) {
+                        self.emit_queue();
+                        self.save_queue();
+                        self.load_current(false, Duration::ZERO);
+                    } else {
+                        self.next(false);
+                    }
+                    self.emit_state();
+                    self.broadcast(Event::SleepTimerFired);
+                } else {
+                    self.next(false);
+                }
             }
             gst::MessageView::Error(error) => {
                 let Some(track) = self.current_track() else { return };

@@ -7,6 +7,7 @@ pub mod app_info;
 pub mod countries;
 mod countries_generated;
 pub mod devices;
+pub mod frame_bars;
 pub mod hwid;
 pub mod ids;
 pub mod iso;
