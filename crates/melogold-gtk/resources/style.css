@@ -153,3 +153,20 @@ listview.track-list > row {
   min-width: 8px;
   min-height: 8px;
 }
+
+/* Название и исполнитель играющего трека — ссылки в альбом и к исполнителю: без рамки и полей,
+   при наведении подчёркнуты. */
+button.track-link {
+  padding: 0 2px;
+  margin: 0 -2px;
+  min-height: 0;
+  min-width: 0;
+  border-radius: 4px;
+}
+button.track-link:hover,
+button.track-link:active {
+  background: none;
+}
+button.track-link:hover > label {
+  text-decoration: underline;
+}

@@ -580,11 +580,14 @@ impl SyncedView {
             }
         });
 
-        // Последняя строка может дойти до верха: снизу поле в высоту области.
+        // Текущая строка — посередине области: сверху и снизу поля в половину высоты, чтобы
+        // и первая, и последняя строка могли встать на середину.
         let weak = Rc::downgrade(self);
         self.scroller.vadjustment().connect_page_size_notify(move |adjustment| {
             if let Some(view) = weak.upgrade() {
-                view.lines.set_margin_bottom(adjustment.page_size() as i32);
+                let half = (adjustment.page_size() / 2.0) as i32;
+                view.lines.set_margin_top(half);
+                view.lines.set_margin_bottom(half);
             }
         });
 
@@ -686,8 +689,6 @@ impl SyncedView {
             }
             self.canvas.imp().radius.set((12.0 * scale) as f32);
         }
-        // Первая строка — сразу под затуханием верхнего края.
-        self.lines.set_margin_top(FADE_TOP as i32);
         self.pending.set(Some(true));
     }
 
@@ -780,13 +781,16 @@ impl SyncedView {
         fade.play();
     }
 
-    /// Верх текущей строки — у верха области, под затуханием края (задание 0007).
+    /// Середина текущей строки — посередине области, как у Windows (пользователь, 2026-09-27,
+    /// вместо «у верха» из задания 0007). До первой строки посередине стоит первая.
     fn scroll_to_active(&self, views: &[RowView], animated: bool) {
         let adjustment = self.scroller.vadjustment();
-        let index = self.active.get();
-        let top =
-            views.get(usize::try_from(index).unwrap_or(usize::MAX)).and_then(|view| view.root.compute_bounds(&self.canvas)).map(|b| b.y());
-        let target = top.map(|y| f64::from(y) - FADE_TOP).unwrap_or(0.0);
+        let index = usize::try_from(self.active.get()).unwrap_or(0);
+        let middle = views
+            .get(index)
+            .and_then(|view| view.root.compute_bounds(&self.canvas))
+            .map(|b| f64::from(b.y()) + f64::from(b.height()) / 2.0);
+        let target = middle.map(|y| y - adjustment.page_size() / 2.0).unwrap_or(0.0);
         let target = target.clamp(0.0, (adjustment.upper() - adjustment.page_size()).max(0.0));
         let scroll = self.scroll.borrow();
         let Some(scroll) = scroll.as_ref() else { return };

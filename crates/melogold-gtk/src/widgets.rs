@@ -128,6 +128,33 @@ pub fn item_row(images: &Images, item: &MusicItem) -> Option<gtk::ListBoxRow> {
 }
 
 /// Размер для людей: «512 МБ», «1,5 ГБ» (Windows `SettingsSize`).
+/// Подпись-ссылка: название играющего трека ведёт в альбом, исполнитель — к исполнителю
+/// (§5.2). Кнопка, а не жест на подписи: её достают Tab и экранный диктор.
+pub fn link_button(label: &gtk::Label) -> gtk::Button {
+    let button = gtk::Button::builder().child(label).halign(gtk::Align::Start).focus_on_click(false).build();
+    button.add_css_class("flat");
+    button.add_css_class("track-link");
+    button
+}
+
+/// Ссылку некуда вести (трек без альбома, без исполнителя) — подпись становится обычной.
+pub fn set_link_enabled(button: &gtk::Button, enabled: bool) {
+    button.set_can_target(enabled);
+    button.set_focusable(enabled);
+}
+
+/// Ссылки играющего трека: альбом есть — название ведёт в него, исполнитель
+/// есть (со ссылкой или хотя бы подписью для поиска) — подпись ведёт к нему.
+pub fn update_track_links(title: &gtk::Label, subtitle: &gtk::Label, track: &melogold_core::music::Track) {
+    if let Some(link) = title.parent().and_downcast::<gtk::Button>() {
+        set_link_enabled(&link, track.album_id.is_some());
+    }
+    if let Some(link) = subtitle.parent().and_downcast::<gtk::Button>() {
+        let artist = !track.artists.is_empty() || track.artists_text.as_deref().is_some_and(|t| !t.trim().is_empty());
+        set_link_enabled(&link, artist);
+    }
+}
+
 pub fn size_text(bytes: u64) -> String {
     let (value, key) = if bytes >= 1 << 30 {
         (bytes as f64 / f64::from(1u32 << 30), "SizeGigabytesFormat")

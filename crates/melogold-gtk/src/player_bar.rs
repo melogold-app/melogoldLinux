@@ -119,9 +119,23 @@ impl PlayerBar {
         let error_box = gtk::Box::builder().spacing(6).visible(false).build();
         error_box.append(&error_label);
         error_box.append(&retry);
+        let title_link = crate::widgets::link_button(&title);
+        let subtitle_link = crate::widgets::link_button(&subtitle);
+        let weak_window = window.downgrade();
+        title_link.connect_clicked(move |_| {
+            if let Some(window) = weak_window.upgrade() {
+                window.open_playing_album();
+            }
+        });
+        let weak_window = window.downgrade();
+        subtitle_link.connect_clicked(move |button| {
+            if let Some(window) = weak_window.upgrade() {
+                window.open_playing_artist(button.upcast_ref());
+            }
+        });
         let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).spacing(2).build();
-        texts.append(&title);
-        texts.append(&subtitle);
+        texts.append(&title_link);
+        texts.append(&subtitle_link);
         texts.append(&error_box);
         // ♡ играющего трека — рядом с названием, как у всех клиентов; в «…» его поэтому нет.
         let heart = icon_button(
@@ -428,6 +442,7 @@ impl PlayerBar {
             self.title.set_label(&track.title);
             self.title.set_tooltip_text(Some(&track.title));
             self.subtitle.set_label(&track.subtitle());
+            crate::widgets::update_track_links(&self.title, &self.subtitle, track);
         }
         let resolving = matches!(state.status, Status::Resolving | Status::Buffering) && state.playing;
         match (resolving, self.resolving_since.get()) {

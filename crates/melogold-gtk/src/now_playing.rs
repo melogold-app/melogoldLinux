@@ -40,6 +40,7 @@ pub struct Inner {
     placeholder: gtk::Image,
     title: gtk::Label,
     subtitle: gtk::Label,
+    heart: gtk::Button,
     error: gtk::Label,
     error_actions: adw::WrapBox,
     play: gtk::Button,
@@ -78,10 +79,43 @@ impl NowPlaying {
         // Обложка уступает место тексту ошибки и кнопкам: окно 800×600 не переполняется.
         frame.set_size_request(160, 160);
 
-        let title = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).build();
+        let title = gtk::Label::builder().wrap(true).xalign(0.0).build();
         title.add_css_class("title-2");
-        let subtitle = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).build();
+        let subtitle = gtk::Label::builder().wrap(true).xalign(0.0).build();
         subtitle.add_css_class("dim-label");
+        // ♡ — справа от названия, как у Android (TitleBlock): отметить играющий трек в одно
+        // нажатие, не открывая меню. В «…» этой страницы «В Избранное» поэтому нет.
+        let heart = gtk::Button::builder()
+            .icon_name("heart-outline-symbolic")
+            .tooltip_text(tr("PlayerLike.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"))
+            .action_name("win.current-like")
+            .valign(gtk::Align::Center)
+            .build();
+        heart.add_css_class("flat");
+        heart.add_css_class("circular");
+        heart.add_css_class("heart");
+        heart.add_css_class("now-playing-heart");
+        crate::library_view::set_heart(&heart, false);
+        let title_link = crate::widgets::link_button(&title);
+        let subtitle_link = crate::widgets::link_button(&subtitle);
+        let weak_window = window.downgrade();
+        title_link.connect_clicked(move |_| {
+            if let Some(window) = weak_window.upgrade() {
+                window.open_playing_album();
+            }
+        });
+        let weak_window = window.downgrade();
+        subtitle_link.connect_clicked(move |button| {
+            if let Some(window) = weak_window.upgrade() {
+                window.open_playing_artist(button.upcast_ref());
+            }
+        });
+        let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).hexpand(true).build();
+        texts.append(&title_link);
+        texts.append(&subtitle_link);
+        let heading = gtk::Box::builder().spacing(12).build();
+        heading.append(&texts);
+        heading.append(&heart);
         let error = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).visible(false).build();
         error.add_css_class("error");
         // Рядом с причиной — «Повторить · Пропустить · Другие версии» (задание 0001).
@@ -165,8 +199,7 @@ impl NowPlaying {
             .margin_end(24)
             .build();
         column.append(&slot);
-        column.append(&title);
-        column.append(&subtitle);
+        column.append(&heading);
         column.append(&error);
         column.append(&error_actions);
         column.append(&seek);
@@ -193,6 +226,21 @@ impl NowPlaying {
         switcher.set_active_name(Some("cover"));
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(&switcher));
+        // «…» — то же меню, что у панели плеера: панели на этой странице нет, а группа «Текст»
+        // (редактор, другой текст, сдвиг) живёт только там и только пока текст на экране.
+        // Перемешать, повтор и ♡ — кнопки страницы, в меню их нет.
+        let more = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .tooltip_text(tr("PlayerMore.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"))
+            .build();
+        let weak_window = window.downgrade();
+        more.set_create_popup_func(move |button| {
+            if let Some(window) = weak_window.upgrade() {
+                let hidden = crate::player_bar::Hidden { modes: false, queue: false, heart: false };
+                button.set_menu_model(Some(&crate::player_bar::player_menu(&window, hidden)));
+            }
+        });
+        header.pack_end(&more);
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&bin));
@@ -212,6 +260,7 @@ impl NowPlaying {
             placeholder,
             title,
             subtitle,
+            heart,
             error,
             error_actions,
             play,
@@ -327,10 +376,16 @@ impl NowPlaying {
         window.update_lyrics_button();
     }
 
+    pub fn set_liked(&self, liked: bool) {
+        crate::library_view::set_heart(&self.heart, liked);
+    }
+
     pub fn apply(&self, window: &MainWindow, state: &State) {
         if let Some(track) = &state.track {
+            self.set_liked(window.library_view.is_liked(&track.video_id));
             self.title.set_label(&track.title);
             self.subtitle.set_label(&track.subtitle());
+            crate::widgets::update_track_links(&self.title, &self.subtitle, track);
             let source = track.thumbnail_url.clone().unwrap_or_else(|| thumbnails::for_video(&track.video_id, 544));
             let url = thumbnails::sized(Some(&source), 544);
             if *self.requested.borrow() != url {

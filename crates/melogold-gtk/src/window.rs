@@ -73,7 +73,7 @@ pub struct Inner {
     suggestion_items: RefCell<Vec<Suggestion>>,
     current: Cell<Tab>,
     player_bar: OnceCell<PlayerBar>,
-    now_playing: OnceCell<NowPlaying>,
+    pub(crate) now_playing: OnceCell<NowPlaying>,
     queue_panel: OnceCell<QueuePanel>,
     state: RefCell<State>,
     /// Последняя очередь: после правки названия трека (задание 0005) она перерисовывается.

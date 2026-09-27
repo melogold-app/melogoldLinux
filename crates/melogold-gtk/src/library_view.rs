@@ -110,6 +110,40 @@ impl LibraryView {
 }
 
 impl MainWindow {
+    /// Название играющего трека — в его альбом (§5.2): панель плеера и «Сейчас играет».
+    pub fn open_playing_album(&self) {
+        if let Some(track) = self.state_track().filter(|t| t.album_id.is_some()) {
+            let target = TrackTarget { track, context: RowContext::Player, ..Default::default() };
+            let _ = WidgetExt::activate_action(&self.window, "win.track-album", Some(&target.variant()));
+        }
+    }
+
+    /// Исполнитель играющего трека — на его страницу; у трека с несколькими исполнителями —
+    /// меню с именами у подписи, как «Открыть исполнителя» в меню трека.
+    pub fn open_playing_artist(&self, anchor: &gtk::Widget) {
+        let Some(track) = self.state_track() else { return };
+        let linked: Vec<_> = track.artists.iter().filter(|a| a.id.is_some()).cloned().collect();
+        let target = TrackTarget { track, context: RowContext::Player, ..Default::default() };
+        if linked.len() < 2 {
+            let _ = WidgetExt::activate_action(&self.window, "win.track-artist", Some(&target.variant()));
+            return;
+        }
+        let menu = gio::Menu::new();
+        for artist in linked {
+            let item = gio::MenuItem::new(Some(&artist.name), None);
+            let target = TrackTarget { artist: artist.id.clone(), ..target.clone() };
+            item.set_action_and_target_value(Some("win.track-artist"), Some(&target.variant()));
+            menu.append_item(&item);
+        }
+        let popover = gtk::PopoverMenu::from_model(Some(&menu));
+        popover.set_parent(anchor);
+        popover.connect_closed(|popover| {
+            let popover = popover.clone();
+            glib::idle_add_local_once(move || popover.unparent());
+        });
+        popover.popup();
+    }
+
     /// Первое чтение библиотеки и подписка на изменения.
     pub fn start_library(&self) {
         self.reload_library(Change(u32::MAX));
@@ -180,7 +214,11 @@ impl MainWindow {
                 row.refresh_heart(liked.contains(&video_id));
             }
         }
-        self.player_bar().set_liked(self.state_track().map(|t| liked.contains(&t.video_id)).unwrap_or(false));
+        let playing = self.state_track().map(|t| liked.contains(&t.video_id)).unwrap_or(false);
+        self.player_bar().set_liked(playing);
+        if let Some(now_playing) = self.now_playing.get() {
+            now_playing.set_liked(playing);
+        }
     }
 
     fn update_marks(&self, video_id: &str) {
