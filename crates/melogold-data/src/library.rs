@@ -1006,8 +1006,9 @@ mod tests {
         assert_eq!(lib.favorites().unwrap().len(), 2);
         lib.set_liked(&[track("a")], false).unwrap();
         assert_eq!(lib.liked_ids().unwrap(), HashSet::from(["b".to_owned()]));
-        lib.record_play(&track("c"), 60_000, now_ms()).unwrap();
-        lib.record_play(&track("d"), 3_000, now_ms()).unwrap();
+        // Прослушано позже лайка: в одну миллисекунду порядок был бы случайным.
+        lib.record_play(&track("c"), 60_000, now_ms() + 60_000).unwrap();
+        lib.record_play(&track("d"), 3_000, now_ms() + 60_000).unwrap();
         let all: Vec<String> = lib.all_tracks().unwrap().into_iter().map(|e| e.track.video_id).collect();
         assert_eq!(all, ["c", "b"], "прослушанное и лайкнутое; меньше 5 с — не прослушивание");
         assert_eq!(lib.all_tracks_count().unwrap(), 2);
