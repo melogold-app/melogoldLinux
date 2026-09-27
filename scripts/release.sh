@@ -20,6 +20,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --quiet
 ./scripts/package.sh
+./scripts/flatpak.sh
 
 [[ ${1:-} == --publish ]] || { echo "dist/ готов; выпуск — с --publish"; exit 0; }
 [[ -z $(git status --porcelain) ]] || { echo "есть незафиксированные правки"; exit 1; }
@@ -30,7 +31,7 @@ gh release view "${tag}" >/dev/null 2>&1 && { echo "релиз ${tag} уже е�
 notes="$(mktemp)"
 { cat "release-notes/${version}.ru.md"; echo; echo "---"; echo; cat "release-notes/${version}.en.md"; } >"${notes}"
 gh release create "${tag}" --draft --title "Melogold ${version}" --notes-file "${notes}" --target "$(git rev-parse HEAD)" \
-    dist/Melogold-x86_64.AppImage "dist/melogold_${version}_amd64.deb" dist/melogold-"${version}"-1.*.x86_64.rpm
+    dist/Melogold-x86_64.AppImage "dist/melogold_${version}_amd64.deb" dist/melogold-"${version}"-1.*.x86_64.rpm dist/Melogold.flatpak
 gh release upload "${tag}" dist/update.json
 gh release edit "${tag}" --draft=false --latest
 echo "выпущено: $(gh release view "${tag}" --json url -q .url)"

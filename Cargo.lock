@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "percent-encoding",
@@ -1498,7 +1498,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-data"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "melogold-core",
  "regex",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-gtk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-innertube"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "melogold-core",
@@ -1552,7 +1552,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-playback"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-channel",
  "futures-util",
@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-channel",
  "futures-util",

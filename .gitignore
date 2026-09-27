@@ -5,3 +5,4 @@
 *.rpm
 *.log
 .DS_Store
+packaging/flatpak/cargo-sources.json

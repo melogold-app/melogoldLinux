@@ -414,9 +414,6 @@ impl MainWindow {
 
     /// Проверка обновлений: нашлась версия — уведомление GNOME и точка у «Настроек».
     fn start_updates(&self) {
-        if crate::app::snapshot_mode() {
-            return;
-        }
         let weak = self.downgrade();
         let refresh: Rc<dyn Fn()> = Rc::new(move || {
             if let Some(window) = weak.upgrade() {
@@ -429,6 +426,9 @@ impl MainWindow {
         self.window.connect_destroy(move |_| {
             keep.take();
         });
+        if crate::app::snapshot_mode() {
+            return;
+        }
         let weak = self.downgrade();
         self.updates.start(move |manifest| {
             if let Some(window) = weak.upgrade() {
@@ -828,6 +828,7 @@ impl MainWindow {
             ),
             simple("now-playing", Box::new(|w| w.show_now_playing())),
             simple("fullscreen", Box::new(|w| w.toggle_fullscreen())),
+            simple("update-install", Box::new(|w| w.updates.install(Some(w.window.upcast_ref())))),
             simple("play-pause", send(|| Command::TogglePlay)),
             simple("next", send(|| Command::Next)),
             simple("previous", send(|| Command::Previous)),

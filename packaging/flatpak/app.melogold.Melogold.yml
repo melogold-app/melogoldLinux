@@ -1,0 +1,40 @@
+# Flatpak для систем со старыми GTK и libadwaita (Ubuntu 24.04, Debian 13, Mint 22; docs/PROMPT.md §3):
+# рантайм GNOME 49 — GTK 4.20 и libadwaita 1.8. Сборка — scripts/flatpak.sh.
+id: app.melogold.Melogold
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: melogold
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  # MPRIS: медиаклавиши и плеер в GNOME Shell и KDE.
+  - --own-name=org.mpris.MediaPlayer2.melogold
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/melogold/cargo
+    CARGO_NET_OFFLINE: 'true'
+modules:
+  - name: melogold
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --locked -p melogold-gtk
+      - install -Dm755 target/release/melogold /app/bin/melogold
+      - install -Dm644 packaging/app.melogold.Melogold.desktop /app/share/applications/app.melogold.Melogold.desktop
+      - install -Dm644 packaging/app.melogold.Melogold.metainfo.xml /app/share/metainfo/app.melogold.Melogold.metainfo.xml
+      - for icon in packaging/icons/hicolor/*/apps/app.melogold.Melogold.png; do size=$(basename $(dirname $(dirname $icon))); install -Dm644 $icon /app/share/icons/hicolor/$size/apps/app.melogold.Melogold.png; done
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - dist
+          - .git
+      - cargo-sources.json

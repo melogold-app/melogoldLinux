@@ -32,8 +32,6 @@
 - Настройки целиком: библиотека и история, хранилище с пределами кэшей, «Сохранить копию» и «Импорт копии»
   (ViTune, ViMusic, Melogold любой платформы), обновления из GitHub Releases, «Лицензии».
 
-Дальше — Flatpak для Ubuntu 24.04, Debian 13 и Mint 22.
-
 ## Установка
 
 Последний выпуск — [GitHub Releases](https://github.com/melogold-app/melogoldLinux/releases/latest):
@@ -43,6 +41,7 @@
 | Любая с glibc 2.42+ (Fedora 43+, Ubuntu 25.10+, Arch, openSUSE Tumbleweed) | `Melogold-x86_64.AppImage` — обновляется сам |
 | Fedora 43+ | `melogold-*.rpm`: `sudo dnf install ./melogold-*.rpm` |
 | Ubuntu 25.10+, Debian testing | `melogold_*_amd64.deb`: `sudo apt install ./melogold_*_amd64.deb` |
+| Ubuntu 24.04, Debian 13, Mint 22 и любая с Flatpak | `Melogold.flatpak`: `flatpak install --user Melogold.flatpak` |
 
 AppImage при первом запуске сам добавляет себя в меню и открывает ссылки `melogold://`.
 
@@ -60,6 +59,7 @@ cargo test --workspace            # тесты ядра без экрана
 ./scripts/install-local.sh        # в ~/.local: ссылки melogold:// из браузера и значок в меню
 ./scripts/snapshots.sh            # снимки окна во вложенном weston, в target/snapshots
 ./scripts/package.sh              # AppImage, deb, rpm и update.json в dist/ (контейнер Fedora 43, podman)
+./scripts/flatpak.sh              # dist/Melogold.flatpak (flatpak-builder в контейнере, рантайм GNOME 49)
 ./scripts/release.sh --publish    # проверки, пакеты и выпуск vX.Y.Z на GitHub
 ```
 

@@ -52,6 +52,21 @@ pub fn maybe_start(window: &MainWindow) {
         ("02-new", Box::new(|w| w.show_tab(Tab::WhatsNew)), 4000),
         ("03-library", Box::new(|w| w.show_tab(Tab::Library)), 700),
         ("04-settings", Box::new(|w| w.show_tab(Tab::Settings)), 700),
+        (
+            // Полоса «Вышла новая версия» и точка у «Настроек» (обновления, срез 8).
+            "04-update",
+            Box::new(|w| {
+                let mut notes = std::collections::HashMap::new();
+                notes.insert("ru".to_owned(), "Исправления".to_owned());
+                notes.insert("en".to_owned(), "Fixes".to_owned());
+                w.updates.pretend_available(melogold_core::updates::UpdateManifest {
+                    version: "9.9.9".into(),
+                    notes,
+                    ..Default::default()
+                });
+            }),
+            700,
+        ),
         ("04a-settings-storage", Box::new(|w| scroll_settings(w, 0.62)), 1500),
         ("04b-settings-about", Box::new(|w| scroll_settings(w, 1.0)), 700),
         ("05-diagnostics", Box::new(|w| w.push(&crate::pages::diagnostics::page(w))), 700),

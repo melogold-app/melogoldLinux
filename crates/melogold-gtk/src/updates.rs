@@ -101,6 +101,12 @@ impl UpdateService {
         self.available.borrow().clone()
     }
 
+    /// Снимки окна: полоса «Вышла новая версия» без сети.
+    pub fn pretend_available(&self, manifest: UpdateManifest) {
+        self.available.replace(Some(manifest));
+        self.set(UpdateState::Available);
+    }
+
     /// Экран, который перерисовывается при смене состояния; живёт, пока жив `refresh`.
     pub fn listen(&self, refresh: &Rc<dyn Fn()>) {
         self.listeners.borrow_mut().push(Rc::downgrade(refresh));
@@ -169,6 +175,7 @@ impl UpdateService {
                     this.available.replace(newer.clone());
                     this.set(if newer.is_some() { UpdateState::Available } else { UpdateState::UpToDate });
                     if let (Some(manifest), Some(found)) = (newer, found) {
+                        tracing::info!(версия = %manifest.version, "вышла новая версия");
                         found(&manifest);
                     }
                 }
@@ -258,6 +265,9 @@ impl UpdateService {
         let notification = gio::Notification::new(&trf("UpdateAvailableTitle", &[&manifest.version]));
         notification.set_body(Some(tr("UpdateToastText")));
         notification.set_default_action("app.show-update");
+        // AppImage обновляется прямо из уведомления; пакетам — «Скачать» на странице релиза.
+        let label = if matches!(self.mode, Mode::AppImage(_)) { tr("UpdateAction") } else { tr("MenuDownload") };
+        notification.add_button(label, "app.update-install");
         app.send_notification(Some("update"), &notification);
     }
 }
