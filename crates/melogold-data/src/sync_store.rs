@@ -92,12 +92,12 @@ impl Library {
 
 /// Операции синхронизации в транзакции.
 pub struct SyncTx<'a> {
-    t: &'a Transaction<'a>,
+    pub(crate) t: &'a Transaction<'a>,
     changes: &'a Cell<u32>,
 }
 
 impl SyncTx<'_> {
-    fn changed(&self, change: Change) {
+    pub(crate) fn changed(&self, change: Change) {
         self.changes.set(self.changes.get() | change.0);
     }
 
@@ -126,6 +126,7 @@ impl SyncTx<'_> {
              UPDATE playlists SET sync_id = NULL;
              UPDATE playlist_items SET sort_key = NULL;
              DELETE FROM synced_lyrics;
+             DELETE FROM synced_lyrics_pins;
              UPDATE play_events SET synced = 0 WHERE device_id IS NULL;
              DELETE FROM play_events WHERE device_id IS NOT NULL;
              DELETE FROM history_ops;

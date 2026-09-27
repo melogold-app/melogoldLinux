@@ -101,3 +101,42 @@ listview.track-list > row {
   font-weight: 600;
   letter-spacing: 0.04em;
 }
+
+/* Текст песни (срез 6): прошедшие строки приглушены сильнее будущих, смена — плавно. */
+.lyric-line {
+  transition: opacity 250ms ease-out;
+}
+.lyric-line.past {
+  opacity: 0.35;
+}
+.lyric-line.future {
+  opacity: 0.6;
+}
+.lyric-line.active {
+  opacity: 1;
+}
+/* Строки уходят в фон у краёв, а не обрезаются. */
+.lyrics-fade-top {
+  background: linear-gradient(to bottom, @window_bg_color, alpha(@window_bg_color, 0));
+}
+.lyrics-fade-bottom {
+  background: linear-gradient(to top, @window_bg_color, alpha(@window_bg_color, 0));
+}
+.lyrics-plain {
+  font-size: 1.4em;
+  line-height: 1.5;
+}
+
+/* Редактор текста: строка, которую отметит следующее нажатие, и низ с кнопками. */
+.lyrics-editor-lines {
+  background: none;
+}
+.lyrics-editor-line {
+  border-radius: 8px;
+}
+.lyrics-editor-line.cursor {
+  background: alpha(@accent_bg_color, 0.14);
+}
+.lyrics-editor-controls {
+  background: alpha(@card_bg_color, 0.5);
+}

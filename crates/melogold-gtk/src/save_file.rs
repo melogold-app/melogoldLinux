@@ -106,7 +106,7 @@ impl MainWindow {
 }
 
 /// «Исполнитель — Название» без знаков, которые файловые системы не пускают в имя.
-fn file_name(track: &Track) -> String {
+pub fn file_name(track: &Track) -> String {
     let name = match track.artists_text.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(artist) => format!("{artist} — {}", track.title),
         None => track.title.clone(),

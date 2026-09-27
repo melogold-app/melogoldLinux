@@ -76,6 +76,14 @@ impl MainWindow {
                 window.account_view.notify_devices();
             }
         });
+        // Свой текст длиннее лимита сервера: он остался только на этом устройстве.
+        let (rejected, weak) = (services.lyrics_rejected.clone(), self.downgrade());
+        glib::spawn_future_local(async move {
+            while rejected.recv().await.is_ok() {
+                let Some(window) = weak.upgrade() else { break };
+                window.toast(tr("LyricsTooLarge"));
+            }
+        });
         // Сеть вернулась — синхронизация начинается заново; пропала — «Нет связи с сервером».
         let monitor = gio::NetworkMonitor::default();
         let sync = Arc::clone(&services.sync);

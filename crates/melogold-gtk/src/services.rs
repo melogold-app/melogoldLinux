@@ -10,6 +10,7 @@ use melogold_core::app_info;
 use melogold_core::paths::AppPaths;
 use melogold_core::settings::keys;
 use melogold_data::{Change, Database, Library};
+use melogold_innertube::lyrics::{Community, KuGou, LrcLib, LyricsFetcher, ProviderError};
 use melogold_innertube::music::YouTubeMusic;
 use melogold_innertube::{locale_from, InnerTube};
 use melogold_playback::downloads::Downloads;
@@ -45,6 +46,10 @@ pub struct Services {
     pub sync_status: async_channel::Receiver<SyncStatus>,
     /// Список устройств изменился на сервере (`devices.updated`).
     pub devices_changes: async_channel::Receiver<()>,
+    /// Цепочка поиска текстов (срез 6): YouTube Music, LrcLib, KuGou, затем сервер Melogold.
+    pub lyrics: Arc<LyricsFetcher>,
+    /// Свой текст длиннее лимита сервера: он остался только здесь.
+    pub lyrics_rejected: async_channel::Receiver<String>,
 }
 
 impl Services {
@@ -165,10 +170,35 @@ impl Services {
         sync.subscribe_devices(move || {
             let _ = devices_sender.try_send(());
         });
+        let (rejected_sender, lyrics_rejected) = async_channel::unbounded();
+        sync.subscribe_lyrics_rejected(move |video_id| {
+            let _ = rejected_sender.try_send(video_id.to_owned());
+        });
         {
             let _guard = runtime.enter();
             sync.start();
         }
+        let community: Community = {
+            let sync = Arc::clone(&sync);
+            Arc::new(move |video_id: String| {
+                let sync = Arc::clone(&sync);
+                Box::pin(async move {
+                    sync.lookup_lyrics(&video_id).await.map_err(|error| {
+                        if error.is_network() {
+                            ProviderError::Network(error.to_string())
+                        } else {
+                            ProviderError::Other(error.to_string())
+                        }
+                    })
+                })
+            })
+        };
+        let lyrics = Arc::new(LyricsFetcher {
+            music: music.clone(),
+            lrclib: LrcLib::new(&app_info::tool_user_agent()),
+            kugou: KuGou::new(),
+            community: Some(community),
+        });
         // Сессия — в фоне: связка ключей может отвечать не сразу, окно её не ждёт. Прочитанная
         // сессия запускает синхронизацию через подписку.
         let loading = Arc::clone(&account);
@@ -189,6 +219,8 @@ impl Services {
             account_changes,
             sync_status,
             devices_changes,
+            lyrics,
+            lyrics_rejected,
         }
     }
 

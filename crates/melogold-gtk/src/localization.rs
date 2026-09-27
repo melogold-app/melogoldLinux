@@ -94,6 +94,8 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
         "По этому адресу — другой сервер, не тот, что в ссылке",
         "This address leads to a different server than the link",
     ),
+    // Редактор текста, «Синхронизация» (задание 0007): подпись над следующей строкой целиком.
+    ("LinuxLyricsEditorNext", "Далее", "Next"),
     (
         "LinuxLinkRequest",
         "Откройте Melogold на другом устройстве → Добавить устройство → Сканировать",
@@ -165,6 +167,16 @@ pub fn tr(key: &'static str) -> &'static str {
 }
 
 /// Строка с подстановками `{0}`, `{1}`… как у Windows (`string.Format`).
+/// Сдвиг в секундах со знаком: «+0,5» по-русски, «+0.5» по-английски.
+pub fn seconds_signed(ms: i64) -> String {
+    let text = format!("{:+.1}", ms as f64 / 1000.0);
+    if lang() == Lang::Ru {
+        text.replace('.', ",")
+    } else {
+        text
+    }
+}
+
 pub fn trf(key: &'static str, args: &[&dyn Display]) -> String {
     format_args_into(tr(key), args)
 }

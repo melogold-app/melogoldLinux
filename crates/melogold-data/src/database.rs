@@ -6,26 +6,43 @@
 //! прежних версий нет — новая база создаётся в схеме 6 и доводится миграциями до текущей.
 //!
 //! 7 — свои названия треков (задание 0005): `track_overrides` и снимок сервера `synced_overrides`.
+//! 8 — закреплённые тексты (задание 0006): ссылки у поставщика у найденного текста (`synced_ref`,
+//! `plain_ref`), закрепления `lyrics_pins` и снимок сервера `synced_lyrics_pins`.
 
 use std::path::Path;
 use std::sync::Mutex;
 
 use rusqlite::{Connection, Transaction};
 
-pub const SCHEMA_VERSION: i32 = 7;
+pub const SCHEMA_VERSION: i32 = 8;
 
 /// Миграции после схемы 6: (версия, SQL).
-const MIGRATIONS: &[(i32, &str)] = &[(
-    7,
-    "CREATE TABLE track_overrides (
-         video_id TEXT PRIMARY KEY,
-         title TEXT,
-         artists_text TEXT,
-         album_title TEXT,
-         updated_at INTEGER NOT NULL
-     );
-     CREATE TABLE synced_overrides (video_id TEXT PRIMARY KEY, title TEXT, artists_text TEXT, album_title TEXT);",
-)];
+const MIGRATIONS: &[(i32, &str)] = &[
+    (
+        7,
+        "CREATE TABLE track_overrides (
+             video_id TEXT PRIMARY KEY,
+             title TEXT,
+             artists_text TEXT,
+             album_title TEXT,
+             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE synced_overrides (video_id TEXT PRIMARY KEY, title TEXT, artists_text TEXT, album_title TEXT);",
+    ),
+    (
+        8,
+        "ALTER TABLE lyrics ADD COLUMN synced_ref TEXT;
+         ALTER TABLE lyrics ADD COLUMN plain_ref TEXT;
+         CREATE TABLE lyrics_pins (
+             video_id TEXT PRIMARY KEY,
+             source TEXT NOT NULL,
+             ref TEXT NOT NULL,
+             start_time_ms INTEGER,
+             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE synced_lyrics_pins (video_id TEXT PRIMARY KEY, source TEXT NOT NULL, ref TEXT NOT NULL, start_time_ms INTEGER);",
+    ),
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {

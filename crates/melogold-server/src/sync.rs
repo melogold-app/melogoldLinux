@@ -1,5 +1,6 @@
 //! Синхронизация библиотеки и истории (API §4.8, Windows `LibrarySync.cs`): Избранное, плейлисты с
-//! порядком, сохранённые альбомы, исполнители и каналы, свои названия треков, прослушивания.
+//! порядком, сохранённые альбомы, исполнители и каналы, свои названия треков, закреплённые тексты,
+//! прослушивания; свои тексты песен — отдельными маршрутами (§4.10).
 //!
 //! **Вариант со снимком** (REWRITE §4.12a Android): вместо журнала правок библиотека сравнивается с
 //! тем, что было на сервере после прошлой синхронизации (таблицы `synced_*`), разница уходит ops,
@@ -17,6 +18,8 @@ use std::time::{Duration, Instant};
 
 use melogold_core::ids::new_uuid;
 use melogold_core::iso;
+use melogold_core::lyrics::pins::LyricsPin;
+use melogold_core::lyrics::sync_rules::{self, LyricsPayload, LyricsSend, StoredLyrics, REJECTED};
 use melogold_core::music::{ArtistRef, Track};
 use melogold_core::playlist_diff::{self, ItemChange};
 use melogold_core::text::{now_ms, truncate_utf16};
@@ -45,6 +48,7 @@ const KEY_MERGE: &str = "needsMerge";
 const KEY_LAST_SYNC: &str = "lastSyncAt";
 const KEY_HISTORY_MERGE: &str = "historyMerge";
 const KEY_HISTORY_RETRY_AT: &str = "historyRetryAt";
+const KEY_LYRICS_REV: &str = "lyricsRev";
 
 /// Что делает синхронизация — для Настроек и экрана аккаунта.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +67,7 @@ pub enum SyncStatus {
 
 type StatusListener = Box<dyn Fn(&SyncStatus) + Send + Sync>;
 type Listener = Box<dyn Fn() + Send + Sync>;
+type VideoListener = Box<dyn Fn(&str) + Send + Sync>;
 
 pub struct LibrarySync {
     account: Arc<Account>,
@@ -72,6 +77,7 @@ pub struct LibrarySync {
     status: Mutex<SyncStatus>,
     status_listeners: Mutex<Vec<StatusListener>>,
     devices_listeners: Mutex<Vec<Listener>>,
+    rejected_listeners: Mutex<Vec<VideoListener>>,
     /// Поколение сессии: смена аккаунта или сети останавливает живые события прошлой.
     session: AtomicU64,
     debounce: AtomicU64,
@@ -97,6 +103,7 @@ impl LibrarySync {
             status: Mutex::new(SyncStatus::Off),
             status_listeners: Mutex::default(),
             devices_listeners: Mutex::default(),
+            rejected_listeners: Mutex::default(),
             session: AtomicU64::new(0),
             debounce: AtomicU64::new(0),
             pending_local: AtomicBool::new(false),
@@ -132,6 +139,17 @@ impl LibrarySync {
     /// Список устройств изменился на сервере (`devices.updated`).
     pub fn subscribe_devices(&self, listener: impl Fn() + Send + Sync + 'static) {
         self.devices_listeners.lock().unwrap_or_else(|p| p.into_inner()).push(Box::new(listener));
+    }
+
+    /// Свой текст не ушёл на сервер: он длиннее лимита (§4.10) и остаётся только здесь.
+    pub fn subscribe_lyrics_rejected(&self, listener: impl Fn(&str) + Send + Sync + 'static) {
+        self.rejected_listeners.lock().unwrap_or_else(|p| p.into_inner()).push(Box::new(listener));
+    }
+
+    fn lyrics_rejected(&self, video_id: &str) {
+        for listener in self.rejected_listeners.lock().unwrap_or_else(|p| p.into_inner()).iter() {
+            listener(video_id);
+        }
     }
 
     fn set_status(&self, status: SyncStatus) {
@@ -185,9 +203,9 @@ impl LibrarySync {
         }
     }
 
-    /// Правка Избранного, плейлистов, закладок, правок или истории уходит через 2 с.
+    /// Правка Избранного, плейлистов, закладок, правок, текстов или истории уходит через 2 с.
     fn on_library_changed(self: &Arc<Self>, change: Change) {
-        let mask = Change::LIKES.0 | Change::PLAYLISTS.0 | Change::BOOKMARKS.0 | Change::HISTORY.0 | Change::OVERRIDES.0;
+        let mask = Change::LIKES.0 | Change::PLAYLISTS.0 | Change::BOOKMARKS.0 | Change::HISTORY.0 | Change::OVERRIDES.0 | Change::LYRICS.0;
         if change.0 & mask == 0 || !matches!(self.account.state(), AccountState::SignedIn { .. }) {
             return;
         }
@@ -267,7 +285,105 @@ impl LibrarySync {
                 self.sync_library(more).await?;
             }
         }
-        Ok(())
+        self.sync_lyrics(force, info.as_ref()).await
+    }
+
+    /// Свои тексты (§4.10, Windows `SyncLyricsAsync`): сначала изменившиеся со снимка — `PUT` и
+    /// `DELETE`, затем свои версии с сервера после `lyricsRev`. Без своих правок и без `force` сеть
+    /// не трогается; без модуля текстов на сервере (`features.lyrics`) — тоже.
+    async fn sync_lyrics(&self, force: bool, info: Option<&ServerInfo>) -> Result<(), ApiError> {
+        let sends = self.db(|tx| Ok(sync_rules::plan_sends(&tx.own_lyrics()?, &tx.synced_lyrics()?)))?;
+        if (sends.is_empty() && !force) || !info.is_some_and(lyrics_available) {
+            return Ok(());
+        }
+        for send in sends {
+            match send {
+                LyricsSend::Put { video_id, payload, hash } if sync_rules::too_large(&payload) => {
+                    self.db(|tx| tx.set_synced_lyrics(&video_id, REJECTED, &hash))?;
+                    self.lyrics_rejected(&video_id);
+                }
+                LyricsSend::Put { video_id, payload, hash } => {
+                    let text = LyricsText::from(&payload);
+                    let result = self
+                        .account
+                        .authorized(|api, token| {
+                            let (text, video_id) = (text.clone(), video_id.clone());
+                            async move { api.put_lyrics(&token, &video_id, &text).await }
+                        })
+                        .await;
+                    match result {
+                        Ok(mine) => self.db(|tx| tx.set_synced_lyrics(&video_id, mine.rev, &hash))?,
+                        // Не отправлять снова, пока текст не изменится; слишком большой — сказать человеку.
+                        Err(error) if error.status == 413 || error.status == 400 => {
+                            tracing::warn!(%error, video_id, "сервер не принял текст");
+                            self.db(|tx| tx.set_synced_lyrics(&video_id, REJECTED, &hash))?;
+                            if error.status == 413 {
+                                self.lyrics_rejected(&video_id);
+                            }
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                LyricsSend::Delete { video_id } => {
+                    let result = self
+                        .account
+                        .authorized(|api, token| {
+                            let video_id = video_id.clone();
+                            async move { api.delete_lyrics(&token, &video_id).await }
+                        })
+                        .await;
+                    match result {
+                        Ok(()) => {}
+                        Err(error) if error.status == 404 => {}
+                        Err(error) => return Err(error),
+                    }
+                    self.db(|tx| tx.forget_synced_lyrics(&video_id))?;
+                }
+                LyricsSend::Forget { video_id } => self.db(|tx| tx.forget_synced_lyrics(&video_id))?,
+            }
+        }
+        let mut after: i64 = self.library.sync_state(KEY_LYRICS_REV).and_then(|v| v.parse().ok()).unwrap_or(0);
+        loop {
+            let page = self.account.authorized(|api, token| async move { api.lyrics_changes(&token, after).await }).await?;
+            self.db(|tx| {
+                for item in &page.items {
+                    apply_lyrics(tx, item)?;
+                }
+                tx.set_state(KEY_LYRICS_REV, Some(&page.rev.to_string()))
+            })?;
+            if !page.more || page.rev <= after {
+                return Ok(());
+            }
+            after = page.rev;
+        }
+    }
+
+    /// Текст с сервера для цепочки поиска, когда поставщики не нашли синхронный: своя версия (ещё не
+    /// пришла синком) или общая другого пользователя. `Ok(None)` — модуля нет, текста нет, не вошли;
+    /// `Err` — нет связи (такой пустой итог не кэшируется как «текста нет»).
+    pub async fn lookup_lyrics(&self, video_id: &str) -> Result<Option<(LyricsPayload, bool)>, ApiError> {
+        if self.account.session().is_none() || !self.server_info().await.as_ref().is_some_and(lyrics_available) {
+            return Ok(None);
+        }
+        let response = match self
+            .account
+            .authorized(|api, token| {
+                let video_id = video_id.to_owned();
+                async move { api.lyrics(&token, &video_id).await }
+            })
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if error.is_network() => return Err(error),
+            Err(error) => {
+                tracing::warn!(%error, video_id, "текст с сервера не пришёл");
+                return Ok(None);
+            }
+        };
+        if let Some(text) = response.mine.filter(|m| !m.deleted).and_then(|m| m.text) {
+            return Ok(Some((LyricsPayload::from(&text), true)));
+        }
+        Ok(response.shared.and_then(|s| s.text).map(|text| (LyricsPayload::from(&text), false)))
     }
 
     /// `/server/info` раз в 30 минут: какие виды ops сервер принимает, лимиты истории.
@@ -412,7 +528,7 @@ impl LibrarySync {
     async fn on_live_event(self: Arc<Self>, event: LiveEvent) {
         tracing::debug!(событие = %event.kind, "живое событие");
         match event.kind.as_str() {
-            "system.connected" | "sync.changed" => {
+            "system.connected" | "sync.changed" | "lyrics.changed" => {
                 self.sync(true).await;
             }
             "devices.updated" => {
@@ -600,8 +716,56 @@ fn build_ops(tx: &SyncTx, info: Option<&ServerInfo>) -> rusqlite::Result<Vec<Op>
         }
     }
 
+    // Закреплённые тексты (задание 0006) — только если сервер их принимает.
+    if info.is_some_and(|i| i.supports("lyrics.pin.set")) {
+        let local = tx.lyrics_pins()?;
+        let synced = tx.synced_lyrics_pins()?;
+        for (video_id, pin) in local.iter().filter(|(id, pin)| synced.get(*id).is_none_or(|s| !s.same_fields(pin))) {
+            let map = fields(&[
+                ("videoId", json!(video_id)),
+                ("source", json!(pin.source)),
+                ("ref", json!(pin.reference)),
+                ("startTimeMs", json!(pin.start_time_ms)),
+            ]);
+            ops.push(builder.make("lyrics.pin.set", format!("lpin:{video_id}"), pin.updated_at, None, map));
+        }
+        for video_id in synced.keys().filter(|id| !local.contains_key(*id)) {
+            ops.push(builder.make("lyrics.pin.set", format!("lpin:{video_id}"), now, None, fields(&[("videoId", json!(video_id))])));
+        }
+    }
+
     ops.extend(history_ops(tx, &builder, info, now)?);
     Ok(ops)
+}
+
+fn lyrics_available(info: &ServerInfo) -> bool {
+    info.features.lyrics.as_ref().is_some_and(|l| l.version >= 1)
+}
+
+/// Своя версия с сервера (Windows `ApplyLyrics`): записать с источниками как есть — она своя, из
+/// какого бы источника ни пришла (задание 0002). Надгробие удаляет свой текст, только если он не
+/// менялся с прошлого синка; выбранный при этом остаётся здесь найденным.
+fn apply_lyrics(tx: &SyncTx, item: &MyLyrics) -> rusqlite::Result<()> {
+    let local = tx.lyrics(&item.video_id)?;
+    let Some(text) = item.text.as_ref().filter(|_| !item.deleted) else {
+        let snapshot = tx.synced_lyrics_of(&item.video_id)?;
+        if let Some(local) = local.filter(|l| sync_rules::delete_on_tombstone(Some(l), snapshot.as_ref())) {
+            if sync_rules::is_chosen_only(&local) {
+                tx.save_lyrics(&item.video_id, &StoredLyrics { chosen: false, ..local })?;
+            } else {
+                tx.delete_lyrics(&item.video_id)?;
+            }
+        }
+        return tx.forget_synced_lyrics(&item.video_id);
+    };
+    let stored = sync_rules::from_payload(&LyricsPayload::from(text));
+    if !sync_rules::same_content(local.as_ref(), &stored) {
+        tx.save_lyrics(&item.video_id, &stored)?;
+    } else if let Some(local) = local.filter(|l| !l.chosen) {
+        // Тот же текст, найденный здесь автоматически, становится своим.
+        tx.save_lyrics(&item.video_id, &StoredLyrics { chosen: true, ..local })?;
+    }
+    tx.set_synced_lyrics(&item.video_id, item.rev, &sync_rules::hash(&sync_rules::to_payload(&stored)))
 }
 
 fn item_op(builder: &OpBuilder, tx: &SyncTx, sync_id: &str, change: ItemChange, now: i64) -> rusqlite::Result<Op> {
@@ -857,6 +1021,20 @@ fn apply_rows(tx: &SyncTx, response: &SyncResponse) -> rusqlite::Result<()> {
         tx.apply_override(&edit, row.deleted)?;
     }
 
+    for row in &response.lyrics_pins {
+        let pin = match (&row.source, &row.reference) {
+            (Some(source), Some(reference)) if !row.deleted && !reference.is_empty() => Some(LyricsPin {
+                video_id: row.video_id.clone(),
+                source: source.clone(),
+                reference: reference.clone(),
+                start_time_ms: row.start_time_ms,
+                updated_at: iso::parse(&row.updated_at).unwrap_or_else(now_ms),
+            }),
+            _ => None,
+        };
+        tx.apply_lyrics_pin(&row.video_id, pin.as_ref())?;
+    }
+
     apply_history_rows(tx, response)
 }
 
@@ -957,6 +1135,74 @@ mod tests {
         assert_eq!(ops[1].json["after"], "bbbbbbbbbbb");
         assert_eq!(ops[1].json["base"], "c.1.1");
         assert!(ops[2].json.get("title").is_none(), "снятая правка — без полей");
+    }
+
+    #[test]
+    fn lyrics_pins_go_up_and_come_back() {
+        use melogold_core::lyrics::sync_rules::sources;
+        let lib = Library::open(Database::in_memory().unwrap());
+        let found = StoredLyrics {
+            synced: Some("[00:01.00]Строка".into()),
+            plain: Some(String::new()),
+            synced_source: Some(sources::KUGOU.into()),
+            synced_ref: Some("42:abc".into()),
+            offset_ms: -300,
+            ..Default::default()
+        };
+        lib.save_lyrics("aaaaaaaaaaa", &found).unwrap();
+        assert!(lib.pin_played("aaaaaaaaaaa").unwrap());
+        // Сервер без закреплений — op нет.
+        assert!(lib.sync(|tx| build_ops(tx, Some(&info(&["like.set"])))).unwrap().is_empty());
+        let pins = info(&["lyrics.pin.set"]);
+        let ops = lib.sync(|tx| build_ops(tx, Some(&pins))).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].json["kind"], "lyrics.pin.set");
+        assert_eq!(
+            (&ops[0].json["source"], &ops[0].json["ref"], &ops[0].json["startTimeMs"]),
+            (&json!("kugou"), &json!("42:abc"), &json!(300))
+        );
+        // Сервер вернул закрепление и чужое — снимок совпал, чужое легло здесь.
+        let response: SyncResponse = serde_json::from_value(json!({
+            "results": [], "cursor": "c.1.1", "hasMore": false,
+            "lyricsPins": [
+                {"videoId": "aaaaaaaaaaa", "source": "kugou", "ref": "42:abc", "startTimeMs": 300, "updatedAt": "2026-09-23T10:00:00.000Z", "deleted": false},
+                {"videoId": "bbbbbbbbbbb", "source": "lrclib", "ref": "7", "startTimeMs": null, "updatedAt": "2026-09-23T10:00:00.000Z", "deleted": false}
+            ]
+        }))
+        .unwrap();
+        lib.sync(|tx| apply_rows(tx, &response)).unwrap();
+        assert!(lib.sync(|tx| build_ops(tx, Some(&pins))).unwrap().is_empty());
+        assert_eq!(lib.lyrics_pin("bbbbbbbbbbb").unwrap().unwrap().reference, "7");
+        // Снятое на сервере снято и здесь.
+        let removed: SyncResponse = serde_json::from_value(json!({
+            "lyricsPins": [{"videoId": "bbbbbbbbbbb", "source": null, "ref": null, "updatedAt": "2026-09-23T10:00:01.000Z", "deleted": true}]
+        }))
+        .unwrap();
+        lib.sync(|tx| apply_rows(tx, &removed)).unwrap();
+        assert_eq!(lib.lyrics_pin("bbbbbbbbbbb").unwrap(), None);
+    }
+
+    /// Задание 0002: версия с сервера с источником `lrclib` — своя; следующая выгрузка её не удаляет.
+    #[test]
+    fn chosen_lyrics_from_server_stay_own() {
+        let lib = Library::open(Database::in_memory().unwrap());
+        let item: MyLyrics = serde_json::from_value(json!({
+            "id": "5d2c7e1a-9b3f-4c6d-8e2a-1f0b3c4d5e6f", "videoId": "aaaaaaaaaaa", "rev": 3, "deleted": false,
+            "text": {"plain": "Строка", "plainSource": "lrclib", "synced": "[00:01.00]Строка", "syncedFormat": "lrc", "syncedSource": "lrclib", "startTimeMs": null, "language": null},
+            "updatedAt": "2026-09-25T12:00:00.000Z"
+        }))
+        .unwrap();
+        lib.sync(|tx| apply_lyrics(tx, &item)).unwrap();
+        let stored = lib.lyrics("aaaaaaaaaaa").unwrap().unwrap();
+        assert!(stored.chosen && sync_rules::is_own(&stored));
+        let sends = lib.sync(|tx| Ok(sync_rules::plan_sends(&tx.own_lyrics()?, &tx.synced_lyrics()?))).unwrap();
+        assert!(sends.is_empty(), "ни PUT, ни DELETE: {sends:?}");
+        // Надгробие: выбранный текст остаётся здесь найденным.
+        let tombstone = MyLyrics { deleted: true, text: None, rev: 4, ..item };
+        lib.sync(|tx| apply_lyrics(tx, &tombstone)).unwrap();
+        let stored = lib.lyrics("aaaaaaaaaaa").unwrap().unwrap();
+        assert!(!stored.chosen && stored.synced.is_some());
+        assert!(lib.sync(|tx| Ok(sync_rules::plan_sends(&tx.own_lyrics()?, &tx.synced_lyrics()?))).unwrap().is_empty());
     }
 
     #[test]

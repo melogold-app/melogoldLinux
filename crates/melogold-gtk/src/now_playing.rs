@@ -1,6 +1,7 @@
 //! «Сейчас играет» (docs/PROMPT.md §5.2): страница поверх окна, Esc и «Назад» закрывают — своей
-//! «Свернуть» нет. Обложка песни — квадратом, кадр видео 16:9 — целиком прямоугольником. Текст
-//! песни справа от обложки — со срезом «Тексты».
+//! «Свернуть» нет. Обложка песни — квадратом, кадр видео 16:9 — целиком прямоугольником. В широком
+//! окне обложка слева, текст справа, по обе стороны от середины окна; в узком — переключатель
+//! «Обложка · Текст» в заголовке.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -14,14 +15,26 @@ use melogold_core::thumbnails;
 use melogold_playback::engine::{Command, State, Status};
 
 use crate::localization::tr;
+use crate::lyrics_view::{LyricsPanel, SyncedView};
 use crate::texts;
 use crate::window::MainWindow;
+
+/// От этой ширины страницы обложка и текст стоят рядом.
+const WIDE: &str = "min-width: 860sp";
 
 #[derive(Clone)]
 pub struct NowPlaying(Rc<Inner>);
 
 pub struct Inner {
     pub page: adw::NavigationPage,
+    pub lyrics: Rc<LyricsPanel>,
+    /// «Обложка · Текст» в узком окне.
+    switcher: adw::ToggleGroup,
+    header: adw::HeaderBar,
+    slot: gtk::Box,
+    right: gtk::Box,
+    wide: Cell<bool>,
+    lyrics_refresh: RefCell<Option<Rc<dyn Fn()>>>,
     frame: gtk::AspectFrame,
     picture: gtk::Picture,
     placeholder: gtk::Image,
@@ -140,6 +153,9 @@ impl NowPlaying {
             controls.append(widget);
         }
 
+        // Обложка или (узкое окно, «Текст») текст — сверху колонки, над названием и кнопками.
+        let slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).vexpand(true).build();
+        slot.append(&frame);
         let column = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(12)
@@ -148,21 +164,49 @@ impl NowPlaying {
             .margin_start(24)
             .margin_end(24)
             .build();
-        column.append(&frame);
+        column.append(&slot);
         column.append(&title);
         column.append(&subtitle);
         column.append(&error);
         column.append(&error_actions);
         column.append(&seek);
         column.append(&controls);
-        let clamp = adw::Clamp::builder().maximum_size(560).child(&column).build();
+        let clamp = adw::Clamp::builder().maximum_size(560).child(&column).hexpand(true).build();
+        let right = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).visible(false).margin_end(12).build();
+        let halves = gtk::Box::builder().homogeneous(true).build();
+        halves.append(&clamp);
+        halves.append(&right);
+        let bin = adw::BreakpointBin::builder().width_request(360).height_request(200).child(&halves).build();
+
+        let (player, weak_window) = (window.ctx.services.player.clone(), window.downgrade());
+        let seek_player = player.clone();
+        let synced = SyncedView::new(
+            Box::new(move || player.position()),
+            Box::new(move || weak_window.upgrade().is_some_and(|w| w.is_playing())),
+            Rc::new(move |ms| seek_player.send(Command::Seek(Duration::from_millis(ms.max(0) as u64)))),
+        );
+        let lyrics = LyricsPanel::new(synced);
+
+        let switcher = adw::ToggleGroup::builder().valign(gtk::Align::Center).visible(false).build();
+        switcher.add(adw::Toggle::builder().name("cover").label(tr("NowPlayingArtwork")).build());
+        switcher.add(adw::Toggle::builder().name("lyrics").label(tr("PlayerLyrics")).build());
+        switcher.set_active_name(Some("cover"));
+        let header = adw::HeaderBar::new();
+        header.set_title_widget(Some(&switcher));
         let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
-        toolbar.set_content(Some(&clamp));
+        toolbar.add_top_bar(&header);
+        toolbar.set_content(Some(&bin));
         let page = adw::NavigationPage::builder().title(tr("NowPlaying")).tag("now-playing").child(&toolbar).build();
 
         let now_playing = NowPlaying(Rc::new(Inner {
             page,
+            lyrics,
+            switcher,
+            header,
+            slot,
+            right,
+            wide: Cell::new(false),
+            lyrics_refresh: RefCell::default(),
             frame,
             picture,
             placeholder,
@@ -204,7 +248,83 @@ impl NowPlaying {
                 }
             });
         });
+
+        // Широко — обложка и текст рядом; узко — одно из двух по переключателю.
+        let wide = adw::Breakpoint::new(adw::BreakpointCondition::parse(WIDE).expect("условие порога"));
+        let relayout = |wide: Option<bool>| {
+            let (weak, weak_window) = (Rc::downgrade(&now_playing.0), window.downgrade());
+            move || {
+                if let (Some(inner), Some(window)) = (weak.upgrade(), weak_window.upgrade()) {
+                    if let Some(wide) = wide {
+                        inner.wide.set(wide);
+                    }
+                    NowPlaying(inner).place(&window);
+                }
+            }
+        };
+        let apply = relayout(Some(true));
+        wide.connect_apply(move |_| apply());
+        let unapply = relayout(Some(false));
+        wide.connect_unapply(move |_| unapply());
+        bin.add_breakpoint(wide);
+        let switched = relayout(None);
+        now_playing.switcher.connect_active_name_notify(move |_| switched());
+        let shown = relayout(None);
+        now_playing.page.connect_shown(move |_| shown());
+        let hidden = relayout(None);
+        now_playing.page.connect_hidden(move |_| hidden());
+        // Текст перерисовывается сам, когда сервис текста меняет состояние.
+        let (weak, service) = (Rc::downgrade(&now_playing.lyrics), window.lyrics.clone());
+        let refresh: Rc<dyn Fn()> = Rc::new(move || {
+            if let Some(panel) = weak.upgrade() {
+                panel.show(&service);
+            }
+        });
+        window.lyrics.listen(&refresh);
+        now_playing.lyrics_refresh.replace(Some(refresh));
+        now_playing.place(window);
         now_playing
+    }
+
+    /// Текст на экране: страница открыта, и текст виден (широкое окно или «Текст» в узком).
+    pub fn lyrics_visible(&self, window: &MainWindow) -> bool {
+        window.now_playing_open() && (self.wide.get() || self.switcher.active_name().as_deref() == Some("lyrics"))
+    }
+
+    /// Показать текст (Ctrl+L, кнопка «Текст»): в узком окне — переключить на «Текст».
+    pub fn show_lyrics(&self) {
+        self.switcher.set_active_name(Some("lyrics"));
+    }
+
+    /// Разложить обложку и текст по ширине и переключателю; сервис текста ищет, только пока текст виден.
+    fn place(&self, window: &MainWindow) {
+        let wide = self.wide.get();
+        let lyrics_narrow = !wide && self.switcher.active_name().as_deref() == Some("lyrics");
+        // Широко переключателя нет — в заголовке название страницы.
+        self.switcher.set_visible(!wide);
+        self.header.set_title_widget(if wide { None } else { Some(&self.switcher) });
+        self.right.set_visible(wide);
+        self.frame.set_visible(!lyrics_narrow);
+        let target = if wide {
+            Some(&self.right)
+        } else if lyrics_narrow {
+            Some(&self.slot)
+        } else {
+            None
+        };
+        let root = &self.lyrics.root;
+        let parent = root.parent().and_downcast::<gtk::Box>();
+        if parent.as_ref() != target {
+            if let Some(parent) = parent {
+                parent.remove(root);
+            }
+            if let Some(target) = target {
+                target.append(root);
+            }
+        }
+        let open = window.now_playing_open();
+        window.lyrics.set_active(open && (wide || lyrics_narrow));
+        window.update_lyrics_button();
     }
 
     pub fn apply(&self, window: &MainWindow, state: &State) {

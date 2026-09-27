@@ -1,7 +1,7 @@
 //! Панель воспроизведения внизу во всю ширину (docs/PROMPT.md §5.2).
 //!
 //! ```text
-//! [обложка][название / исполнитель]   [⇄ ⏮ ⏯ ⏭ ⟲ / ——●—— время]   [Очередь][громкость][…]
+//! [обложка][название / исполнитель]   [⇄ ⏮ ⏯ ⏭ ⟲ / ——●—— время]   [Текст][Очередь][громкость][…]
 //! ```
 //! Боковые колонки — у `GtkCenterBox`, поэтому ⏯ стоит посередине окна. Пороги ширины (`AdwBreakpoint`
 //! в окне): от 1100 — всё; уже — громкость кнопкой с поповером; от 720 и уже — панель в две строки:
@@ -45,6 +45,7 @@ pub struct Inner {
     pub seek_top: gtk::Box,
     position_labels: [gtk::Label; 2],
     duration_labels: [gtk::Label; 2],
+    pub lyrics: gtk::ToggleButton,
     pub queue: gtk::ToggleButton,
     pub volume_inline: gtk::Box,
     pub volume_button: gtk::MenuButton,
@@ -186,7 +187,12 @@ impl PlayerBar {
         middle.append(&controls);
         middle.append(&seek_center);
 
-        // ── справа: очередь, громкость, «…» ──
+        // ── справа: текст, очередь, громкость, «…» ──
+        let lyrics = toggle_button(
+            "lyrics-symbolic",
+            tr("PlayerLyricsButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"),
+            tr("PlayerLyricsButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name"),
+        );
         let queue = toggle_button(
             "view-list-bullet-symbolic",
             &format!("{} (Ctrl+U)", tr("QueueTitle")),
@@ -236,6 +242,7 @@ impl PlayerBar {
             .build();
         more.add_css_class("flat");
         let actions = gtk::Box::builder().spacing(2).halign(gtk::Align::End).build();
+        actions.append(&lyrics);
         actions.append(&queue);
         actions.append(&volume_inline);
         actions.append(&volume_button);
@@ -274,6 +281,7 @@ impl PlayerBar {
             seek_top,
             position_labels: [position_center, position_top],
             duration_labels: [duration_center, duration_top],
+            lyrics,
             queue,
             volume_inline,
             volume_button,
@@ -301,6 +309,14 @@ impl PlayerBar {
         self.previous.set_action_name(Some("win.previous"));
         self.next.set_action_name(Some("win.next"));
         self.shuffle.set_action_name(Some("win.shuffle"));
+        // «Текст» — не переключатель состояния: нажата, пока текст на экране (Ctrl+L).
+        let weak_window = window.downgrade();
+        self.lyrics.connect_clicked(move |button| {
+            if let Some(window) = weak_window.upgrade() {
+                window.toggle_lyrics();
+                button.set_active(window.lyrics_visible());
+            }
+        });
         self.repeat.set_action_name(Some("win.repeat"));
 
         // Перемотка: позиция летит в плеер через 150 мс после последнего движения ползунка.
@@ -357,6 +373,12 @@ impl PlayerBar {
                 button.set_menu_model(Some(&player_menu(&window, bar.hidden.get())));
             }
         });
+    }
+
+    pub fn set_lyrics_active(&self, active: bool) {
+        if self.lyrics.is_active() != active {
+            self.lyrics.set_active(active);
+        }
     }
 
     pub fn set_liked(&self, liked: bool) {
@@ -492,17 +514,20 @@ impl PlayerBar {
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Hidden {
     pub modes: bool,
+    /// «Текст» и «Очередь» (окно уже 480).
     pub queue: bool,
     /// ♡ у названия (окно уже 480): в «…» появляется «В Избранное».
     pub heart: bool,
 }
 
 /// Меню «…» панели плеера — одно на всё (§5.3): спрятанное порогом, меню играющего трека (без
-/// очереди и ♡ — они рядом), сведения о потоке и клавиши. Текст и таймер добавят свои срезы.
+/// очереди и ♡ — они рядом), группа «Текст», пока текст на экране, сведения о потоке и клавиши.
+/// Таймер добавит свой срез.
 pub fn player_menu(window: &MainWindow, hidden: Hidden) -> gio::Menu {
     let menu = gio::Menu::new();
     let panel = gio::Menu::new();
     if hidden.queue {
+        panel.append(Some(tr("PlayerLyrics")), Some("win.lyrics"));
         panel.append(Some(tr("QueueTitle")), Some("win.queue"));
     }
     if hidden.modes {
@@ -525,9 +550,50 @@ pub fn player_menu(window: &MainWindow, hidden: Hidden) -> gio::Menu {
             }
         }
     }
+    if let Some(lyrics) = lyrics_menu(window) {
+        menu.append_section(None, &lyrics);
+    }
     let info = gio::Menu::new();
     info.append(Some(tr("MenuStreamInfo")), Some("win.stream-info"));
     info.append(Some(tr("MenuShortcuts")), Some("app.shortcuts"));
     menu.append_section(None, &info);
     menu
+}
+
+/// Группа «Текст» (§5.3), пока текст на экране: переключатель подписан по тому, что на экране;
+/// «Найти другой текст…» (LrcLib и файл); «Редактировать текст»; «Сдвиг текста» ±0,1 и ±0,5 с.
+fn lyrics_menu(window: &MainWindow) -> Option<gio::Menu> {
+    use crate::lyrics_service::LyricsState;
+    if !window.lyrics_visible() || window.lyrics.track().is_none() {
+        return None;
+    }
+    let menu = gio::Menu::new();
+    let state = window.lyrics.state();
+    match &state {
+        LyricsState::Synced { .. } => menu.append(Some(tr("LyricsShowPlain")), Some("win.lyrics-toggle")),
+        LyricsState::Plain { .. } if window.lyrics.has_synced() => menu.append(Some(tr("LyricsShowSynced")), Some("win.lyrics-toggle")),
+        _ => {}
+    }
+    menu.append(Some(tr("LyricsFindMenu")), Some("win.lyrics-find"));
+    menu.append(Some(tr("LyricsEdit")), Some("win.lyrics-edit"));
+    if let LyricsState::Synced { offset_ms, .. } = state {
+        let shift = crate::localization::seconds_signed(offset_ms);
+        let offset = gio::Menu::new();
+        let steps = gio::Menu::new();
+        for (key, delta) in [("LyricsEarlier05", 500), ("LyricsEarlier01", 100), ("LyricsLater01", -100), ("LyricsLater05", -500)] {
+            steps.append_item(&gio::MenuItem::new(
+                Some(tr(key)),
+                Some(&gio::Action::print_detailed_name("win.lyrics-shift", Some(&delta.to_variant()))),
+            ));
+        }
+        offset.append_section(None, &steps);
+        if offset_ms != 0 {
+            let reset = gio::Menu::new();
+            reset.append(Some(&crate::localization::trf("LyricsResetShiftFormat", &[&shift])), Some("win.lyrics-reset-shift"));
+            offset.append_section(None, &reset);
+        }
+        let label = if offset_ms == 0 { tr("LyricsOffset").to_owned() } else { crate::localization::trf("LyricsOffsetFormat", &[&shift]) };
+        menu.append_submenu(Some(&label), &offset);
+    }
+    Some(menu)
 }

@@ -984,12 +984,21 @@ impl Engine {
         let played = std::mem::take(&mut self.listened).mul_f64(self.rate());
         if let Some(track) = self.listened_track.take() {
             if played >= MIN_PLAY {
-                if let (Some(library), false) = (self.deps.library.clone(), self.settings.history_paused) {
+                if let Some(library) = self.deps.library.clone() {
                     let (track, ms, ended) = (track.clone(), played.as_millis() as i64, melogold_core::text::now_ms());
+                    let history = !self.settings.history_paused;
                     // История — не повод ронять плеер и не повод его ждать.
                     tokio::task::spawn_blocking(move || {
-                        if let Err(error) = library.record_play(&track, ms, ended) {
-                            tracing::warn!(%error, "прослушивание не записалось");
+                        if history {
+                            if let Err(error) = library.record_play(&track, ms, ended) {
+                                tracing::warn!(%error, "прослушивание не записалось");
+                            }
+                        }
+                        // Прослушал 30 с с найденным текстом — текст закрепляется (задание 0006).
+                        if ms >= melogold_core::lyrics::pins::PIN_AFTER_MS {
+                            if let Err(error) = library.pin_played(&track.video_id) {
+                                tracing::warn!(%error, "текст не закрепился");
+                            }
                         }
                     });
                 }

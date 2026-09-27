@@ -2,6 +2,7 @@
 //! неизвестные поля и значения перечислений не ломают разбор, недостающее — значение по умолчанию.
 //! Запросы не отправляют пустых необязательных полей.
 
+use melogold_core::lyrics::sync_rules::LyricsPayload;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -395,6 +396,19 @@ pub struct TrackOverrideRow {
     pub deleted: bool,
 }
 
+/// Закреплённый текст (задание 0006): ссылка у поставщика; сам текст сервер не хранит.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LyricsPinRow {
+    pub video_id: String,
+    pub source: Option<String>,
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    pub start_time_ms: Option<i64>,
+    pub updated_at: String,
+    pub deleted: bool,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PlayRow {
@@ -434,9 +448,96 @@ pub struct SyncResponse {
     pub likes: Vec<LikeRow>,
     pub bookmarks: Vec<BookmarkRow>,
     pub overrides: Vec<TrackOverrideRow>,
+    pub lyrics_pins: Vec<LyricsPinRow>,
     pub plays: Vec<PlayRow>,
     pub play_stats: Vec<PlayStatRow>,
     pub play_forgets: Vec<PlayForgetRow>,
+}
+
+// ── тексты песен (§4.10) ──
+
+/// Текст в форме сервера: `LyricsText` в ответах и `LyricsPut` в запросе (пустые поля не уходят).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LyricsText {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plain_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+}
+
+impl From<&LyricsPayload> for LyricsText {
+    fn from(p: &LyricsPayload) -> LyricsText {
+        LyricsText {
+            plain: p.plain.clone(),
+            plain_source: p.plain_source.clone(),
+            synced: p.synced.clone(),
+            synced_format: p.synced_format.clone(),
+            synced_source: p.synced_source.clone(),
+            start_time_ms: p.start_time_ms,
+            language: p.language.clone(),
+        }
+    }
+}
+
+impl From<&LyricsText> for LyricsPayload {
+    fn from(t: &LyricsText) -> LyricsPayload {
+        LyricsPayload {
+            plain: t.plain.clone(),
+            plain_source: t.plain_source.clone(),
+            synced: t.synced.clone(),
+            synced_format: t.synced_format.clone(),
+            synced_source: t.synced_source.clone(),
+            start_time_ms: t.start_time_ms,
+            language: t.language.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MyLyrics {
+    pub id: String,
+    pub video_id: String,
+    pub rev: i64,
+    pub deleted: bool,
+    pub text: Option<LyricsText>,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SharedLyrics {
+    pub id: String,
+    pub video_id: String,
+    pub text: Option<LyricsText>,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LyricsResponse {
+    pub mine: Option<MyLyrics>,
+    pub shared: Option<SharedLyrics>,
+    pub server_time: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MyLyricsPage {
+    pub items: Vec<MyLyrics>,
+    pub rev: i64,
+    pub more: bool,
 }
 
 // ── ошибки и живые события (§2.1, §6) ──

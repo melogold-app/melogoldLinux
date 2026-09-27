@@ -321,7 +321,15 @@ pub struct LyricsFetcher {
 
 impl LyricsFetcher {
     /// Стороны, которые уже есть в `current`, заново не ищутся.
-    pub async fn fetch(&self, track: &Track, duration_ms: i64, current: Option<&StoredLyrics>) -> FetchResult {
+    /// `edited` — свои исполнитель и название трека (задание 0005): LrcLib спрашивается сначала по ним,
+    /// потом по оригиналу — у загрузок фанатов оригинальное «Artist — Song (live, fan upload)» не находится.
+    pub async fn fetch(
+        &self,
+        track: &Track,
+        edited: Option<(String, String)>,
+        duration_ms: i64,
+        current: Option<&StoredLyrics>,
+    ) -> FetchResult {
         let raw_artist = track.artists_text.clone().unwrap_or_default();
         let raw_title = track.title.clone();
         let is_song = track.album_id.is_some() || track.album_title.is_some();
@@ -332,20 +340,34 @@ impl LyricsFetcher {
         );
         let artist = clean.artist.clone().unwrap_or_else(|| raw_artist.clone());
         let title = if clean.title.trim().is_empty() { raw_title.clone() } else { clean.title.clone() };
-        let failed = std::cell::Cell::new(false);
+        let failed = std::sync::atomic::AtomicBool::new(false);
         let note = |error: &ProviderError| {
             if let ProviderError::Network(message) = error {
                 tracing::debug!(%message, "поставщик текста не ответил");
-                failed.set(true);
+                failed.store(true, std::sync::atomic::Ordering::Relaxed);
             }
         };
+
+        // LrcLib: своё название, затем очищенное, а синхронный — ещё и как у трека, если очистка его изменила.
+        let mut plain_queries: Vec<(String, String)> = Vec::new();
+        let push = |queries: &mut Vec<(String, String)>, pair: (String, String)| {
+            if !pair.1.trim().is_empty() && !queries.contains(&pair) {
+                queries.push(pair);
+            }
+        };
+        if let Some(pair) = edited {
+            push(&mut plain_queries, pair);
+        }
+        push(&mut plain_queries, (artist.clone(), title.clone()));
+        let mut synced_queries = plain_queries.clone();
+        push(&mut synced_queries, (raw_artist.clone(), raw_title.clone()));
 
         // Вкладка «Текст» страницы трека; нет её — у YouTube Music текста нет.
         let browse_id = match self.music.next(&track.video_id, None).await {
             Ok(page) => page.lyrics_browse_id,
             Err(error) => {
                 if error.kind == crate::ErrorKind::Offline {
-                    failed.set(true);
+                    failed.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 None
             }
@@ -356,7 +378,7 @@ impl LyricsFetcher {
             let youtube = match &browse_id {
                 Some(id) => self.music.lyrics(id).await.unwrap_or_else(|e| {
                     if e.kind == crate::ErrorKind::Offline {
-                        failed.set(true);
+                        failed.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                     None
                 }),
@@ -366,16 +388,10 @@ impl LyricsFetcher {
                 lyrics.plain = Some(text);
                 lyrics.plain_source = Some(sources::YOUTUBE_MUSIC.into());
                 lyrics.plain_ref = Some(id.clone());
-            } else {
-                match self.lrclib.best(&artist, &title, duration_ms, false).await {
-                    Ok(Some((text, id))) => {
-                        lyrics.plain = Some(text);
-                        lyrics.plain_source = Some(sources::LRCLIB.into());
-                        lyrics.plain_ref = Some(id);
-                    }
-                    Ok(None) => {}
-                    Err(error) => note(&error),
-                }
+            } else if let Some((text, id)) = self.lrclib_best(&plain_queries, duration_ms, false, &note).await {
+                lyrics.plain = Some(text);
+                lyrics.plain_source = Some(sources::LRCLIB.into());
+                lyrics.plain_ref = Some(id);
             }
         }
 
@@ -393,22 +409,15 @@ impl LyricsFetcher {
                                 Ok(None) => {}
                                 Err(error) => {
                                     if error.kind == crate::ErrorKind::Offline {
-                                        failed.set(true);
+                                        failed.store(true, std::sync::atomic::Ordering::Relaxed);
                                     }
                                 }
                             }
                         }
                     }
                     _ => {
-                        let mut result = self.lrclib.best(&artist, &title, duration_ms, true).await;
-                        // Название как у трека, если очистка его изменила.
-                        if matches!(result, Ok(None)) && (artist != raw_artist || title != raw_title) {
-                            result = self.lrclib.best(&raw_artist, &raw_title, duration_ms, true).await;
-                        }
-                        match result {
-                            Ok(Some((text, id))) => found = Some((text, sources::LRCLIB, id)),
-                            Ok(None) => {}
-                            Err(error) => note(&error),
+                        if let Some((text, id)) = self.lrclib_best(&synced_queries, duration_ms, true, &note).await {
+                            found = Some((text, sources::LRCLIB, id));
                         }
                     }
                 }
@@ -452,7 +461,25 @@ impl LyricsFetcher {
                 }
             }
         }
-        FetchResult { lyrics, any_failure: failed.get(), mine }
+        FetchResult { lyrics, any_failure: failed.load(std::sync::atomic::Ordering::Relaxed), mine }
+    }
+
+    /// Лучший текст LrcLib по первому запросу, который что-то нашёл.
+    async fn lrclib_best(
+        &self,
+        queries: &[(String, String)],
+        duration_ms: i64,
+        synced: bool,
+        note: &impl Fn(&ProviderError),
+    ) -> Option<(String, String)> {
+        for (artist, title) in queries {
+            match self.lrclib.best(artist, title, duration_ms, synced).await {
+                Ok(Some(found)) => return Some(found),
+                Ok(None) => {}
+                Err(error) => note(&error),
+            }
+        }
+        None
     }
 
     /// Закреплённый текст по ссылке у поставщика (задание 0006); `None` — поставщик молчит или текста там нет.
@@ -545,7 +572,7 @@ mod tests {
             artists_text: Some("Queen Official".into()),
             ..Default::default()
         };
-        let result = fetcher.fetch(&track, 355_000, None).await;
+        let result = fetcher.fetch(&track, None, 355_000, None).await;
         let synced = result.lyrics.synced.expect("синхронный текст");
         assert!(melogold_core::lyrics::parse_synced(&synced).is_some());
         let (source, reference) = (result.lyrics.synced_source.unwrap(), result.lyrics.synced_ref.unwrap());
@@ -563,7 +590,7 @@ mod tests {
                 _ => None,
             })
             .expect("песня с альбомом");
-        let result = fetcher.fetch(&song, song.duration_ms.unwrap_or(355_000), None).await;
+        let result = fetcher.fetch(&song, None, song.duration_ms.unwrap_or(355_000), None).await;
         println!("песня {}: синхронный из {:?}, обычный из {:?}", song.video_id, result.lyrics.synced_source, result.lyrics.plain_source);
         assert!(result.lyrics.synced.is_some() || result.lyrics.plain.is_some());
         if result.lyrics.synced_source.as_deref() == Some(sources::YOUTUBE_MUSIC) {

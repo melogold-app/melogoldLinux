@@ -2,6 +2,7 @@
 
 pub mod database;
 pub mod library;
+pub mod lyrics;
 pub mod overrides;
 pub mod sync_store;
 

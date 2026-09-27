@@ -233,6 +233,18 @@ impl LyricsDraft {
         self.update(index, |line| DraftLine { backing, ..line })
     }
 
+    /// Язык строки (BCP 47); пустой — как у всего текста.
+    pub fn with_line_language(&self, index: usize, language: Option<&str>) -> LyricsDraft {
+        let language = language.map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned);
+        self.update(index, |line| DraftLine { language, ..line })
+    }
+
+    /// Язык всего текста; пустой — не указан.
+    pub fn with_language(&self, language: Option<&str>) -> LyricsDraft {
+        let language = language.map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned);
+        LyricsDraft { language, ..self.clone() }
+    }
+
     pub fn with_timing(&self, timing: LyricsTiming) -> LyricsDraft {
         LyricsDraft { timing, word_cursor: 0, ..self.clone() }
     }

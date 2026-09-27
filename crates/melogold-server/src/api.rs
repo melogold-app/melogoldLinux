@@ -268,6 +268,24 @@ impl Api {
         self.call(reqwest::Method::POST, "/sync", Some(to_value(request)), Some(token), true).await
     }
 
+    // ── тексты песен (§4.10) ──
+
+    pub async fn put_lyrics(&self, token: &str, video_id: &str, text: &LyricsText) -> Result<MyLyrics, ApiError> {
+        self.call(reqwest::Method::PUT, &format!("/lyrics/{video_id}"), Some(to_value(text)), Some(token), false).await
+    }
+
+    pub async fn delete_lyrics(&self, token: &str, video_id: &str) -> Result<(), ApiError> {
+        self.call_empty(reqwest::Method::DELETE, &format!("/lyrics/{video_id}"), None, Some(token), false).await
+    }
+
+    pub async fn lyrics(&self, token: &str, video_id: &str) -> Result<LyricsResponse, ApiError> {
+        self.call(reqwest::Method::GET, &format!("/lyrics/{video_id}"), None, Some(token), false).await
+    }
+
+    pub async fn lyrics_changes(&self, token: &str, after: i64) -> Result<MyLyricsPage, ApiError> {
+        self.call(reqwest::Method::POST, "/auth/me/lyrics/changes", Some(json!({ "after": after })), Some(token), false).await
+    }
+
     // ── живые события (§6) ──
 
     /// Поток событий: кадры `id:` + `data:` без `event:`, heartbeat — комментарий. Заканчивается,

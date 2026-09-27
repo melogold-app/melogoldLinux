@@ -1,6 +1,6 @@
 # Выбранный текст песни переезжает на другие устройства
 
-Статус: открыто (делается в срезе 6, «Тексты»)
+Статус: сделано (срез 6, «Тексты»)
 
 Те же задания и подробности: `melogoldAndroid/tasks/0009-chosen-lyrics-sync.md`,
 `melogoldiOSmacOS/tasks/0011-chosen-lyrics-sync.md`. Образец — Windows 0.1.10 (`StoredLyrics.Chosen`,
@@ -28,3 +28,13 @@
 - Юнит-тесты: выбранный LrcLib — свой, уходит с `syncedSource = "lrclib"`; без флага — не уходит; версия с сервера с
   `lrclib` сохраняется с флагом и не удаляется при следующей выгрузке.
 - Живой сервер (временный аккаунт, удалить после): выбор на Windows появляется на Linux и обратно.
+
+## 4. Linux
+
+- `melogold-core/src/lyrics/sync_rules.rs`: `is_own` (сторона `user`/`file` или `chosen` и непустой текст),
+  `from_payload` — версия с сервера своя с любым источником; `plan_sends`, `delete_on_tombstone`;
+- `melogold-server/src/sync.rs`: `PUT`/`DELETE /lyrics/{videoId}`, свои версии по `lyricsRev`, `lookup_lyrics` для
+  цепочки поиска; тест `chosen_lyrics_from_server_stay_own` — версия `lrclib` с сервера сохраняется с флагом и
+  следующая выгрузка её не удаляет;
+- «Найти другой текст…» ставит `chosen`; живая проверка двух устройств (`tests/live.rs`) — выбранный текст доходит
+  с `syncedSource = "lrclib"` и остаётся своим после повторной синхронизации обеих сторон.

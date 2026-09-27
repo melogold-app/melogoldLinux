@@ -9,6 +9,7 @@
     <file preprocess="xml-stripblanks">icons/scalable/actions/heart-outline-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/offline-filled-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/offline-outline-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/lyrics-symbolic.svg</file>
     <file>icons/256x256/apps/app.melogold.Melogold.png</file>
     <file>style.css</file>
   </gresource>

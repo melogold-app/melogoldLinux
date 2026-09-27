@@ -269,8 +269,14 @@ pub fn maybe_start(window: &MainWindow) {
         ),
     ];
     let mut steps = steps;
+    steps.extend(lyrics_steps());
     if std::env::var("MELOGOLD_SNAPSHOT_ACCOUNT").as_deref() == Ok("1") {
         steps.extend(account_steps());
+    }
+    // Только нужные шаги: MELOGOLD_SNAPSHOT_STEPS=17,08 — по началу имени.
+    if let Ok(only) = std::env::var("MELOGOLD_SNAPSHOT_STEPS") {
+        let prefixes: Vec<String> = only.split(',').map(|p| p.trim().to_owned()).filter(|p| !p.is_empty()).collect();
+        steps.retain(|(name, _, _)| prefixes.iter().any(|p| name.starts_with(p.as_str())));
     }
 
     let window = window.clone();
@@ -344,6 +350,178 @@ fn sample_tracks() -> Vec<melogold_core::music::Track> {
         ..Default::default()
     })
     .collect()
+}
+
+/// Текст песни (срез 6, задания 0003 и 0007): дуэт, подпевка, время слов, длинная строка с
+/// переносом, проигрыш; обычный вид; «Найти другой текст»; «Текст недоступен». Текст — из
+/// библиотеки: сеть нужна только потоку трека и поиску LrcLib.
+fn lyrics_steps() -> Vec<Step> {
+    const TTML: &str = r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xml:lang="en">
+<head><metadata><ttm:agent type="person" xml:id="v1"/><ttm:agent type="person" xml:id="v2"/></metadata></head>
+<body><div>
+<p begin="00:18.000" end="00:21.500" ttm:agent="v1"><span begin="00:18.000" end="00:18.600">We're </span><span begin="00:18.600" end="00:19.200">no </span><span begin="00:19.200" end="00:19.900">strangers </span><span begin="00:19.900" end="00:20.300">to </span><span begin="00:20.300" end="00:21.500">love</span></p>
+<p begin="00:22.000" end="00:26.000" ttm:agent="v2">You know the rules and so do I<span ttm:role="x-bg"><span begin="00:24.000" end="00:25.500">(so do I)</span></span></p>
+<p begin="00:26.500" end="00:31.000" ttm:agent="v1">A full commitment's what I'm thinking of, and this line is long enough to wrap onto the next one</p>
+<p begin="00:31.500" end="00:35.000" ttm:agent="v2">You wouldn't get this from any other guy</p>
+<p begin="00:43.000" end="00:47.000" ttm:agent="v1">I just wanna tell you how I'm feeling</p>
+<p begin="00:47.000" end="00:51.000" ttm:agent="v1">Gotta make you understand</p>
+<p begin="00:51.000" end="00:55.000" ttm:agent="v2">Never gonna give you up</p>
+<p begin="00:55.000" end="00:59.000" ttm:agent="v2">Never gonna let you down</p>
+</div></body></tt>"#;
+    let play = |video_id: &'static str, title: &'static str, start: u64| {
+        move |w: &MainWindow| {
+            let track = melogold_core::music::Track {
+                video_id: video_id.into(),
+                title: title.into(),
+                artists_text: Some("Rick Astley".into()),
+                album_title: Some("Whenever You Need Somebody".into()),
+                ..Default::default()
+            };
+            w.ctx.services.player.send(melogold_playback::engine::Command::PlaySingle { track, start: Duration::from_secs(start) });
+        }
+    };
+    let (first, second) = (play("dQw4w9WgXcQ", "Never Gonna Give You Up", 19), play("fJ9rUzIMcZQ", "Bohemian Rhapsody", 0));
+    vec![
+        (
+            "17-lyrics",
+            Box::new(move |w: &MainWindow| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    dialog.close();
+                }
+                let lyrics = melogold_core::lyrics::sync_rules::StoredLyrics {
+                    synced: Some(TTML.into()),
+                    plain: Some(String::new()),
+                    synced_source: Some("lrclib".into()),
+                    synced_ref: Some("33476831".into()),
+                    ..Default::default()
+                };
+                let _ = w.ctx.services.library.save_lyrics("dQw4w9WgXcQ", &lyrics);
+                first(w);
+                // «Сейчас играет» открывается, когда трек уже в плеере.
+                let weak = w.downgrade();
+                glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+                    if let Some(window) = weak.upgrade() {
+                        window.toggle_lyrics();
+                    }
+                });
+            }),
+            6000,
+        ),
+        (
+            "17a-lyrics-interlude",
+            Box::new(|w: &MainWindow| w.ctx.services.player.send(melogold_playback::engine::Command::Seek(Duration::from_secs(38)))),
+            2500,
+        ),
+        ("17b-lyrics-plain", Box::new(|w: &MainWindow| w.lyrics.toggle_synced()), 1000),
+        (
+            "17c-lyrics-find",
+            Box::new(|w: &MainWindow| {
+                w.lyrics.toggle_synced();
+                w.find_lyrics();
+            }),
+            4000,
+        ),
+        (
+            // Текст из сети: в библиотеке его нет — цепочка YouTube Music → LrcLib → KuGou.
+            "17c1-lyrics-online",
+            Box::new(|w: &MainWindow| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    dialog.close();
+                }
+                let track = melogold_core::music::Track {
+                    video_id: "BSTsnWoslP4".into(),
+                    title: "Bohemian Rhapsody".into(),
+                    artists_text: Some("Queen".into()),
+                    album_title: Some("A Night at the Opera".into()),
+                    ..Default::default()
+                };
+                w.ctx.services.player.send(melogold_playback::engine::Command::PlaySingle { track, start: Duration::from_secs(60) });
+            }),
+            9000,
+        ),
+        (
+            "17d-lyrics-unavailable",
+            Box::new(move |w: &MainWindow| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    dialog.close();
+                }
+                let none = melogold_core::lyrics::sync_rules::StoredLyrics {
+                    synced: Some(String::new()),
+                    plain: Some(String::new()),
+                    ..Default::default()
+                };
+                let _ = w.ctx.services.library.save_lyrics("fJ9rUzIMcZQ", &none);
+                second(w);
+            }),
+            3000,
+        ),
+        (
+            // Задание 0007: «Далее» — длинная строка (японский текст) целиком, с подпевкой.
+            "17f-editor-sync",
+            Box::new(|w: &MainWindow| {
+                let text = "君の名前を何度も呼んだ夜明けの空に消えていく声がまだ胸の奥で響いている、忘れられない約束と一緒に (ずっと)\nWe're no strangers to love\nYou know the rules and so do I (so do I)\nA full commitment's what I'm thinking of";
+                let lyrics = melogold_core::lyrics::sync_rules::StoredLyrics {
+                    synced: Some(String::new()),
+                    plain: Some(text.into()),
+                    plain_source: Some("user".into()),
+                    ..Default::default()
+                };
+                let _ = w.ctx.services.library.save_lyrics("fJ9rUzIMcZQ", &lyrics);
+                w.lyrics.reload();
+                let weak = w.downgrade();
+                glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                    if let Some(window) = weak.upgrade() {
+                        window.edit_lyrics();
+                    }
+                });
+            }),
+            1800,
+        ),
+        (
+            "17g-editor-words",
+            Box::new(|w: &MainWindow| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    if let Some(timing) = descendant::<adw::ToggleGroup>(dialog.upcast_ref(), "editor-timing") {
+                        timing.set_active_name(Some("word"));
+                    }
+                }
+            }),
+            800,
+        ),
+        (
+            "17h-editor-text",
+            Box::new(|w: &MainWindow| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    if let Some(tabs) = descendant::<adw::ToggleGroup>(dialog.upcast_ref(), "editor-tabs") {
+                        tabs.set_active_name(Some("text"));
+                    }
+                }
+            }),
+            800,
+        ),
+        (
+            "17i-editor-preview",
+            Box::new(|w: &MainWindow| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    if let Some(tabs) = descendant::<adw::ToggleGroup>(dialog.upcast_ref(), "editor-tabs") {
+                        tabs.set_active_name(Some("preview"));
+                    }
+                }
+            }),
+            800,
+        ),
+        (
+            "17j-lyrics-closed",
+            Box::new(|w: &MainWindow| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    dialog.force_close();
+                }
+                w.go_back();
+                w.ctx.services.player.send(melogold_playback::engine::Command::Pause);
+            }),
+            800,
+        ),
+    ]
 }
 
 /// Экраны вошедшего пользователя — на временном аккаунте `e2elinux…` (docs/PROMPT.md: живые проверки

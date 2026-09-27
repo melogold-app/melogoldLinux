@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::FutureExt;
+use melogold_core::lyrics::sync_rules::{sources, StoredLyrics};
 use melogold_core::music::Track;
 use melogold_data::{Database, Library};
 use melogold_server::account::{Account, AccountState, DeviceIdentity, DEFAULT_SERVER_URL};
@@ -101,6 +102,26 @@ async fn scenario(a: &Device, login: &str, password: &str, server: &str, dir: &s
             browse_id: "MPREb_OLmD8O5IYNS".into(), title: "Группа крови".into(), ..Default::default()
         };
     a.library.set_album_saved(&album, true).unwrap();
+    // Тексты: выбранный в «Найти другой текст» (задание 0002) и закреплённый после 30 с (задание 0006).
+    let chosen = StoredLyrics {
+        synced: Some("[00:01.00]e2e выбранный\n".into()),
+        plain: Some("e2e выбранный".into()),
+        synced_source: Some(sources::LRCLIB.into()),
+        plain_source: Some(sources::LRCLIB.into()),
+        chosen: true,
+        ..Default::default()
+    };
+    a.library.save_lyrics("fJ9rUzIMcZQ", &chosen).unwrap();
+    let found = StoredLyrics {
+        synced: Some("[00:02.00]e2e найденный".into()),
+        plain: Some(String::new()),
+        synced_source: Some(sources::LRCLIB.into()),
+        synced_ref: Some("33476831".into()),
+        offset_ms: -400,
+        ..Default::default()
+    };
+    a.library.save_lyrics("cYKAr38pZcY", &found).unwrap();
+    assert!(a.library.pin_played("cYKAr38pZcY").unwrap());
     assert!(a.sync.sync(true).await, "синхронизация A");
 
     // Устройство B входит тем же логином и получает всё.
@@ -118,6 +139,15 @@ async fn scenario(a: &Device, login: &str, password: &str, server: &str, dir: &s
     let history = b.library.recent_history(10).unwrap();
     assert!(history.iter().any(|h| h.track.video_id == "dQw4w9WgXcQ"), "прослушивание A в истории B");
     assert_eq!(b.account.devices().await.expect("устройства").devices.len(), 2);
+    let lyrics = b.library.lyrics("fJ9rUzIMcZQ").unwrap().expect("выбранный текст дошёл");
+    assert_eq!((lyrics.synced_source.as_deref(), lyrics.chosen), (Some("lrclib"), true), "выбранный — свой и с настоящим источником");
+    assert!(lyrics.synced.as_deref().unwrap_or_default().contains("e2e выбранный"));
+    let pin = b.library.lyrics_pin("cYKAr38pZcY").unwrap().expect("закрепление дошло");
+    assert_eq!((pin.source.as_str(), pin.reference.as_str(), pin.start_time_ms), ("lrclib", "33476831", Some(400)));
+    // Повторная синхронизация B ничего не удаляет (грабля Android и Apple).
+    assert!(b.sync.sync(true).await);
+    assert!(a.sync.sync(true).await);
+    assert_eq!(a.library.lyrics("fJ9rUzIMcZQ").unwrap().map(|l| l.chosen), Some(true), "выбор цел на A");
 
     // Живые события: A слушает, B правит — у A правка появляется сама, за секунды.
     a.sync.start();

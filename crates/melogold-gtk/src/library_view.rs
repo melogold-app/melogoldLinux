@@ -151,6 +151,9 @@ impl MainWindow {
             if let Some(playlists) = playlists {
                 *view.playlists.borrow_mut() = playlists;
             }
+            if change.has(Change::LYRICS) {
+                window.lyrics.library_changed();
+            }
             if change.has(Change::OVERRIDES) {
                 window.refresh_display();
             }

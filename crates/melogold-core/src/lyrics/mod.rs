@@ -4,6 +4,7 @@
 
 pub mod draft;
 pub mod lrc;
+pub mod pins;
 pub mod rows;
 pub mod sync_rules;
 pub mod ttml;

@@ -32,6 +32,7 @@ use crate::account_view::AccountView;
 use crate::app::AppContext;
 use crate::library_view::LibraryView;
 use crate::localization::{tr, trf};
+use crate::lyrics_service::LyricsService;
 use crate::now_playing::NowPlaying;
 use crate::pages;
 use crate::player_bar::{Hidden, PlayerBar};
@@ -84,6 +85,8 @@ pub struct Inner {
     pub selection: RefCell<Option<Rc<Selection>>>,
     pub selection_bar: SelectionBar,
     pub account_view: AccountView,
+    /// Текст играющего трека (срез 6).
+    pub lyrics: LyricsService,
 }
 
 struct Section {
@@ -213,6 +216,7 @@ impl MainWindow {
             .build();
         suggestions.set_parent(&search);
 
+        let lyrics = LyricsService::new(Rc::clone(&ctx));
         let this = MainWindow(Rc::new(Inner {
             window,
             ctx,
@@ -242,6 +246,7 @@ impl MainWindow {
             selection: RefCell::default(),
             selection_bar,
             account_view: AccountView::default(),
+            lyrics,
         }));
         this.build_player();
         this.install_breakpoints();
@@ -307,6 +312,7 @@ impl MainWindow {
     fn show_state(&self, state: &State) {
         let mut shown = state.clone();
         shown.track = shown.track.map(|t| self.display(&t));
+        self.lyrics.set_track(state.track.as_ref(), shown.track.as_ref());
         self.player_bar().apply(self, &shown);
         if let Some(now_playing) = self.now_playing.get() {
             now_playing.apply(self, &shown);
@@ -381,6 +387,38 @@ impl MainWindow {
         }
         if self.root_nav.visible_page().as_ref() != Some(&now_playing.page) {
             self.root_nav.push(&now_playing.page);
+        }
+    }
+
+    pub fn now_playing_open(&self) -> bool {
+        self.root_nav.visible_page().is_some_and(|p| p.tag().as_deref() == Some("now-playing"))
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.state.borrow().playing
+    }
+
+    /// Текст на экране: открыта «Сейчас играет», и текст виден.
+    pub fn lyrics_visible(&self) -> bool {
+        self.now_playing.get().is_some_and(|n| n.lyrics_visible(self))
+    }
+
+    /// «Текст» (Ctrl+L): показать текст; уже на экране — закрыть «Сейчас играет».
+    pub fn toggle_lyrics(&self) {
+        if self.lyrics_visible() {
+            self.close_now_playing();
+            return;
+        }
+        self.show_now_playing();
+        if let Some(now_playing) = self.now_playing.get() {
+            now_playing.show_lyrics();
+        }
+    }
+
+    /// Кнопка «Текст» панели плеера нажата, пока текст на экране.
+    pub fn update_lyrics_button(&self) {
+        if let Some(bar) = self.player_bar.get() {
+            bar.set_lyrics_active(self.lyrics_visible());
         }
     }
 
@@ -603,6 +641,7 @@ impl MainWindow {
         volume_as_button(&phone);
         two_rows(&phone);
         phone.add_setter(&bar.queue, "visible", Some(&false.to_value()));
+        phone.add_setter(&bar.lyrics, "visible", Some(&false.to_value()));
         phone.add_setter(&bar.heart, "visible", Some(&false.to_value()));
         menu_follows(&phone, Hidden { modes: true, queue: true, heart: true });
         headers_follow(&phone, true);
@@ -743,6 +782,12 @@ impl MainWindow {
                     }
                 }),
             ),
+            simple("lyrics", Box::new(|w| w.toggle_lyrics())),
+            simple("lyrics-find", Box::new(|w| w.find_lyrics())),
+            simple("lyrics-edit", Box::new(|w| w.edit_lyrics())),
+            simple("lyrics-retry", Box::new(|w| w.lyrics.retry())),
+            simple("lyrics-toggle", Box::new(|w| w.lyrics.toggle_synced())),
+            simple("lyrics-reset-shift", Box::new(|w| w.lyrics.reset_shift())),
             simple(
                 "current-like",
                 Box::new(|w| {
@@ -754,6 +799,16 @@ impl MainWindow {
             ),
         ];
         self.window.add_action_entries(entries);
+        let weak = self.downgrade();
+        let shift = gio::ActionEntry::builder("lyrics-shift")
+            .parameter_type(Some(glib::VariantTy::INT32))
+            .activate(move |_: &adw::ApplicationWindow, _, parameter| {
+                if let (Some(window), Some(delta)) = (weak.upgrade(), parameter.and_then(|p| p.get::<i32>())) {
+                    window.lyrics.shift(i64::from(delta));
+                }
+            })
+            .build();
+        self.window.add_action_entries([shift]);
 
         // Состояния: перемешать, без звука, очередь — у переключателей своё отмеченное состояние.
         let shuffle = gio::SimpleAction::new_stateful("shuffle", None, &false.to_variant());
@@ -799,6 +854,8 @@ impl MainWindow {
             ("win.repeat", &["<Control>t"]),
             ("win.queue", &["<Control>u"]),
             ("win.mute", &["<Control>m"]),
+            ("win.lyrics", &["<Control>l"]),
+            ("win.current-like", &["<Control>d"]),
         ] {
             app.set_accels_for_action(action, accels);
         }

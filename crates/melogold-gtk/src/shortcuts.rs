@@ -22,6 +22,36 @@ pub fn present(parent: Option<&gtk::Window>) -> adw::ShortcutsDialog {
         window.add(adw::ShortcutsItem::new(title, accelerator));
     }
     dialog.add(window);
+    let playback = adw::ShortcutsSection::new(Some(tr("ShortcutsGroupPlayback")));
+    for (title, accelerator) in [
+        (tr("ShortcutPlayPause"), "space"),
+        (tr("ShortcutNextPrevious"), "<Control>Right <Control>Left"),
+        (tr("ShortcutSeek"), "<Shift>Right <Shift>Left"),
+        (tr("ShortcutVolume"), "<Control>Up <Control>Down"),
+        (tr("ShortcutMute"), "m <Control>m"),
+        (tr("ShortcutShuffle"), "<Control>h"),
+        (tr("ShortcutRepeat"), "<Control>t"),
+        (tr("ShortcutLike"), "<Control>d"),
+        (tr("ShortcutLyrics"), "<Control>l"),
+        (tr("ShortcutQueue"), "<Control>u"),
+    ] {
+        playback.add(adw::ShortcutsItem::new(title, accelerator));
+    }
+    dialog.add(playback);
+    let editor = adw::ShortcutsSection::new(Some(tr("ShortcutsGroupEditor")));
+    for (title, accelerator) in [
+        (tr("ShortcutMark"), "Return"),
+        (tr("ShortcutMarkEnd"), "<Shift>Return"),
+        (tr("ShortcutRemark"), "BackSpace"),
+        (tr("ShortcutCursor"), "Up Down"),
+        (tr("ShortcutEditorSeek"), "Left Right"),
+        (tr("ShortcutNudge"), "bracketleft bracketright"),
+        (tr("ShortcutUndo"), "<Control>z"),
+        (tr("ShortcutSave"), "<Control>s"),
+    ] {
+        editor.add(adw::ShortcutsItem::new(title, accelerator));
+    }
+    dialog.add(editor);
     dialog.present(parent);
     dialog
 }
