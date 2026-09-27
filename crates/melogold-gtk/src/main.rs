@@ -4,6 +4,7 @@
 // а не запутанность; псевдонимы на каждый такой тип читались бы хуже.
 #![allow(clippy::type_complexity)]
 
+mod account_view;
 mod app;
 mod catalog_widgets;
 mod images;

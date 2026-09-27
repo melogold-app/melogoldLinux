@@ -168,7 +168,7 @@ pub fn new_page(window: &MainWindow) -> adw::NavigationPage {
 // ── детальные экраны ──
 
 pub fn album_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage {
-    let page = scaffold("", None, false);
+    let page = scaffold("Melogold", None, false);
     let (music, id) = (window.ctx.services.music.clone(), browse_id.to_owned());
     let title_page = page.page.clone();
     load(
@@ -232,7 +232,7 @@ pub fn album_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage {
 
 /// Плейлист YouTube: плейлисты длиннее 100 треков догружаются продолжениями (грабли §9 п. 8).
 pub fn playlist_page(window: &MainWindow, playlist_id: &str) -> adw::NavigationPage {
-    let page = scaffold("", None, false);
+    let page = scaffold("Melogold", None, false);
     let (music, id) = (window.ctx.services.music.clone(), playlist_id.to_owned());
     let (title_page, scroller) = (page.page.clone(), page.scroller.clone());
     load(
@@ -283,7 +283,7 @@ pub fn playlist_page(window: &MainWindow, playlist_id: &str) -> adw::NavigationP
 
 /// Исполнитель YTM; без музыкального профиля — канал YouTube с бесконечной лентой видео.
 pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage {
-    let page = scaffold("", None, false);
+    let page = scaffold("Melogold", None, false);
     let (music, id) = (window.ctx.services.music.clone(), browse_id.to_owned());
     let (title_page, scroller) = (page.page.clone(), page.scroller.clone());
     load(

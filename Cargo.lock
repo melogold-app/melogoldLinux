@@ -1519,6 +1519,7 @@ dependencies = [
  "melogold-data",
  "melogold-innertube",
  "melogold-playback",
+ "melogold-server",
  "reqwest",
  "serde",
  "serde_json",

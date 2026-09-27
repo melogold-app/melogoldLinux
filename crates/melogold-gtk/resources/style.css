@@ -94,3 +94,10 @@ listview.track-list > row {
   color: var(--popover-fg-color);
   box-shadow: 0 1px 3px 1px alpha(black, 0.12), 0 2px 12px 2px alpha(black, 0.12), 0 0 0 1px var(--border-color);
 }
+
+/* Код восстановления: крупно, моноширинным, переносится между группами. */
+.recovery-code {
+  font-size: 1.5em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}

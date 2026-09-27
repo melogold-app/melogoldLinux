@@ -46,6 +46,6 @@ for config in "${configs[@]}"; do
         MELOGOLD_SCREENSHOT_DIR="${dir}" MELOGOLD_SCREENSHOT_SIZE="${size}" \
         MELOGOLD_SCREENSHOT_SCHEME="${scheme}" MELOGOLD_SCREENSHOT_LANG="${lang}" \
         MELOGOLD_AUDIO_SINK=fakesink MELOGOLD_FAKE_GEO=cYKAr38pZcY:RU RUST_LOG="${RUST_LOG:-warn}" \
-        timeout 120 "${repo}/target/debug/melogold"
+        timeout 180 "${repo}/target/debug/melogold"
 done
 echo "снимки: ${out}"

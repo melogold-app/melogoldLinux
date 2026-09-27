@@ -6,5 +6,5 @@ pub mod overrides;
 pub mod sync_store;
 
 pub use database::{Database, DbError};
-pub use library::{Change, Library};
+pub use library::{Change, DeviceFilter, Library};
 pub use overrides::TrackOverride;

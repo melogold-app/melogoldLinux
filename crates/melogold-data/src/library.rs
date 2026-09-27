@@ -68,6 +68,27 @@ pub struct AllTracksEntry {
     pub play_time_ms: i64,
 }
 
+/// Чьи прослушивания показать в Истории (задание Windows 0002 §5).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum DeviceFilter {
+    #[default]
+    All,
+    /// Это устройство: события без `deviceId` и с `deviceId` этого устройства на сервере.
+    This(Option<String>),
+    Device(String),
+}
+
+impl DeviceFilter {
+    /// Условие по `play_events` и значение параметра `?2`.
+    fn sql(&self) -> (&'static str, Option<String>) {
+        match self {
+            DeviceFilter::All => ("(?2 IS NULL OR 1)", None),
+            DeviceFilter::This(own) => ("(device_id IS NULL OR device_id = ?2)", own.clone()),
+            DeviceFilter::Device(id) => ("device_id = ?2", Some(id.clone())),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Counts {
     pub likes: i64,
@@ -512,40 +533,65 @@ impl Library {
         Ok(())
     }
 
-    /// «Недавние»: последние 100 разных треков по последнему прослушиванию.
+    /// «Недавние»: последние разные треки по последнему прослушиванию.
     pub fn recent_history(&self, limit: usize) -> Result<Vec<HistoryEntry>, DbError> {
+        self.recent_history_for(limit, &DeviceFilter::All)
+    }
+
+    /// «Недавние» выбранного устройства (задание Windows 0002 §5).
+    pub fn recent_history_for(&self, limit: usize, filter: &DeviceFilter) -> Result<Vec<HistoryEntry>, DbError> {
+        let (condition, device) = filter.sql();
         self.db.read(|c| {
             let mut statement = c.prepare(&format!(
                 "SELECT {}, h.last
-                 FROM (SELECT video_id, MAX(played_at) AS last FROM play_events GROUP BY video_id ORDER BY last DESC LIMIT ?1) h
+                 FROM (SELECT video_id, MAX(played_at) AS last FROM play_events WHERE {condition}
+                       GROUP BY video_id ORDER BY last DESC LIMIT ?1) h
                  JOIN tracks t ON t.video_id = h.video_id ORDER BY h.last DESC",
                 prefixed("t")
             ))?;
-            let rows = statement.query_map([limit as i64], |r| Ok(HistoryEntry { track: read_track(r, 0)?, played_at: r.get(14)? }))?;
+            let rows = statement
+                .query_map(params![limit as i64, device], |r| Ok(HistoryEntry { track: read_track(r, 0)?, played_at: r.get(14)? }))?;
             rows.collect()
         })
     }
 
     /// «Чаще всего» за период; за всё время — общее время трека (`total_play_ms`).
     pub fn most_played(&self, since_ms: Option<i64>, limit: usize) -> Result<Vec<TopEntry>, DbError> {
+        self.most_played_for(since_ms, limit, &DeviceFilter::All)
+    }
+
+    /// «Чаще всего» выбранного устройства: сумма его прослушиваний за период. «Всё время» для «Все
+    /// устройства» — общее время трека (`playStats` сервера).
+    pub fn most_played_for(&self, since_ms: Option<i64>, limit: usize, filter: &DeviceFilter) -> Result<Vec<TopEntry>, DbError> {
+        let (condition, device) = filter.sql();
         self.db.read(|c| {
-            let sql = match since_ms {
-                None => format!(
+            let map = |r: &Row| Ok(TopEntry { track: read_track(r, 0)?, play_time_ms: r.get(14)? });
+            if since_ms.is_none() && matches!(filter, DeviceFilter::All) {
+                let mut statement = c.prepare(&format!(
                     "SELECT {}, t.total_play_ms FROM tracks t WHERE t.total_play_ms > 0 ORDER BY t.total_play_ms DESC LIMIT ?1",
                     prefixed("t")
-                ),
-                Some(_) => format!(
-                    "SELECT {}, s.total FROM (SELECT video_id, SUM(play_time_ms) AS total FROM play_events WHERE played_at >= ?2
-                     GROUP BY video_id ORDER BY total DESC LIMIT ?1) s JOIN tracks t ON t.video_id = s.video_id ORDER BY s.total DESC",
-                    prefixed("t")
-                ),
-            };
-            let mut statement = c.prepare(&sql)?;
-            let map = |r: &Row| Ok(TopEntry { track: read_track(r, 0)?, play_time_ms: r.get(14)? });
-            match since_ms {
-                None => statement.query_map([limit as i64], map)?.collect(),
-                Some(since) => statement.query_map(params![limit as i64, since], map)?.collect(),
+                ))?;
+                let rows = statement.query_map([limit as i64], map)?.collect();
+                return rows;
             }
+            let mut statement = c.prepare(&format!(
+                "SELECT {}, s.total FROM (SELECT video_id, SUM(play_time_ms) AS total FROM play_events
+                                          WHERE played_at >= ?3 AND {condition}
+                                          GROUP BY video_id ORDER BY total DESC LIMIT ?1) s
+                 JOIN tracks t ON t.video_id = s.video_id ORDER BY s.total DESC",
+                prefixed("t")
+            ))?;
+            let rows = statement.query_map(params![limit as i64, device, since_ms.unwrap_or(0)], map)?.collect();
+            rows
+        })
+    }
+
+    /// Устройства, чьи прослушивания пришли с сервера (не это).
+    pub fn play_devices(&self) -> Result<HashSet<String>, DbError> {
+        self.db.read(|c| {
+            let mut statement = c.prepare("SELECT DISTINCT device_id FROM play_events WHERE device_id IS NOT NULL")?;
+            let rows = statement.query_map([], |r| r.get(0))?;
+            rows.collect()
         })
     }
 
@@ -1010,6 +1056,27 @@ mod tests {
         let db = Database::open(&path).unwrap();
         let _ = std::fs::remove_file(&path);
         db
+    }
+
+    #[test]
+    fn history_by_device() {
+        let lib = library();
+        lib.record_play(&track("mine"), 60_000, 1_000).unwrap();
+        lib.sync(|tx| {
+            tx.ensure_track("back", None)?;
+            tx.ensure_track("other", None)?;
+            tx.insert_play("e-own-back", "back", 2_000, 30_000, Some("me"))?;
+            tx.insert_play("e-other", "other", 3_000, 90_000, Some("phone"))
+        })
+        .unwrap();
+        let ids =
+            |filter: &DeviceFilter| lib.recent_history_for(10, filter).unwrap().into_iter().map(|h| h.track.video_id).collect::<Vec<_>>();
+        assert_eq!(ids(&DeviceFilter::All), ["other", "back", "mine"]);
+        assert_eq!(ids(&DeviceFilter::This(Some("me".into()))), ["back", "mine"]);
+        assert_eq!(ids(&DeviceFilter::Device("phone".into())), ["other"]);
+        let top = lib.most_played_for(Some(0), 10, &DeviceFilter::Device("phone".into())).unwrap();
+        assert_eq!((top[0].track.video_id.as_str(), top[0].play_time_ms), ("other", 90_000));
+        assert_eq!(lib.play_devices().unwrap(), HashSet::from(["me".to_owned(), "phone".to_owned()]));
     }
 
     #[test]

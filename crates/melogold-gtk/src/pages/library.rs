@@ -12,7 +12,7 @@ use gtk::glib;
 use melogold_core::music::{MusicItem, Track};
 use melogold_core::text::now_ms;
 use melogold_data::library::LocalPlaylist;
-use melogold_data::{Change, Library};
+use melogold_data::{Change, DeviceFilter, Library};
 use melogold_playback::engine::Command;
 
 use crate::catalog_widgets::{card_grid, card_view, TrackContext, TrackList, TrackListView};
@@ -591,16 +591,29 @@ pub fn history(window: &MainWindow) -> adw::NavigationPage {
         periods.add(adw::Toggle::builder().name(name).label(tr(key)).build());
     }
     periods.set_active_name(Some("30"));
+    // Чьи прослушивания (задание Windows 0002 §5): виден с аккаунтом, когда есть чужие.
+    let device_names = gtk::StringList::new(&[tr("HistoryDeviceAll"), tr("HistoryDeviceThis")]);
+    let devices = gtk::DropDown::builder()
+        .model(&device_names)
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .tooltip_text(tr("HistoryDeviceChoose"))
+        .build();
+    devices.update_property(&[gtk::accessible::Property::Label(tr("HistoryDeviceChoose"))]);
+    let device_filters: Rc<RefCell<Vec<DeviceFilter>>> = Rc::new(RefCell::new(vec![DeviceFilter::All, DeviceFilter::This(None)]));
     let controls = gtk::Box::builder().spacing(12).build();
     controls.append(&modes);
     controls.append(&periods);
+    controls.append(&devices);
     let controls_scroller =
         gtk::ScrolledWindow::builder().child(&controls).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).build();
     p.top.append(&controls_scroller);
 
     let (weak, list, state, modes_ref, periods_ref) = (window.downgrade(), p.list.clone(), p.state.clone(), modes.clone(), periods.clone());
+    let (devices_ref, filters_ref) = (devices.clone(), Rc::clone(&device_filters));
     let refresh = live(window, &p.page, Change(Change::HISTORY.0 | Change::BLOCKS.0), move || {
         let Some(window) = weak.upgrade() else { return };
+        let filter = filters_ref.borrow().get(devices_ref.selected() as usize).cloned().unwrap_or_default();
         let top = modes_ref.active_name().as_deref() == Some("top");
         periods_ref.set_visible(top);
         let day = 86_400_000;
@@ -612,9 +625,9 @@ pub fn history(window: &MainWindow) -> adw::NavigationPage {
         };
         let task = window.ctx.services.db(move |library| {
             if top {
-                library.most_played(since, 500).unwrap_or_default().into_iter().map(|e| e.track).collect::<Vec<_>>()
+                library.most_played_for(since, 500, &filter).unwrap_or_default().into_iter().map(|e| e.track).collect::<Vec<_>>()
             } else {
-                library.recent_history(500).unwrap_or_default().into_iter().map(|e| e.track).collect()
+                library.recent_history_for(500, &filter).unwrap_or_default().into_iter().map(|e| e.track).collect()
             }
         });
         let (weak, list, state, plays) = (window.downgrade(), list.clone(), state.clone(), Rc::clone(&plays));
@@ -632,9 +645,11 @@ pub fn history(window: &MainWindow) -> adw::NavigationPage {
             }
         });
     });
-    let (r1, r2) = (Rc::clone(&refresh), Rc::clone(&refresh));
+    let (r1, r2, r3) = (Rc::clone(&refresh), Rc::clone(&refresh), Rc::clone(&refresh));
     modes.connect_active_name_notify(move |_| r1());
     periods.connect_active_name_notify(move |_| r2());
+    devices.connect_selected_notify(move |_| r3());
+    load_history_devices(window, &devices, &device_names, &device_filters);
 
     let weak = window.downgrade();
     clear_button.connect_clicked(move |_| {
@@ -645,13 +660,50 @@ pub fn history(window: &MainWindow) -> adw::NavigationPage {
     p.page
 }
 
+/// Устройства для фильтра Истории: «Это устройство» — с его id на сервере, остальные — по именам
+/// из списка устройств аккаунта; ушедшее из списка — «Другое устройство».
+fn load_history_devices(window: &MainWindow, dropdown: &gtk::DropDown, names: &gtk::StringList, filters: &Rc<RefCell<Vec<DeviceFilter>>>) {
+    let services = &window.ctx.services;
+    let Some(session) = services.account.session() else { return };
+    let own = session.device_id.clone();
+    let seen = services.db(|library| library.play_devices().unwrap_or_default());
+    let account = std::sync::Arc::clone(&services.account);
+    let named = services.run(async move { account.device_names().await.unwrap_or_default() });
+    let (dropdown, names, filters) = (dropdown.clone(), names.clone(), Rc::clone(filters));
+    glib::spawn_future_local(async move {
+        let (Some(seen), Some(named)) = (seen.await, named.await) else { return };
+        let mut others: Vec<(String, String)> = seen
+            .into_iter()
+            .filter(|id| *id != own)
+            .map(|id| {
+                let name = named.get(&id).map(|(name, _)| name.clone()).unwrap_or_else(|| tr("HistoryDeviceOther").to_owned());
+                (id, name)
+            })
+            .collect();
+        if others.is_empty() {
+            return;
+        }
+        others.sort_by(|a, b| a.1.cmp(&b.1));
+        let mut list = vec![DeviceFilter::All, DeviceFilter::This(Some(own))];
+        for (id, name) in others {
+            names.append(&name);
+            list.push(DeviceFilter::Device(id));
+        }
+        filters.replace(list);
+        dropdown.set_visible(true);
+    });
+}
+
 /// «Очистить историю…»: с числом прослушиваний, кнопка — разрушающая (§5.6).
 fn confirm_clear_history(window: &MainWindow) {
     let task = window.ctx.services.db(|library| library.play_count().unwrap_or(0));
     let weak = window.downgrade();
     glib::spawn_future_local(async move {
         let (Some(window), Some(count)) = (weak.upgrade(), task.await) else { return };
-        let dialog = adw::AlertDialog::new(Some(tr("ClearHistoryTitle")), Some(&trf("ClearHistoryPromptFormat", &[&count])));
+        // С аккаунтом история очищается на всех устройствах — так и сказать.
+        let key =
+            if window.ctx.services.account.session().is_some() { "ClearHistoryEverywherePromptFormat" } else { "ClearHistoryPromptFormat" };
+        let dialog = adw::AlertDialog::new(Some(tr("ClearHistoryTitle")), Some(&trf(key, &[&count])));
         dialog.add_response("cancel", tr("Cancel"));
         dialog.add_response("clear", tr("ClearHistory").trim_end_matches('…'));
         dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);

@@ -28,6 +28,7 @@ use melogold_core::settings::{keys, Tab};
 use melogold_core::youtube_links::{self, LinkTarget};
 use melogold_playback::engine::{Command, Event, QueueView, State};
 
+use crate::account_view::AccountView;
 use crate::app::AppContext;
 use crate::library_view::LibraryView;
 use crate::localization::{tr, trf};
@@ -82,6 +83,7 @@ pub struct Inner {
     /// Выделение, чья панель сейчас на экране (задание 0004).
     pub selection: RefCell<Option<Rc<Selection>>>,
     pub selection_bar: SelectionBar,
+    pub account_view: AccountView,
 }
 
 struct Section {
@@ -239,6 +241,7 @@ impl MainWindow {
             library_view: LibraryView::default(),
             selection: RefCell::default(),
             selection_bar,
+            account_view: AccountView::default(),
         }));
         this.build_player();
         this.install_breakpoints();
@@ -249,6 +252,7 @@ impl MainWindow {
         this.install_track_actions();
         this.install_selection_actions();
         this.start_library();
+        this.start_account();
         this.install_keys();
         this.install_search();
         this.install_drop();

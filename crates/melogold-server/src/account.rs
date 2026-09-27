@@ -71,21 +71,51 @@ pub struct Account {
 }
 
 impl Account {
-    /// Сессия читается из хранилища; `server_url` — выбранный в настройках (иначе по умолчанию).
-    pub async fn open(identity: DeviceIdentity, store: SessionStore, server_url: Option<String>) -> Arc<Account> {
-        let (session, store_kind) = store.load().await;
-        let state = match &session {
-            Some(s) => AccountState::SignedIn { login: s.login.clone(), device_id: s.device_id.clone(), server_url: s.server_url.clone() },
-            None => AccountState::SignedOut,
-        };
+    /// Аккаунт без сессии; [`Account::load`] читает её из хранилища. `server_url` — выбранный в
+    /// настройках (иначе по умолчанию).
+    pub fn new(identity: DeviceIdentity, store: SessionStore, server_url: Option<String>) -> Arc<Account> {
         let server_url = server_url.filter(|u| !u.is_empty()).unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
         Arc::new(Account {
             identity,
             store,
-            inner: Mutex::new(Inner { session, server_url, server_info: None, state, store_kind, api: None }),
+            inner: Mutex::new(Inner {
+                session: None,
+                server_url,
+                server_info: None,
+                state: AccountState::SignedOut,
+                store_kind: StoreKind::File,
+                api: None,
+            }),
             refresh: tokio::sync::Mutex::new(()),
             listeners: Mutex::default(),
         })
+    }
+
+    /// Прочитать сессию (связка ключей может отвечать не сразу — окно её не ждёт).
+    pub async fn load(&self) {
+        let (session, store_kind) = self.store.load().await;
+        let state = match &session {
+            Some(s) => AccountState::SignedIn { login: s.login.clone(), device_id: s.device_id.clone(), server_url: s.server_url.clone() },
+            None => AccountState::SignedOut,
+        };
+        {
+            let mut inner = self.lock();
+            inner.session = session;
+            inner.state = state.clone();
+            inner.store_kind = store_kind;
+        }
+        if state != AccountState::SignedOut {
+            for listener in self.listeners.lock().unwrap_or_else(|p| p.into_inner()).iter() {
+                listener(&state);
+            }
+        }
+    }
+
+    /// Новый аккаунт с уже прочитанной сессией (проверки, примеры).
+    pub async fn open(identity: DeviceIdentity, store: SessionStore, server_url: Option<String>) -> Arc<Account> {
+        let account = Account::new(identity, store, server_url);
+        account.load().await;
+        account
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {

@@ -66,10 +66,16 @@ impl SessionStore {
     /// Сессия и где она лежит. Файл, оставшийся с тех пор, когда связки не было, переезжает в неё.
     pub async fn load(&self) -> (Option<StoredSession>, StoreKind) {
         if let Some(keyring) = self.keyring().await {
-            let _ = keyring.unlock().await;
+            // Отпирается связка, только если в ней уже есть сессия Melogold: без аккаунта запроса
+            // пароля связки при запуске не бывает.
             let from_keyring = match keyring.search_items(&attributes()).await {
                 Ok(items) => match items.first() {
-                    Some(item) => item.secret().await.ok().and_then(|secret| serde_json::from_slice::<StoredSession>(&secret).ok()),
+                    Some(item) => {
+                        if item.is_locked().await.unwrap_or(false) {
+                            let _ = item.unlock().await;
+                        }
+                        item.secret().await.ok().and_then(|secret| serde_json::from_slice::<StoredSession>(&secret).ok())
+                    }
                     None => None,
                 },
                 Err(error) => {

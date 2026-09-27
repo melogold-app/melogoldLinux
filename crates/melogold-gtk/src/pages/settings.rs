@@ -1,9 +1,15 @@
 //! Настройки (docs/PROMPT.md §5.4, REWRITE §3.5). Только то, что есть на Android, плюс
 //! платформенное; группы появляются вместе со срезом, который их оживляет.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use adw::prelude::*;
-use melogold_core::app_info::{DEFAULT_SERVER_URL, ISSUES_URL, REPOSITORY_URL, VERSION};
+use gtk::glib;
+use melogold_core::app_info::{ISSUES_URL, REPOSITORY_URL, VERSION};
 use melogold_core::settings::{keys, ThemeMode};
+use melogold_server::account::AccountState;
+use melogold_server::sync::SyncStatus;
 
 use crate::app::{apply_theme, present_about};
 use crate::localization::{tr, trf};
@@ -19,17 +25,94 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
     adw::NavigationPage::builder().title(tr("NavSettings")).tag("root").child(&page).build()
 }
 
+/// Аккаунт и сервер (REWRITE §3.5.12–§3.5.13): «Работает без аккаунта» с «Войти» и «Создать
+/// аккаунт», «Вы вошли как …» со статусом синхронизации, «Нужно войти снова»; сервер — адресом.
 fn account_group(window: &MainWindow) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::new();
-    let account =
-        adw::ActionRow::builder().title(tr("SettingsWithoutAccount.Header")).subtitle(tr("SettingsWithoutAccount.Description")).build();
-    account.add_prefix(&gtk::Image::from_icon_name("avatar-default-symbolic"));
+    let account = adw::ActionRow::new();
+    let icon = gtk::Image::from_icon_name("avatar-default-symbolic");
+    account.add_prefix(&icon);
+    let arrow = gtk::Image::from_icon_name("go-next-symbolic");
+    account.add_suffix(&arrow);
     group.add(&account);
-    let server_url = window.ctx.settings.get(&keys::SERVER_URL).unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
-    let host = url::Url::parse(&server_url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or(server_url);
-    let server = adw::ActionRow::builder().title(tr("SettingsServer.Header")).subtitle(host).build();
+    // Без аккаунта — строки-кнопки под ним: в узком окне кнопки справа сжали бы текст.
+    let sign_in = adw::ButtonRow::builder().title(tr("AccountSignIn")).build();
+    sign_in.add_css_class("suggested-action");
+    let register = adw::ButtonRow::builder().title(tr("AccountRegister")).build();
+    group.add(&sign_in);
+    group.add(&register);
+    let server = adw::ActionRow::builder().title(tr("SettingsServer.Header")).activatable(true).build();
     server.add_prefix(&gtk::Image::from_icon_name("network-server-symbolic"));
+    server.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
     group.add(&server);
+
+    let refresh: Rc<dyn Fn()> = {
+        let (weak, account, icon, sign_in, register, arrow, server) =
+            (window.downgrade(), account.clone(), icon.clone(), sign_in.clone(), register.clone(), arrow.clone(), server.clone());
+        Rc::new(move || {
+            let Some(window) = weak.upgrade() else { return };
+            let services = &window.ctx.services;
+            let signed_in = matches!(services.account.state(), AccountState::SignedIn { .. });
+            match services.account.state() {
+                AccountState::SignedIn { login, .. } => {
+                    account.set_title(&glib::markup_escape_text(&trf("AccountSignedInAsFormat", &[&login])));
+                    let status = services.sync.status();
+                    account.set_subtitle(&super::account::status_text(&status));
+                    icon.set_icon_name(Some(if matches!(status, SyncStatus::Failed { .. }) {
+                        "network-offline-symbolic"
+                    } else {
+                        "avatar-default-symbolic"
+                    }));
+                }
+                AccountState::AuthRequired { .. } => {
+                    account.set_title(tr("AccountAuthRequiredTitle"));
+                    account.set_subtitle(tr("AccountAuthRequiredText"));
+                    icon.set_icon_name(Some("dialog-warning-symbolic"));
+                }
+                AccountState::SignedOut => {
+                    account.set_title(tr("NoAccountTitle"));
+                    account.set_subtitle(tr("NoAccountText"));
+                    icon.set_icon_name(Some("avatar-default-symbolic"));
+                }
+            }
+            account.set_activatable(signed_in);
+            arrow.set_visible(signed_in);
+            sign_in.set_visible(!signed_in);
+            register.set_visible(!signed_in);
+            server.set_subtitle(&super::account::host(&services.account.server_url()));
+        })
+    };
+    refresh();
+    window.account_view.listen(&refresh);
+    // Обработчик живёт, пока жива группа.
+    let keep = RefCell::new(Some(refresh));
+    group.connect_destroy(move |_| {
+        keep.take();
+    });
+    let weak = window.downgrade();
+    account.connect_activated(move |_| {
+        if let Some(window) = weak.upgrade() {
+            window.push(&super::account::account_page(&window));
+        }
+    });
+    let weak = window.downgrade();
+    sign_in.connect_activated(move |_| {
+        if let Some(window) = weak.upgrade() {
+            window.push(&super::account::sign_in_page(&window));
+        }
+    });
+    let weak = window.downgrade();
+    register.connect_activated(move |_| {
+        if let Some(window) = weak.upgrade() {
+            window.push(&super::account::register_page(&window));
+        }
+    });
+    let weak = window.downgrade();
+    server.connect_activated(move |_| {
+        if let Some(window) = weak.upgrade() {
+            window.push(&super::account::server_page(&window));
+        }
+    });
     group
 }
 

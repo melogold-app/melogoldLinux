@@ -1,5 +1,6 @@
 //! Страницы разделов. Каждая — `AdwNavigationPage` в стеке своего раздела.
 
+pub mod account;
 pub mod catalog;
 pub mod diagnostics;
 pub mod library;

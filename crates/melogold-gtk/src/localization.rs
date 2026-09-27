@@ -63,6 +63,14 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxSkip", "Пропустить", "Skip"),
     ("LinuxSectionSoonTrends", "В тренде и настроения появятся в следующем срезе", "Trending and moods are coming next"),
     ("LinuxSectionSoonNew", "Новые релизы и «Для вас» появятся позже", "New releases and For you are coming later"),
+    // Где лежат токены входа (docs/PROMPT.md §3 «Где что лежит»).
+    ("LinuxTokens", "Токены входа", "Sign-in tokens"),
+    ("LinuxTokensInKeyring", "В связке ключей", "In the keyring"),
+    (
+        "LinuxTokensInFile",
+        "Связки ключей нет: в файле, который может читать только ваш пользователь",
+        "No keyring: in a file only your user can read",
+    ),
     // Свои названия трека (задание 0005): у Android есть, у Windows пока нет.
     ("LinuxEditDetails", "Изменить сведения…", "Edit details…"),
     ("LinuxTrackDetails", "Сведения о треке", "Track details"),

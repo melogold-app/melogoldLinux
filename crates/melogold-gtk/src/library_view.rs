@@ -554,7 +554,15 @@ impl MainWindow {
         self.notify_library(Change::HISTORY);
         let (weak, undo_weak, undo_key) = (self.downgrade(), self.downgrade(), key.clone());
         self.undoable(
-            &trf("RemovedFromHistoryFormat", &[&track.title]),
+            // С аккаунтом трек уходит из Истории на всех устройствах — так и сказать.
+            &trf(
+                if self.ctx.services.account.session().is_some() {
+                    "RemovedFromHistoryEverywhereFormat"
+                } else {
+                    "RemovedFromHistoryFormat"
+                },
+                &[&track.title],
+            ),
             move || {
                 let Some(window) = weak.upgrade() else { return };
                 let task = window.ctx.services.db(move |library| library.remove_from_history(&track.video_id, Some(before)));

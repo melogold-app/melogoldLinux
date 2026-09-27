@@ -15,6 +15,7 @@ melogold-core = { path = "../melogold-core" }
 melogold-data = { path = "../melogold-data" }
 melogold-innertube = { path = "../melogold-innertube" }
 melogold-playback = { path = "../melogold-playback" }
+melogold-server = { path = "../melogold-server" }
 futures-util.workspace = true
 gst.workspace = true
 hex.workspace = true

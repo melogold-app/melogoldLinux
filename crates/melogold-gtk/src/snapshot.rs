@@ -227,7 +227,51 @@ pub fn maybe_start(window: &MainWindow) {
             }),
             700,
         ),
+        (
+            "14-settings-account",
+            Box::new(|w| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    dialog.close();
+                }
+                w.show_tab(Tab::Settings);
+            }),
+            900,
+        ),
+        ("14a-sign-in", Box::new(|w| w.push(&crate::pages::account::sign_in_page(w))), 900),
+        (
+            "14b-register",
+            Box::new(|w| {
+                w.go_back();
+                w.push(&crate::pages::account::register_page(w));
+            }),
+            900,
+        ),
+        (
+            "14b1-recovery-code",
+            Box::new(|w| {
+                w.go_back();
+                // Код из примера контракта: экран показывается, аккаунт не создаётся.
+                w.push(&crate::pages::account::recovery_code_page(w, "7KQ2-MX9D-4TNP-B8RW-3HZF"));
+            }),
+            900,
+        ),
+        (
+            "14c-server",
+            Box::new(|w| {
+                // Страница кода не отпускает «Назад», пока код не сохранён: в снимке — к корню.
+                if let Some(page) = w.nav(Tab::Settings).visible_page() {
+                    page.set_can_pop(true);
+                }
+                w.go_back();
+                w.push(&crate::pages::account::server_page(w));
+            }),
+            3500,
+        ),
     ];
+    let mut steps = steps;
+    if std::env::var("MELOGOLD_SNAPSHOT_ACCOUNT").as_deref() == Ok("1") {
+        steps.extend(account_steps());
+    }
 
     let window = window.clone();
     glib::spawn_future_local(async move {
@@ -300,4 +344,60 @@ fn sample_tracks() -> Vec<melogold_core::music::Track> {
         ..Default::default()
     })
     .collect()
+}
+
+/// Экраны вошедшего пользователя — на временном аккаунте `e2elinux…` (docs/PROMPT.md: живые проверки
+/// только так), который удаляется последним шагом. Пароль живёт только в памяти этого прогона.
+fn account_steps() -> Vec<Step> {
+    let suffix: String = melogold_core::ids::new_uuid().chars().filter(|c| c.is_ascii_alphanumeric()).take(10).collect();
+    let login = format!("e2elinux{suffix}");
+    let password = std::rc::Rc::new(melogold_core::ids::new_uuid().replace('-', "") + &melogold_core::ids::new_uuid().replace('-', ""));
+    let (register_password, delete_password) = (std::rc::Rc::clone(&password), password);
+    vec![
+        (
+            "15-account-register",
+            Box::new(move |w: &MainWindow| {
+                w.go_back();
+                let account = std::sync::Arc::clone(&w.ctx.services.account);
+                let (login, password) = (login.clone(), register_password.to_string());
+                let task = w.ctx.services.run(async move {
+                    account.register(&login, &password, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))).await
+                });
+                glib::spawn_future_local(async move {
+                    match task.await {
+                        Some(Ok(_)) => println!("временный аккаунт создан"),
+                        other => eprintln!("временный аккаунт не создан: {other:?}"),
+                    }
+                });
+            }),
+            9000,
+        ),
+        ("15a-account", Box::new(|w: &MainWindow| w.push(&crate::pages::account::account_page(w))), 3500),
+        ("15b-add-device", Box::new(|w: &MainWindow| crate::pages::account::link_device_dialog(w)), 1200),
+        (
+            "15c-history-everywhere",
+            Box::new(|w: &MainWindow| {
+                if let Some(dialog) = w.window.visible_dialog() {
+                    dialog.close();
+                }
+                w.go_back();
+            }),
+            800,
+        ),
+        (
+            "16-account-deleted",
+            Box::new(move |w: &MainWindow| {
+                let account = std::sync::Arc::clone(&w.ctx.services.account);
+                let password = delete_password.to_string();
+                let task = w.ctx.services.run(async move { account.delete_account(&password).await });
+                glib::spawn_future_local(async move {
+                    match task.await {
+                        Some(Ok(())) => println!("временный аккаунт удалён"),
+                        other => eprintln!("ВРЕМЕННЫЙ АККАУНТ НЕ УДАЛЁН: {other:?}"),
+                    }
+                });
+            }),
+            4000,
+        ),
+    ]
 }

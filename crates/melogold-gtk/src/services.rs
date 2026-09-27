@@ -17,6 +17,9 @@ use melogold_playback::engine::{self, PlayerHandle};
 use melogold_playback::resolver::Resolver;
 use melogold_playback::song_cache::SongCache;
 use melogold_playback::stream_clients;
+use melogold_server::account::{Account, AccountState, DeviceIdentity};
+use melogold_server::session::SessionStore;
+use melogold_server::sync::{LibrarySync, SyncStatus};
 
 use crate::images::Images;
 use crate::localization::{self, Lang};
@@ -35,6 +38,13 @@ pub struct Services {
     pub library_changes: async_channel::Receiver<Change>,
     /// У трека изменилась загрузка или кэш — метки «есть без сети».
     pub offline_changes: async_channel::Receiver<String>,
+    /// Аккаунт и синхронизация (срез 5).
+    pub account: Arc<Account>,
+    pub sync: Arc<LibrarySync>,
+    pub account_changes: async_channel::Receiver<AccountState>,
+    pub sync_status: async_channel::Receiver<SyncStatus>,
+    /// Список устройств изменился на сервере (`devices.updated`).
+    pub devices_changes: async_channel::Receiver<()>,
 }
 
 impl Services {
@@ -128,7 +138,58 @@ impl Services {
             downloads.resume();
         }
         tracing::info!(hl = %hl, gl = %gl, "InnerTube");
-        Services { runtime, music, resolver, songs, player, images, library, downloads, library_changes, offline_changes }
+
+        // Аккаунт: сессия — из связки ключей. Снимки окна связку пользователя не трогают.
+        let identity = DeviceIdentity {
+            platform_id: melogold_core::hwid::platform_id(paths),
+            name: melogold_core::system::device_name(),
+            os_version: Some(melogold_core::system::os_pretty_name()),
+            model: melogold_core::system::product_name(),
+            client_version: app_info::VERSION.to_owned(),
+            language: if localization::lang() == Lang::Ru { "ru".into() } else { "en".into() },
+        };
+        let snapshots = cfg!(debug_assertions) && std::env::var_os("MELOGOLD_SCREENSHOT_DIR").is_some();
+        let store = if snapshots { SessionStore::file_only(paths.session_fallback()) } else { SessionStore::new(paths.session_fallback()) };
+        let server_url = settings.get(&keys::SERVER_URL);
+        let account = Account::new(identity, store, server_url);
+        let (account_sender, account_changes) = async_channel::unbounded();
+        account.subscribe(move |state| {
+            let _ = account_sender.try_send(state.clone());
+        });
+        let sync = LibrarySync::new(Arc::clone(&account), Arc::clone(&library), runtime.handle().clone());
+        let (status_sender, sync_status) = async_channel::unbounded();
+        sync.subscribe_status(move |status| {
+            let _ = status_sender.try_send(status.clone());
+        });
+        let (devices_sender, devices_changes) = async_channel::unbounded();
+        sync.subscribe_devices(move || {
+            let _ = devices_sender.try_send(());
+        });
+        {
+            let _guard = runtime.enter();
+            sync.start();
+        }
+        // Сессия — в фоне: связка ключей может отвечать не сразу, окно её не ждёт. Прочитанная
+        // сессия запускает синхронизацию через подписку.
+        let loading = Arc::clone(&account);
+        runtime.spawn(async move { loading.load().await });
+        Services {
+            runtime,
+            music,
+            resolver,
+            songs,
+            player,
+            images,
+            library,
+            downloads,
+            library_changes,
+            offline_changes,
+            account,
+            sync,
+            account_changes,
+            sync_status,
+            devices_changes,
+        }
     }
 
     /// Выполнить в рантайме tokio; результат ждётся из главного потока как future.
@@ -158,6 +219,9 @@ impl Services {
 
     /// Выход: плеер сохраняет очередь и позицию и останавливается.
     pub fn shutdown(&self) {
+        // Неотправленные правки — одной синхронизацией, не дольше 3 с (Windows `Flush`).
+        let sync = Arc::clone(&self.sync);
+        self.runtime.block_on(async move { sync.flush(std::time::Duration::from_secs(3)).await });
         self.player.send(engine::Command::Shutdown);
         std::thread::sleep(std::time::Duration::from_millis(300));
     }

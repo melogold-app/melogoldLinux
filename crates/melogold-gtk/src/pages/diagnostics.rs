@@ -27,6 +27,17 @@ pub fn page(window: &MainWindow) -> adw::NavigationPage {
         row.add_css_class("property");
         versions.add(&row);
     }
+    // Где токены входа (docs/PROMPT.md §3): связки ключей нет — они в файле 0600, и это видно здесь.
+    let account = &window.ctx.services.account;
+    if account.session().is_some() {
+        let in_keyring = account.store_kind() == melogold_server::session::StoreKind::Keyring;
+        let row = adw::ActionRow::builder()
+            .title(tr("LinuxTokens"))
+            .subtitle(tr(if in_keyring { "LinuxTokensInKeyring" } else { "LinuxTokensInFile" }))
+            .build();
+        row.add_css_class("property");
+        versions.add(&row);
+    }
     page.add(&versions);
 
     // «Проверить извлечение» (REWRITE §3.5.10): время, itag и клиент или класс ошибки.
