@@ -1,6 +1,6 @@
 # Вход по коду: показать код на новом устройстве и на устройстве, где уже вошли
 
-Статус: открыто
+Статус: сделано
 
 Те же задания: `melogoldAndroid/tasks/0015-sign-in-by-code.md` (сделано, ветка `feature/sign-in-by-code`), `melogoldWindows/tasks/0014-sign-in-by-code.md`, `melogoldiOSmacOS/tasks/0017-sign-in-by-code.md`.
 Образец — Android (`sync/DeviceLinking.kt`, `ui/screens/settings/account/LinkCodeScreens.kt`, `AddDeviceScreen.kt`); контракт — API §4.6 сервера (`melogoldServer/docs/API.md`, «Привязка устройств»).

@@ -4,5 +4,7 @@
 pub mod account;
 pub mod api;
 pub mod dto;
+pub mod linking;
+pub mod remote;
 pub mod session;
 pub mod sync;

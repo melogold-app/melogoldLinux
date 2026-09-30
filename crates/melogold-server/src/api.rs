@@ -16,6 +16,8 @@ use crate::dto::*;
 pub const SYNC_PROTOCOL: i64 = 1;
 /// Версия HTTP API, которую понимает клиент.
 pub const API_VERSION: i64 = 1;
+/// Таймаут длинного опроса привязки: сервер держит ответ до 25 с (§4.6).
+const LINK_POLL_TIMEOUT: Duration = Duration::from_secs(35);
 
 #[derive(Clone, Debug, thiserror::Error)]
 #[error("{code} ({status}): {message}")]
@@ -258,6 +260,85 @@ impl Api {
         self.call(reqwest::Method::POST, &format!("/auth/me/links/{link_id}/deny"), None, Some(token), false).await
     }
 
+    // ── вход по коду, устройство новое (§4.6) ──
+
+    /// Режим `request`: это устройство показывает код (тот же `DeviceInput`, что у входа по паролю).
+    pub async fn create_link_request(&self, device: &DeviceInput) -> Result<LinkCreated, ApiError> {
+        self.call(reqwest::Method::POST, "/auth/link/requests", Some(json!({ "device": to_value(device) })), None, false).await
+    }
+
+    /// Режим `invite`: код, который показывает вошедшее устройство.
+    pub async fn claim_link(&self, user_code: &str, device: &DeviceInput) -> Result<LinkClaimed, ApiError> {
+        let body = json!({ "userCode": user_code, "device": to_value(device) });
+        self.call(reqwest::Method::POST, "/auth/link/claim", Some(body), None, false).await
+    }
+
+    /// Длинный опрос: сервер держит ответ до 25 с, таймаут запроса — 35 с (§4.6).
+    pub async fn poll_link(&self, poll_secret: &str, known_status: &str) -> Result<LinkPollResponse, ApiError> {
+        let body = json!({ "pollSecret": poll_secret, "knownStatus": known_status });
+        let response = self.raw(reqwest::Method::POST, "/auth/link/poll", Some(&body), None, false, Some(LINK_POLL_TIMEOUT)).await?;
+        let status = response.status().as_u16();
+        let text = response.text().await.map_err(|e| ApiError::new(0, "network", e.to_string()))?;
+        serde_json::from_str(&text).map_err(|e| ApiError::new(status, "invalid_response", e.to_string()))
+    }
+
+    pub async fn cancel_link_request(&self, poll_secret: &str) -> Result<(), ApiError> {
+        self.call_empty(reqwest::Method::POST, "/auth/link/cancel", Some(json!({ "pollSecret": poll_secret })), None, false).await
+    }
+
+    // ── вход по коду, устройство вошло: приглашение (§4.6, режим invite) ──
+
+    pub async fn create_invite(&self, token: &str) -> Result<LinkCreated, ApiError> {
+        self.call(reqwest::Method::POST, "/auth/me/links", Some(json!({})), Some(token), false).await
+    }
+
+    pub async fn link(&self, token: &str, link_id: &str) -> Result<LinkDetails, ApiError> {
+        self.call(reqwest::Method::GET, &format!("/auth/me/links/{link_id}"), None, Some(token), false).await
+    }
+
+    pub async fn cancel_invite(&self, token: &str, link_id: &str) -> Result<(), ApiError> {
+        self.call_empty(reqwest::Method::POST, &format!("/auth/me/links/{link_id}/cancel"), Some(json!({})), Some(token), false).await
+    }
+
+    // ── ссылки на свои плейлисты (§4.11) ──
+
+    /// Снимок своего плейлиста: до 1000 треков по порядку.
+    pub async fn create_share(&self, token: &str, name: &str, tracks: &[TrackInput]) -> Result<ShareCreated, ApiError> {
+        let body = json!({ "kind": "playlist", "name": name, "tracks": to_value(&tracks) });
+        self.call(reqwest::Method::POST, "/shares", Some(body), Some(token), false).await
+    }
+
+    pub async fn shares(&self, token: &str) -> Result<ShareList, ApiError> {
+        self.call(reqwest::Method::GET, "/shares", None, Some(token), false).await
+    }
+
+    pub async fn delete_share(&self, token: &str, share_id: &str) -> Result<(), ApiError> {
+        self.call_empty(reqwest::Method::DELETE, &format!("/shares/{share_id}"), None, Some(token), false).await
+    }
+
+    /// Снимок по ссылке — без входа: сервер ссылки может быть чужим.
+    pub async fn share(&self, share_id: &str) -> Result<ShareDto, ApiError> {
+        self.call(reqwest::Method::GET, &format!("/shares/{share_id}"), None, None, false).await
+    }
+
+    // ── воспроизведение и пульт (§4.9); заголовок протокола сервер требует на всём `/playback/*` ──
+
+    pub async fn put_playback(&self, token: &str, put: &PlaybackPut) -> Result<PlaybackPutResult, ApiError> {
+        self.call(reqwest::Method::PUT, "/playback/state", Some(to_value(put)), Some(token), true).await
+    }
+
+    pub async fn playback_state(&self, token: &str) -> Result<PlaybackStateResponse, ApiError> {
+        self.call(reqwest::Method::GET, "/playback/state", None, Some(token), true).await
+    }
+
+    pub async fn remote_devices(&self, token: &str) -> Result<RemoteDeviceList, ApiError> {
+        self.call(reqwest::Method::GET, "/playback/devices", None, Some(token), true).await
+    }
+
+    pub async fn send_command(&self, token: &str, command: &RemoteCommand) -> Result<RemoteCommandResult, ApiError> {
+        self.call(reqwest::Method::POST, "/playback/commands", Some(to_value(command)), Some(token), true).await
+    }
+
     // ── синхронизация (§4.7–§4.8) ──
 
     pub async fn merge_plan(&self, token: &str, playlists: &[MergePlanInput]) -> Result<MergePlanResponse, ApiError> {
@@ -290,10 +371,12 @@ impl Api {
 
     /// Поток событий: кадры `id:` + `data:` без `event:`, heartbeat — комментарий. Заканчивается,
     /// когда сервер его закрывает (истёк токен, отзыв) — вызывающий переоткрывает с паузой.
-    pub async fn events(&self, token: &str, mut on_event: impl FnMut(LiveEvent)) -> Result<(), ApiError> {
+    ///
+    /// `remote`: устройство разрешает управлять собой с других (`?remote=1`, §6) и получает `playback.command`.
+    pub async fn events(&self, token: &str, remote: bool, mut on_event: impl FnMut(LiveEvent)) -> Result<(), ApiError> {
         let response = self
             .stream
-            .get(format!("{}/auth/me/events", self.base))
+            .get(format!("{}/auth/me/events{}", self.base, if remote { "?remote=1" } else { "" }))
             .bearer_auth(token)
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .send()

@@ -1,6 +1,6 @@
 # Управление музыкой на другом устройстве и его громкостью (как AirPlay, но через сервер)
 
-Статус: открыто — утверждено пользователем 2026-09-30. Контракт сервера — `melogoldServer/tasks/0004-remote-control.md` (дальше `docs/API.md` §4.9, §6); нужен сервер с `features.remote` (0.1.2)
+Статус: сделано — утверждено пользователем 2026-09-30. Контракт сервера — `melogoldServer/tasks/0004-remote-control.md` (дальше `docs/API.md` §4.9, §6); нужен сервер с `features.remote` (0.1.2)
 
 Те же задания: `melogoldAndroid/tasks/0018-remote-control.md`, `melogoldWindows/tasks/0017-remote-control.md`, `melogoldiOSmacOS/tasks/0020-remote-control.md`. Сервер — `melogoldServer/tasks/0004-remote-control.md`.
 Образец — Android (делается сейчас, `melogoldAndroid/tasks/0018-remote-control.md`).

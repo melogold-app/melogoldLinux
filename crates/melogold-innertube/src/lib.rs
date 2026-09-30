@@ -2,6 +2,7 @@
 //! Порт `src/Melogold.InnerTube` Windows и `providers/innertube` Android.
 
 pub mod client;
+pub mod external;
 pub mod json;
 pub mod lyrics;
 pub mod music;

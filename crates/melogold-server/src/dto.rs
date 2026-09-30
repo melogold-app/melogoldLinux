@@ -3,6 +3,7 @@
 //! Запросы не отправляют пустых необязательных полей.
 
 use melogold_core::lyrics::sync_rules::LyricsPayload;
+use melogold_core::music::{ArtistRef, Track};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -57,6 +58,46 @@ pub struct TrackInput {
     pub explicit: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_type: Option<String>,
+}
+
+impl TrackInput {
+    /// Метаданные трека для сервера. Заглушка (название = `videoId`) — без названия: сервер оставит своё.
+    pub fn from_track(track: &Track) -> TrackInput {
+        TrackInput {
+            video_id: track.video_id.clone(),
+            title: (track.title != track.video_id).then(|| track.title.clone()),
+            artists_text: track.artists_text.clone(),
+            artists: (!track.artists.is_empty())
+                .then(|| track.artists.iter().map(|a: &ArtistRef| ArtistRefDto { id: a.id.clone(), name: a.name.clone() }).collect()),
+            album_id: track.album_id.clone(),
+            album_title: track.album_title.clone(),
+            duration_ms: track.duration_ms,
+            duration_text: track.duration_text.clone(),
+            thumbnail_url: track.thumbnail_url.clone(),
+            explicit: track.explicit.then_some(true),
+            video_type: track.video_type.clone(),
+        }
+    }
+}
+
+impl TrackDto {
+    /// Трек для показа: как его прислал сервер (пустое название — заглушка `videoId`).
+    pub fn to_track(&self) -> Track {
+        Track {
+            video_id: self.video_id.clone(),
+            title: if self.title.trim().is_empty() { self.video_id.clone() } else { self.title.clone() },
+            artists_text: self.artists_text.clone(),
+            artists: self.artists.iter().map(|a| ArtistRef { id: a.id.clone(), name: a.name.clone() }).collect(),
+            album_id: self.album_id.clone(),
+            album_title: self.album_title.clone(),
+            duration_ms: self.duration_ms,
+            duration_text: self.duration_text.clone(),
+            thumbnail_url: self.thumbnail_url.clone(),
+            explicit: self.explicit,
+            video_type: self.video_type.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
@@ -167,6 +208,10 @@ pub struct Features {
     pub account_deletion: Option<VersionFeature>,
     pub registration_pow: Option<VersionFeature>,
     pub lyrics: Option<VersionFeature>,
+    /// Ссылки на свои плейлисты (§4.11).
+    pub share: Option<VersionFeature>,
+    /// Управление другим устройством (§4.9 «Пульт»).
+    pub remote: Option<VersionFeature>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -290,6 +335,253 @@ pub struct LinkDetails {
 pub struct LinkDecisionResponse {
     pub link_id: String,
     pub status: String,
+}
+
+/// Ответ на `POST /auth/link/requests` и `POST /auth/me/links` (§4.6).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkCreated {
+    pub link_id: String,
+    pub mode: String,
+    pub server_id: String,
+    pub link_token: String,
+    pub user_code: String,
+    /// Только у режима `request`.
+    pub poll_secret: Option<String>,
+    pub expires_at: String,
+    pub long_poll_seconds: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkAccount {
+    pub login: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkApprover {
+    pub name: String,
+    pub platform: String,
+}
+
+/// Ответ `POST /auth/link/claim`: код принят, дальше нужно число на другом устройстве.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkClaimed {
+    pub link_id: String,
+    pub status: String,
+    pub poll_secret: String,
+    pub account: LinkAccount,
+    pub approver_device: LinkApprover,
+    pub verify_code: String,
+    pub expires_at: String,
+    pub long_poll_seconds: i64,
+}
+
+/// Ответ `POST /auth/link/poll`: `pending`, `claimed` или `completed` (с сессией).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkPollResponse {
+    pub link_id: String,
+    pub status: String,
+    pub expires_at: String,
+    pub account: Option<LinkAccount>,
+    pub approver_device: Option<LinkApprover>,
+    pub verify_code: Option<String>,
+    pub session: Option<AuthSession>,
+}
+
+// ── ссылки на свои плейлисты (§4.11) ──
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShareCreated {
+    pub share_id: String,
+    pub url: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShareDto {
+    pub share_id: String,
+    pub kind: String,
+    pub name: String,
+    pub url: String,
+    pub tracks: Vec<TrackDto>,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ShareList {
+    pub shares: Vec<ShareDto>,
+}
+
+// ── воспроизведение и пульт (§4.9, §6) ──
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackHandoff {
+    pub device_id: String,
+    pub session_id: String,
+    pub at: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackHandoffInput {
+    pub device_id: String,
+    pub session_id: String,
+}
+
+/// Состояние воспроизведения аккаунта: одно на аккаунт, автор — устройство `device_id`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackState {
+    pub rev: i64,
+    pub device_id: String,
+    pub device_name: Option<String>,
+    pub session_id: String,
+    pub queue_version: i64,
+    pub index: i64,
+    pub position_ms: i64,
+    pub duration_ms: Option<i64>,
+    pub playing: bool,
+    /// Когда `position_ms` была верна (время сервера).
+    pub at: String,
+    pub updated_at: String,
+    pub queue: Vec<TrackDto>,
+    pub handoff_from: Option<PlaybackHandoff>,
+    pub volume: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackStateResponse {
+    pub state: Option<PlaybackState>,
+    pub server_time: String,
+}
+
+/// Тело `PUT /playback/state`.
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackPut {
+    pub session_id: String,
+    pub queue_version: i64,
+    pub at: String,
+    pub index: i64,
+    pub position_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    pub playing: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue: Option<Vec<TrackInput>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handoff_from: Option<PlaybackHandoffInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackPutResult {
+    pub applied: bool,
+    pub rev: Option<i64>,
+    /// `newer_state` или `handed_off`, когда `applied == false`.
+    pub reason: Option<String>,
+    pub state: Option<PlaybackState>,
+    pub server_time: String,
+}
+
+/// Кратко о состоянии — в событии `playback.updated` и в списке устройств.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackSummary {
+    pub rev: i64,
+    pub device_id: String,
+    pub device_name: Option<String>,
+    pub session_id: String,
+    pub queue_version: i64,
+    pub index: i64,
+    pub queue_length: i64,
+    pub track: Option<TrackDto>,
+    pub position_ms: i64,
+    pub duration_ms: Option<i64>,
+    pub playing: bool,
+    pub at: String,
+    pub updated_at: String,
+    pub handoff_from: Option<PlaybackHandoff>,
+    pub volume: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteDevice {
+    pub device_id: String,
+    pub name: String,
+    pub platform: String,
+    /// У устройства открыт поток событий прямо сейчас.
+    pub online: bool,
+    /// Хотя бы один его поток открыт с `remote=1`.
+    pub controllable: bool,
+    pub playing: Option<PlaybackSummary>,
+    pub volume: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteDeviceList {
+    pub devices: Vec<RemoteDevice>,
+    pub server_time: String,
+}
+
+/// Тело `POST /playback/commands`.
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCommand {
+    pub command_id: String,
+    pub target_device_id: String,
+    /// `play|pause|toggle|next|previous|seek|volume|play_queue|stop`.
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue: Option<Vec<TrackInput>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteCommandResult {
+    pub delivered: bool,
+}
+
+/// Payload события `playback.updated`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackUpdatedPayload {
+    pub rev: i64,
+    pub cleared: bool,
+    pub state: Option<PlaybackSummary>,
+}
+
+/// Payload события `playback.command`: поля, которых у команды нет, — `null`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackCommandPayload {
+    pub command_id: String,
+    pub from_device_id: String,
+    pub from_device_name: Option<String>,
+    pub action: String,
+    pub position_ms: Option<i64>,
+    pub volume: Option<i64>,
+    pub queue: Option<Vec<TrackDto>>,
+    pub index: Option<i64>,
 }
 
 // ── синхронизация (§4.7–§4.8) ──

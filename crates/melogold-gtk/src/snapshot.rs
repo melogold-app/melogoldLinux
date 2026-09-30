@@ -19,7 +19,7 @@ use melogold_core::settings::Tab;
 use crate::window::MainWindow;
 
 /// Шаг: имя снимка, что сделать, сколько ждать до снимка (сеть — дольше).
-type Step = (&'static str, Box<dyn Fn(&MainWindow)>, u64);
+pub(crate) type Step = (&'static str, Box<dyn Fn(&MainWindow)>, u64);
 
 pub fn maybe_start(window: &MainWindow) {
     let Some(directory) = std::env::var_os("MELOGOLD_SCREENSHOT_DIR").map(PathBuf::from) else { return };
@@ -339,8 +339,14 @@ pub fn maybe_start(window: &MainWindow) {
     ];
     let mut steps = steps;
     steps.extend(lyrics_steps());
+    steps.extend(crate::snapshot_features::steps());
     if std::env::var("MELOGOLD_SNAPSHOT_ACCOUNT").as_deref() == Ok("1") {
-        steps.extend(account_steps());
+        // Живые шаги заданий 0010–0011 — до последнего шага, который удаляет временный аккаунт.
+        let mut account = account_steps();
+        let deletion = account.pop();
+        account.extend(crate::snapshot_features::account_steps());
+        account.extend(deletion);
+        steps.extend(account);
     }
     // Только нужные шаги: MELOGOLD_SNAPSHOT_STEPS=17,08 — по началу имени.
     if let Ok(only) = std::env::var("MELOGOLD_SNAPSHOT_STEPS") {

@@ -275,6 +275,7 @@ impl MainWindow {
         this.connect_sidebar(&top_list);
         this.connect_sidebar(&bottom_list);
         this.install_actions();
+        crate::remote_sheet::install(&this);
         this.install_track_actions();
         this.install_selection_actions();
         this.start_library();
@@ -519,8 +520,13 @@ impl MainWindow {
                 // Вход по приглашению другого устройства (QR, API §4.6) — в 0.2.
                 MelogoldLink::Invite { .. } => self.toast(tr("LinuxInviteLater")),
                 MelogoldLink::Request { .. } => self.toast(tr("LinuxLinkRequest")),
+                MelogoldLink::Share { url, id } => self.open_share_link(&url, &id),
                 MelogoldLink::Unsupported => self.toast(tr("LinkUnsupported")),
             }
+            return;
+        }
+        // Снимок плейлиста по адресу `/s/<код>` и ссылки Spotify, Apple, Яндекса, Deezer, Tidal, SoundCloud (задание 0010).
+        if self.open_incoming(text) {
             return;
         }
         self.open_youtube(youtube_links::parse(text));
@@ -557,7 +563,7 @@ impl MainWindow {
 
     /// Ссылка YouTube (REWRITE §2.3 «Ссылки и интенты»): видео играет (с `list=` — очередь плейлиста с
     /// этого видео, `t=` — позиция), плейлист, альбом и канал открываются, `@handle` — через `resolve_url`.
-    fn open_youtube(&self, target: LinkTarget) {
+    pub(crate) fn open_youtube(&self, target: LinkTarget) {
         use pages::catalog;
         tracing::info!(вход = ?std::mem::discriminant(&target), "ссылка YouTube");
         match target {
@@ -623,7 +629,8 @@ impl MainWindow {
 
     fn build_player(&self) {
         let bar = PlayerBar::new(self);
-        self.outer.add_bottom_bar(&bar.root);
+        // Над панелью — пульт другого устройства (задание 0011); пока он включён, своя панель скрыта.
+        self.outer.add_bottom_bar(&crate::remote_bar::bottom(self, &bar.root));
         let _ = self.player_bar.set(bar);
         let now_playing = NowPlaying::new(self);
         let _ = self.now_playing.set(now_playing);
@@ -1215,6 +1222,10 @@ impl MainWindow {
                 return;
             }
             // Ссылка YouTube в поле — первой строкой «Открыть ссылку: видео YouTube» (§5.4 «Поиск»).
+            if let Some(kind) = crate::share::suggestion_kind(&text) {
+                window.show_suggestions(vec![Suggestion::Link(trf("OpenLinkFormat", &[&tr(kind)]))]);
+                return;
+            }
             let link_kind = match youtube_links::parse(&text) {
                 LinkTarget::Video { .. } => Some("LinkKindVideo"),
                 LinkTarget::Playlist(_) => Some("LinkKindPlaylist"),
@@ -1433,6 +1444,7 @@ fn sidebar_row(icon: &str, label: &str) -> gtk::ListBoxRow {
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
     let section = gio::Menu::new();
+    section.append(Some(tr("LinuxRemoteDevice")), Some("win.remote-devices"));
     section.append(Some(tr("NavSettings")), Some("win.preferences"));
     section.append(Some(tr("MenuShortcuts")), Some("app.shortcuts"));
     section.append(Some(tr("LinuxAbout")), Some("app.about"));

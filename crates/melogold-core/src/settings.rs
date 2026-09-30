@@ -165,6 +165,8 @@ pub mod keys {
     /// Лимит кэша музыки в МБ; 0 — без ограничений (задание Windows 0003: 4 ГБ).
     pub const STREAM_CACHE_MB: Key<i64> = Key::new("cache.streamLimit", || 4096);
     pub const UPDATES_AUTO: Key<bool> = Key::new("updates.auto", || true);
+    /// Другие устройства аккаунта могут управлять этим (задание 0011): живой поток открывается с `remote=1`.
+    pub const REMOTE_CONTROL: Key<bool> = Key::new("playback.remoteControl", || true);
     /// Адрес сервера; пусто — рабочий сервер по умолчанию.
     pub const SERVER_URL: Key<Option<String>> = Key::new("server.url", || None);
 

@@ -50,6 +50,12 @@ pub struct Services {
     pub lyrics: Arc<LyricsFetcher>,
     /// Свой текст длиннее лимита сервера: он остался только здесь.
     pub lyrics_rejected: async_channel::Receiver<String>,
+    /// `link.updated` (задание 0008): `linkId` привязки, которую сменило другое устройство.
+    pub link_updates: tokio::sync::broadcast::Sender<String>,
+    /// Ссылки других сервисов → YouTube Music (задание 0010).
+    pub external: Arc<melogold_innertube::external::ExternalResolver>,
+    /// Управление другим устройством и команды этому (задание 0011).
+    pub remote: Arc<crate::remote::RemoteHub>,
 }
 
 impl Services {
@@ -73,6 +79,7 @@ impl Services {
         }
         let client = InnerTube::new(&hl, &gl);
         let music = YouTubeMusic::new(client.clone());
+        let external = Arc::new(melogold_innertube::external::ExternalResolver::new(music.clone()));
         let clients_path = paths.stream_clients();
         let resolver = Arc::new(Resolver::new(client.clone(), stream_clients::load_saved(&clients_path)));
         let limit_mb = settings.get(&keys::STREAM_CACHE_MB);
@@ -158,7 +165,12 @@ impl Services {
         };
         let snapshots = crate::app::snapshot_mode();
         let store = if snapshots { SessionStore::file_only(paths.session_fallback()) } else { SessionStore::new(paths.session_fallback()) };
-        let server_url = settings.get(&keys::SERVER_URL);
+        // Проверка на локальном сервере (снимки окна и живые прогоны): адрес — из окружения.
+        let server_url = if snapshots {
+            std::env::var("MELOGOLD_SERVER_URL").ok().or_else(|| settings.get(&keys::SERVER_URL))
+        } else {
+            settings.get(&keys::SERVER_URL)
+        };
         let account = Account::new(identity, store, server_url);
         let (account_sender, account_changes) = async_channel::unbounded();
         account.subscribe(move |state| {
@@ -177,6 +189,17 @@ impl Services {
         sync.subscribe_lyrics_rejected(move |video_id| {
             let _ = rejected_sender.try_send(video_id.to_owned());
         });
+        let (link_updates, _) = tokio::sync::broadcast::channel(16);
+        {
+            let updates = link_updates.clone();
+            sync.subscribe_events(move |event| {
+                if event.kind == "link.updated" {
+                    if let Some(id) = event.payload.get("linkId").and_then(|v| v.as_str()) {
+                        let _ = updates.send(id.to_owned());
+                    }
+                }
+            });
+        }
         {
             let _guard = runtime.enter();
             sync.start();
@@ -202,6 +225,13 @@ impl Services {
             kugou: KuGou::new(),
             community: Some(community),
         });
+        let remote = crate::remote::RemoteHub::start(runtime.handle(), &account, &sync, &player);
+        sync.set_remote_control(settings.get(&keys::REMOTE_CONTROL));
+        {
+            // Пока это устройство — пульт, команды плееру уходят на управляемое устройство.
+            let control = remote.control.clone();
+            player.set_interceptor(Some(Arc::new(move |command| crate::remote::redirect(&control, command))));
+        }
         // Сессия — в фоне: связка ключей может отвечать не сразу, окно её не ждёт. Прочитанная
         // сессия запускает синхронизацию через подписку.
         let loading = Arc::clone(&account);
@@ -224,6 +254,9 @@ impl Services {
             devices_changes,
             lyrics,
             lyrics_rejected,
+            link_updates,
+            external,
+            remote,
         }
     }
 

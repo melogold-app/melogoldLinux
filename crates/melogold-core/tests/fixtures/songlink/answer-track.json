@@ -1,0 +1,53 @@
+{
+  "entityUniqueId": "SPOTIFY_SONG::4cOdK2wGLETKBW3PvgPWqT",
+  "userCountry": "US",
+  "pageUrl": "https://song.link/s/4cOdK2wGLETKBW3PvgPWqT",
+  "entitiesByUniqueId": {
+    "SPOTIFY_SONG::4cOdK2wGLETKBW3PvgPWqT": {
+      "id": "4cOdK2wGLETKBW3PvgPWqT",
+      "type": "song",
+      "title": "Never Gonna Give You Up",
+      "artistName": "Rick Astley",
+      "thumbnailUrl": "https://i.scdn.co/image/ab67616d0000b273baf89eb11ec7c657805d2da0",
+      "thumbnailWidth": 640,
+      "thumbnailHeight": 640,
+      "apiProvider": "spotify",
+      "platforms": ["spotify"]
+    },
+    "YOUTUBE_VIDEO::dQw4w9WgXcQ": {
+      "id": "dQw4w9WgXcQ",
+      "type": "song",
+      "title": "Rick Astley - Never Gonna Give You Up (Official Video)",
+      "artistName": "Rick Astley",
+      "thumbnailUrl": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+      "thumbnailWidth": 480,
+      "thumbnailHeight": 360,
+      "apiProvider": "youtube",
+      "platforms": ["youtube", "youtubeMusic"]
+    }
+  },
+  "linksByPlatform": {
+    "spotify": {
+      "country": "US",
+      "url": "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+      "nativeAppUriMobile": "spotify:track:4cOdK2wGLETKBW3PvgPWqT",
+      "nativeAppUriDesktop": "spotify:track:4cOdK2wGLETKBW3PvgPWqT",
+      "entityUniqueId": "SPOTIFY_SONG::4cOdK2wGLETKBW3PvgPWqT"
+    },
+    "youtube": {
+      "country": "US",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "entityUniqueId": "YOUTUBE_VIDEO::dQw4w9WgXcQ"
+    },
+    "youtubeMusic": {
+      "country": "US",
+      "url": "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+      "entityUniqueId": "YOUTUBE_VIDEO::dQw4w9WgXcQ"
+    },
+    "appleMusic": {
+      "country": "US",
+      "url": "https://music.apple.com/us/album/never-gonna-give-you-up/1559523357?i=1559523359",
+      "entityUniqueId": "ITUNES_SONG::1559523359"
+    }
+  }
+}

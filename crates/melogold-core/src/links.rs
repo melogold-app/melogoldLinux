@@ -14,6 +14,8 @@ pub enum MelogoldLink {
     Invite { server: String, server_id: String, token: String },
     /// `melogold://link?mode=request…` — не выполняется: только инструкция.
     Request { server: String, server_id: String },
+    /// `melogold://share?v=1&url=<сервер>&id=<код>` — «Плейлист по ссылке» (API §4.11); сохранить — только кнопкой.
+    Share { url: String, id: String },
     /// Схема наша, но разобрать нельзя: другая версия, нет полей, незнакомый хост.
     Unsupported,
 }
@@ -39,6 +41,10 @@ pub fn parse(text: &str) -> Option<MelogoldLink> {
         Some("server") => match non_empty(query("url")) {
             Some(url) => MelogoldLink::Server { url, server_id: non_empty(query("sid")) },
             None => MelogoldLink::Unsupported,
+        },
+        Some("share") => match (non_empty(query("url")), non_empty(query("id"))) {
+            (Some(url), Some(id)) if crate::share_links::is_share_id(&id) => MelogoldLink::Share { url, id },
+            _ => MelogoldLink::Unsupported,
         },
         Some("link") => match (query("mode").as_deref(), non_empty(query("server")), non_empty(query("sid"))) {
             (Some("invite"), Some(server), Some(server_id)) => match non_empty(query("token")) {
@@ -79,6 +85,17 @@ mod tests {
             parse("melogold://link?mode=request&server=https%3A%2F%2Fa.b&sid=s&token=t&extra=1"),
             Some(MelogoldLink::Request { server: "https://a.b".into(), server_id: "s".into() })
         );
+    }
+
+    #[test]
+    fn share_link_carries_server_and_code() {
+        assert_eq!(
+            parse("melogold://share?v=1&url=https%3A%2F%2Fmusic.example.com&id=a1B2c3D4e5"),
+            Some(MelogoldLink::Share { url: "https://music.example.com".into(), id: "a1B2c3D4e5".into() })
+        );
+        assert_eq!(parse("melogold://share?v=1&url=https%3A%2F%2Fa.b&id=short"), Some(MelogoldLink::Unsupported));
+        assert_eq!(parse("melogold://share?v=1&id=a1B2c3D4e5"), Some(MelogoldLink::Unsupported));
+        assert_eq!(parse("melogold://share?v=2&url=https%3A%2F%2Fa.b&id=a1B2c3D4e5"), Some(MelogoldLink::Unsupported));
     }
 
     #[test]

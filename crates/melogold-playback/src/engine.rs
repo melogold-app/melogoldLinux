@@ -145,6 +145,13 @@ pub enum Command {
         start: usize,
         shuffle: bool,
     },
+    /// Как [`Command::PlayList`], но трек начинается с `position` («Слушать здесь» забирает очередь и место
+    /// другого устройства, задание 0011).
+    PlayListAt {
+        tracks: Vec<Track>,
+        start: usize,
+        position: Duration,
+    },
     /// Одиночный трек и дальше похожие (поиск, «Недавние», ссылка); `start` — позиция из `t=`.
     PlaySingle {
         track: Track,
@@ -221,7 +228,12 @@ struct Shared {
     state: Mutex<State>,
     /// Низы, середина, верх — для столбиков «играет».
     levels: Arc<crate::levels::AudioLevels>,
+    /// Перехватчик команд окна: пока это устройство — пульт другого, команды уходят туда (задание 0011).
+    interceptor: Mutex<Option<Interceptor>>,
 }
+
+/// Возвращает `true`, если команду забрал перехватчик и своему плееру её отдавать не нужно.
+pub type Interceptor = Arc<dyn Fn(&Command) -> bool + Send + Sync>;
 
 #[derive(Clone)]
 pub struct PlayerHandle {
@@ -230,8 +242,23 @@ pub struct PlayerHandle {
 }
 
 impl PlayerHandle {
+    /// Команда плееру. Перехватчик (пульт другого устройства) может её забрать.
     pub fn send(&self, command: Command) {
+        let intercepted = self.shared.interceptor.lock().ok().and_then(|i| i.clone()).is_some_and(|intercept| intercept(&command));
+        if !intercepted {
+            let _ = self.commands.send(command);
+        }
+    }
+
+    /// Команда именно этому плееру, мимо перехватчика: её дало другое устройство (`playback.command`).
+    pub fn send_local(&self, command: Command) {
         let _ = self.commands.send(command);
+    }
+
+    pub fn set_interceptor(&self, interceptor: Option<Interceptor>) {
+        if let Ok(mut slot) = self.shared.interceptor.lock() {
+            *slot = interceptor;
+        }
     }
 
     /// Позиция текущего трека (прямо у GStreamer, дёшево); без конвейера — с какого места он начнётся.
@@ -389,6 +416,14 @@ impl Engine {
                 self.before_replace();
                 self.queue.set_list(tracks, start, shuffle);
                 self.queue_changed_then_load(Duration::ZERO);
+            }
+            Command::PlayListAt { tracks, start, position } => {
+                if tracks.is_empty() {
+                    return;
+                }
+                self.before_replace();
+                self.queue.set_list(tracks, start, false);
+                self.queue_changed_then_load(position);
             }
             Command::PlaySingle { track, start } => {
                 self.before_replace();

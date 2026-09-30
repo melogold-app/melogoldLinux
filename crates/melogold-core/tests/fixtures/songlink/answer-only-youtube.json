@@ -1,0 +1,12 @@
+{
+  "entityUniqueId": "DEEZER_SONG::3135556",
+  "userCountry": "US",
+  "pageUrl": "https://song.link/d/3135556",
+  "entitiesByUniqueId": {
+    "DEEZER_SONG::3135556": {"id": "3135556", "type": "song", "title": "Harder, Better, Faster, Stronger", "artistName": "Daft Punk", "apiProvider": "deezer", "platforms": ["deezer"]}
+  },
+  "linksByPlatform": {
+    "deezer": {"country": "US", "url": "https://www.deezer.com/track/3135556", "entityUniqueId": "DEEZER_SONG::3135556"},
+    "youtube": {"country": "US", "url": "https://www.youtube.com/watch?v=gAjR4_CbPpQ", "entityUniqueId": "YOUTUBE_VIDEO::gAjR4_CbPpQ"}
+  }
+}

@@ -4,8 +4,10 @@ pub mod account;
 pub mod catalog;
 pub mod diagnostics;
 pub mod library;
+pub mod link_code;
 pub mod search;
 pub mod settings;
+pub mod shares;
 
 use adw::prelude::*;
 
