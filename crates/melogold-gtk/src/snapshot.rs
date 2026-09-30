@@ -126,6 +126,19 @@ pub fn maybe_start(window: &MainWindow) {
         ("07a-album", Box::new(|w| w.push(&crate::pages::catalog::album_page(w, "MPREb_OLmD8O5IYNS"))), 3500),
         ("07b-artist", Box::new(|w| w.push(&crate::pages::catalog::artist_page(w, "UCRr1xG_2WIDs18a6cIiCxeA"))), 4000),
         (
+            // Полки альбомов и синглов исполнителя — у каждой «Все ›» (у альбомов без ссылки YouTube —
+            // сетка тех же карточек).
+            "07b1-artist-shelves",
+            Box::new(|w| {
+                for tab in [Tab::Trends, Tab::WhatsNew, Tab::Library] {
+                    if w.nav(tab).is_mapped() {
+                        scroll_page(w, tab, 0.34);
+                    }
+                }
+            }),
+            1200,
+        ),
+        (
             "07b2-artist-albums",
             Box::new(|w| {
                 // «Все ›» у синглов Daft Punk: отдельная страница-сетка.
@@ -472,7 +485,12 @@ fn capture(window: &adw::ApplicationWindow, path: &Path) -> Option<()> {
 
 /// Настройки прокручены на долю `fraction` высоты (Хранилище, О приложении).
 fn scroll_settings(window: &MainWindow, fraction: f64) {
-    let Some(page) = window.nav(Tab::Settings).visible_page() else { return };
+    scroll_page(window, Tab::Settings, fraction);
+}
+
+/// Прокрутить открытую страницу раздела на долю её высоты.
+fn scroll_page(window: &MainWindow, tab: Tab, fraction: f64) {
+    let Some(page) = window.nav(tab).visible_page() else { return };
     let mut stack = vec![page.upcast::<gtk::Widget>()];
     while let Some(widget) = stack.pop() {
         if let Some(scroller) = widget.downcast_ref::<gtk::ScrolledWindow>() {

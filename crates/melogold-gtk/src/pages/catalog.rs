@@ -395,14 +395,27 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
 }
 
 /// «Все ›» полки исполнителя, у которой YouTube Music отдаёт полную сетку (`MPAD…` или `UC…` + `params`).
+/// Полка карточек без такой ссылки (все альбомы уже на полке) тоже открывается отдельной страницей —
+/// сеткой тех же карточек, без запроса: листать ленту вбок неудобно (пользователь, 2026-09-30).
 fn artist_items_more(window: &MainWindow, shelf: &Shelf, artist: &str) -> Option<Rc<dyn Fn()>> {
-    let browse_id = shelf.more_browse_id.clone()?;
-    if !(browse_id.starts_with("MPAD") || (browse_id.starts_with("UC") && shelf.more_params.is_some())) {
-        return None;
-    }
     let title = match shelf.title.as_deref().filter(|t| !t.is_empty()) {
         Some(name) => format!("{name} — {artist}"),
         None => artist.to_owned(),
+    };
+    let grid_link =
+        shelf.more_browse_id.clone().filter(|id| id.starts_with("MPAD") || (id.starts_with("UC") && shelf.more_params.is_some()));
+    let Some(browse_id) = grid_link else {
+        let cards = shelf.items.len() >= 2 && shelf.items.iter().all(|item| !matches!(item, MusicItem::Mood(_)));
+        let all_tracks = shelf.items.iter().all(|item| matches!(item, MusicItem::Track(t) if !t.is_video()));
+        if !cards || all_tracks || shelf.more_browse_id.is_some() {
+            return None;
+        }
+        let (weak, items) = (window.downgrade(), shelf.items.clone());
+        return Some(Rc::new(move || {
+            if let Some(window) = weak.upgrade() {
+                window.push(&shelf_items_page(&window, &title, &items));
+            }
+        }));
     };
     let (weak, params, fallback) = (window.downgrade(), shelf.more_params.clone(), shelf.items.clone());
     Some(Rc::new(move || {
@@ -410,6 +423,14 @@ fn artist_items_more(window: &MainWindow, shelf: &Shelf, artist: &str) -> Option
             window.push(&artist_items_page(&window, &title, &browse_id, params.as_deref(), fallback.clone()));
         }
     }))
+}
+
+/// Карточки полки сеткой, без сети: все они уже пришли со страницей исполнителя.
+fn shelf_items_page(window: &MainWindow, title: &str, items: &[MusicItem]) -> adw::NavigationPage {
+    let page = scaffold(title, None, true);
+    page.content.append(&card_grid(window, items));
+    page.state.content();
+    page.page
 }
 
 /// Все альбомы, синглы, плейлисты исполнителя сеткой карточек; продолжения подгружаются при прокрутке.
