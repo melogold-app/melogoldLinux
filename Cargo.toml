@@ -7,6 +7,7 @@ members = [
     "crates/melogold-playback",
     "crates/melogold-server",
     "crates/melogold-gtk",
+    "crates/melogold-update",
 ]
 
 [workspace.package]

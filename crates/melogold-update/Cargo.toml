@@ -1,0 +1,22 @@
+[package]
+name = "melogold-update"
+description = "Помощник установки обновления deb и rpm: работает под root, запускается окном через pkexec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "melogold-update"
+path = "src/main.rs"
+
+[dependencies]
+melogold-core = { path = "../melogold-core" }
+libc = "0.2"
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
+hex.workspace = true
