@@ -28,6 +28,13 @@ struct FeedState {
     generation: u64,
     target: Duration,
     stopped: bool,
+    /// `appsrc` запущен и сам попросил данные (`need-data` или `seek-data`). До этого кадры не
+    /// кладутся: трек с диска или из кэша успевал забить очередь `appsrc` (`max-bytes`) ещё до
+    /// запуска конвейера, начальная перемотка `basesrc` при запуске очищала очередь, не будя
+    /// ждущего места, — и поток кормления ждал места, а конвейер ждал кадров, вечно. Звук шёл
+    /// только после перемотки ползунком: сбрасывающая перемотка будит ждущего (пользователь,
+    /// 2026-09-30: «трек не играет, пока не подвинешь ползунок»).
+    ready: bool,
 }
 
 #[derive(Default)]
@@ -51,6 +58,24 @@ impl Control {
     fn stop(&self) {
         self.lock().stopped = true;
         self.changed.notify_all();
+    }
+
+    /// `appsrc` попросил данные: кормить можно.
+    fn mark_ready(&self) {
+        let mut state = self.lock();
+        if !state.ready {
+            state.ready = true;
+            self.changed.notify_all();
+        }
+    }
+
+    /// Ждать, пока `appsrc` попросит данные; `false` — остановлено.
+    fn wait_ready(&self) -> bool {
+        let mut state = self.lock();
+        while !state.stopped && !state.ready {
+            state = self.changed.wait(state).unwrap_or_else(|p| p.into_inner());
+        }
+        !state.stopped
     }
 
     /// Ждать перемотки или остановки; `None` — остановлено.
@@ -152,11 +177,13 @@ impl Output {
         gst::Element::link_many(elements).map_err(|e| e.to_string())?;
 
         let control = Arc::new(Control::default());
-        let seek_control = Arc::clone(&control);
+        let (seek_control, need_control) = (Arc::clone(&control), Arc::clone(&control));
         appsrc.set_callbacks(
             gst_app::AppSrcCallbacks::builder()
+                .need_data(move |_, _| need_control.mark_ready())
                 .seek_data(move |_, offset| {
                     seek_control.seek(Duration::from_nanos(offset));
+                    seek_control.mark_ready();
                     true
                 })
                 .build(),
@@ -275,8 +302,13 @@ fn audio_sink() -> Result<gst::Element, String> {
 fn feed(stream: Arc<TrackStream>, appsrc: AppSrc, control: Arc<Control>, start: Duration, failed: impl Fn(StreamError)) {
     let index = stream.index().clone();
     let timescale = u64::from(index.track.timescale.max(1));
+    // Первый кадр — только когда запущенный `appsrc` его попросит (см. `FeedState::ready`).
+    if !control.wait_ready() {
+        return;
+    }
     let Some(mut generation) = control.current() else { return };
-    let mut target = start;
+    // Начальная перемотка при запуске уже пришла как `seek-data`: её место и берётся.
+    let mut target = if generation > 0 { control.lock().target } else { start };
     'position: loop {
         let mut number = index.fragment_at(target);
         let mut discont = true;
@@ -396,4 +428,76 @@ fn push(
         }
     }
     Pushed::All(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Кормление ждёт, пока `appsrc` попросит данные: очередь не забивается до запуска конвейера, и
+    /// начальная перемотка при запуске не запирает поток кормления. Без ожидания этот тест висел:
+    /// поток ждал места в очереди, конвейер — кадров.
+    #[test]
+    fn feeding_waits_until_appsrc_asks_so_the_start_does_not_deadlock() {
+        if gst::init().is_err() {
+            return;
+        }
+        let caps = gst::Caps::builder("audio/x-raw")
+            .field("format", "S16LE")
+            .field("layout", "interleaved")
+            .field("rate", 44_100i32)
+            .field("channels", 2i32)
+            .build();
+        // Как в Output: перематываемый источник, блокирующая очередь с пределом по байтам.
+        let appsrc = AppSrc::builder()
+            .caps(&caps)
+            .format(gst::Format::Time)
+            .stream_type(AppStreamType::Seekable)
+            .block(true)
+            .max_bytes(64 * 1024)
+            .build();
+        let Ok(sink) = gst::ElementFactory::make("fakesink").property("sync", false).build() else { return };
+        let pipeline = gst::Pipeline::new();
+        pipeline.add_many([appsrc.upcast_ref::<gst::Element>(), &sink]).expect("элементы");
+        appsrc.link(&sink).expect("связь");
+        let control = Arc::new(Control::default());
+        let (seek_control, need_control) = (Arc::clone(&control), Arc::clone(&control));
+        appsrc.set_callbacks(
+            gst_app::AppSrcCallbacks::builder()
+                .need_data(move |_, _| need_control.mark_ready())
+                .seek_data(move |_, offset| {
+                    seek_control.seek(Duration::from_nanos(offset));
+                    seek_control.mark_ready();
+                    true
+                })
+                .build(),
+        );
+        // Данные «с диска» готовы сразу: 2 с звука — в 5 раз больше предела очереди.
+        let (feeder_control, feeder_src) = (Arc::clone(&control), appsrc.clone());
+        let feeder = std::thread::spawn(move || {
+            if !feeder_control.wait_ready() {
+                return false;
+            }
+            for i in 0..20u64 {
+                let mut buffer = gst::Buffer::from_slice(vec![0u8; 4410 * 4]);
+                let buffer_mut = buffer.get_mut().expect("новый буфер");
+                buffer_mut.set_pts(gst::ClockTime::from_mseconds(100 * i));
+                buffer_mut.set_duration(gst::ClockTime::from_mseconds(100));
+                if feeder_src.push_buffer(buffer).is_err() {
+                    return false;
+                }
+            }
+            feeder_src.end_of_stream().is_ok()
+        });
+        // Конвейер запускается позже, чем готовы данные, — как Output::new и затем play().
+        std::thread::sleep(Duration::from_millis(50));
+        pipeline.set_state(gst::State::Playing).expect("запуск");
+        let bus = pipeline.bus().expect("шина");
+        let message = bus.timed_pop_filtered(gst::ClockTime::from_seconds(5), &[gst::MessageType::Eos, gst::MessageType::Error]);
+        let reached_end = matches!(message.as_ref().map(|m| m.view()), Some(gst::MessageView::Eos(_)));
+        let _ = pipeline.set_state(gst::State::Null);
+        control.stop();
+        assert!(feeder.join().expect("поток кормления"), "все кадры отданы");
+        assert!(reached_end, "все кадры дошли до вывода, запирания нет");
+    }
 }

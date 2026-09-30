@@ -1321,4 +1321,67 @@ mod tests {
         player.send(Command::Shutdown);
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    /// Воспроизведение бага «трек не играет, пока не подвинешь ползунок» (2026-09-30) на настоящем
+    /// файле из кэша: `MELOGOLD_REPRO_CACHE=<папка с <id>.140.data/json> MELOGOLD_REPRO_ID=<id>`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "нужен файл из кэша пользователя"]
+    async fn repro_cached_track_starts() {
+        let (Ok(cache), Ok(id)) = (std::env::var("MELOGOLD_REPRO_CACHE"), std::env::var("MELOGOLD_REPRO_ID")) else { return };
+        // Настоящий вывод (pulsesink/PipeWire) — только без звука: MELOGOLD_REPRO_REAL_SINK=1.
+        if std::env::var("MELOGOLD_REPRO_REAL_SINK").as_deref() != Ok("1") {
+            std::env::set_var("MELOGOLD_AUDIO_SINK", "fakesink");
+        }
+        gst::init().unwrap();
+        let dir = std::env::temp_dir().join(format!("melogold-repro-{}", std::process::id()));
+        let songs = dir.join("songs");
+        std::fs::create_dir_all(&songs).unwrap();
+        let first = std::env::var("MELOGOLD_REPRO_FIRST_ID").ok();
+        for song in [Some(id.clone()), first.clone()].into_iter().flatten() {
+            for ext in ["data", "json"] {
+                std::fs::copy(format!("{cache}/{song}.140.{ext}"), songs.join(format!("{song}.140.{ext}"))).unwrap();
+            }
+        }
+        let api = FakeApi::new(|_, _| fake::playable());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        let deps = Deps {
+            resolver: Arc::clone(&resolver),
+            music: YouTubeMusic::new(resolver.client().clone()),
+            songs: SongCache::new(songs.clone(), 0),
+            downloads: None,
+            library: None,
+            http: reqwest::Client::new(),
+            settings: Settings { muted: true, volume: 0.0, ..Settings::default() },
+            queue_path: None,
+        };
+        let player = start(&tokio::runtime::Handle::current(), deps);
+        let events = player.subscribe();
+        // Сначала играет другой трек — как в журнале: переключение с играющего на трек из кэша.
+        if let Some(first) = &first {
+            player.send(Command::PlaySingle { track: track(first), start: Duration::ZERO });
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            eprintln!("первый трек: позиция {:?}", player.position());
+        }
+        let pressed = std::time::Instant::now();
+        let start_ms: u64 = std::env::var("MELOGOLD_REPRO_START_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        player.send(Command::PlaySingle { track: track(&id), start: Duration::from_millis(start_ms) });
+        let deadline = pressed + Duration::from_secs(12);
+        let mut last = None;
+        while std::time::Instant::now() < deadline {
+            if let Ok(Ok(Event::State(state))) = tokio::time::timeout(Duration::from_millis(200), events.recv()).await {
+                last = Some((state.status, state.playing));
+            }
+            let on_new = player.state().track.as_ref().is_some_and(|t| t.video_id == id);
+            let moved = player
+                .position()
+                .is_some_and(|p| p > Duration::from_millis(start_ms + 1500) && p < Duration::from_millis(start_ms + 12_000));
+            if on_new && moved {
+                eprintln!("ЗВУК ИДЁТ через {} мс; вызовов player: {}", pressed.elapsed().as_millis(), api.player_calls());
+                player.send(Command::Shutdown);
+                return;
+            }
+        }
+        player.send(Command::Shutdown);
+        panic!("за 12 с позиция не сдвинулась: {:?}, позиция {:?}, вызовов player {}", last, player.position(), api.player_calls());
+    }
 }
