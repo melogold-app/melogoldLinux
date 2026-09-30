@@ -65,6 +65,8 @@ helper=/usr/libexec/melogold/melogold-update
 if command -v dnf >/dev/null; then
     fmt=rpm
     dnf install -y -q "/w/melogold-${version}-1."*.rpm >/dev/null 2>&1
+    # В чистом образе нет ни runuser, ни системной шины — только для самой проверки.
+    dnf install -y -q util-linux dbus-daemon libxml2 >/dev/null 2>&1
     installed() { rpm -q --qf '%{VERSION}' melogold; }
     file_next=$(ls /w/melogold-${next}-1.*.rpm)
     file_cur=$(ls /w/melogold-${version}-1.*.rpm)
@@ -73,7 +75,7 @@ else
     fmt=deb
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null 2>&1
-    apt-get install -y -qq "/w/melogold_${version}_amd64.deb" >/dev/null 2>&1
+    apt-get install -y -qq "/w/melogold_${version}_amd64.deb" dbus libxml2-utils >/dev/null 2>&1
     installed() { dpkg-query -W -f='${Version}' melogold; }
     file_next=/w/melogold_${next}_amd64.deb
     file_cur=/w/melogold_${version}_amd64.deb
@@ -85,6 +87,12 @@ check "помощник на месте, 0755 root" '[[ $(stat -c "%a %U" $helpe
 policy=/usr/share/polkit-1/actions/app.melogold.Melogold.update.policy
 check "policy на месте" '[[ -f $policy ]]'
 if command -v xmllint >/dev/null; then check "xmllint policy" 'xmllint --noout $policy'; fi
+# pkaction говорит с polkitd: поднимаем системную шину и polkitd прямо в контейнере (без сеанса и агента).
+mkdir -p /run/dbus && (dbus-daemon --system --fork >/dev/null 2>&1 || true)
+for daemon in /usr/lib/polkit-1/polkitd /usr/libexec/polkitd; do
+    [[ -x $daemon ]] && { $daemon --no-debug >/dev/null 2>&1 & break; }
+done
+sleep 2
 if command -v pkaction >/dev/null; then
     pkaction --verbose --action-id app.melogold.Melogold.update | sed 's/^/       /'
     check "pkaction: allow_active=yes, auth_admin вне сеанса" \
@@ -97,7 +105,7 @@ check "pkexec на месте" 'command -v pkexec >/dev/null'
 run() { out=$("$@" 2>/tmp/err); code=$?; echo "       код $code: $out"; }
 
 echo "-- не root: отказ"
-run setpriv --reuid=65534 --regid=65534 --clear-groups env MELOGOLD_UPDATE_SOURCE=/w/good $helper
+run runuser -u nobody -- env MELOGOLD_UPDATE_SOURCE=/w/good $helper
 check "код 2, версия прежняя" '[[ $code == 2 && $(installed) == "$version" ]]'
 
 echo "-- подменённый sha256: ничего не ставится"
