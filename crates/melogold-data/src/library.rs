@@ -80,7 +80,7 @@ pub enum DeviceFilter {
 
 impl DeviceFilter {
     /// Условие по `play_events` и значение параметра `?2`.
-    fn sql(&self) -> (&'static str, Option<String>) {
+    pub(crate) fn sql(&self) -> (&'static str, Option<String>) {
         match self {
             DeviceFilter::All => ("(?2 IS NULL OR 1)", None),
             DeviceFilter::This(own) => ("(device_id IS NULL OR device_id = ?2)", own.clone()),
@@ -1067,17 +1067,20 @@ mod tests {
             tx.ensure_track("back", None)?;
             tx.ensure_track("other", None)?;
             tx.insert_play("e-own-back", "back", 2_000, 30_000, Some("me"))?;
-            tx.insert_play("e-other", "other", 3_000, 90_000, Some("phone"))
+            tx.insert_play("e-other", "other", 3_000, 90_000, Some("phone"))?;
+            // Событие с сервера без `deviceId` хранится пустой строкой (задание 0012).
+            tx.ensure_track("nameless", None)?;
+            tx.insert_play("e-nameless", "nameless", 4_000, 10_000, Some(""))
         })
         .unwrap();
         let ids =
             |filter: &DeviceFilter| lib.recent_history_for(10, filter).unwrap().into_iter().map(|h| h.track.video_id).collect::<Vec<_>>();
-        assert_eq!(ids(&DeviceFilter::All), ["other", "back", "mine"]);
+        assert_eq!(ids(&DeviceFilter::All), ["nameless", "other", "back", "mine"], "без deviceId — только в «Все устройства»");
         assert_eq!(ids(&DeviceFilter::This(Some("me".into()))), ["back", "mine"]);
         assert_eq!(ids(&DeviceFilter::Device("phone".into())), ["other"]);
         let top = lib.most_played_for(Some(0), 10, &DeviceFilter::Device("phone".into())).unwrap();
         assert_eq!((top[0].track.video_id.as_str(), top[0].play_time_ms), ("other", 90_000));
-        assert_eq!(lib.play_devices().unwrap(), HashSet::from(["me".to_owned(), "phone".to_owned()]));
+        assert_eq!(lib.play_devices().unwrap(), HashSet::from(["me".to_owned(), "phone".to_owned(), String::new()]));
     }
 
     #[test]

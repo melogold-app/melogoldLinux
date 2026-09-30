@@ -52,7 +52,9 @@
     <file preprocess="xml-stripblanks">icons/scalable/actions/phone-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/preferences-system-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/preferences-system-time-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/send-to-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/sidebar-show-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/starred-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/system-log-out-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/system-search-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tablet-symbolic.svg</file>
@@ -61,6 +63,7 @@
     <file preprocess="xml-stripblanks">icons/scalable/actions/view-more-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/view-refresh-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/window-close-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/x-office-calendar-symbolic.svg</file>
     <file>icons/256x256/apps/app.melogold.Melogold.png</file>
     <file>style.css</file>
   </gresource>

@@ -25,6 +25,7 @@ pub mod queue;
 pub mod server_address;
 pub mod settings;
 pub mod share_links;
+pub mod stats_window;
 pub mod system;
 pub mod text;
 pub mod thumbnails;

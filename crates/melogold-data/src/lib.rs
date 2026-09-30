@@ -5,6 +5,7 @@ pub mod database;
 pub mod library;
 pub mod lyrics;
 pub mod overrides;
+pub mod stats;
 pub mod sync_store;
 
 pub use database::{Database, DbError};

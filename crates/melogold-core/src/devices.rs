@@ -23,6 +23,24 @@ pub fn kind(platform: Option<&str>) -> DeviceKind {
     }
 }
 
+/// Устройства для фильтра Истории и Итогов (задание 0012): чужие устройства, чьи прослушивания есть
+/// здесь **и** которые есть в аккаунте (`names`: id → имя), по имени. Удалённое из аккаунта, устройство
+/// без имени и событие без `deviceId` (пустая строка) не попадают: их прослушивания видны только в
+/// «Все устройства». Фильтр показывают, когда список не пуст.
+pub fn filter_devices<'a>(
+    seen: impl IntoIterator<Item = &'a String>,
+    own: &str,
+    names: &std::collections::HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut others: Vec<(String, String)> = seen
+        .into_iter()
+        .filter(|id| !id.is_empty() && id.as_str() != own)
+        .filter_map(|id| names.get(id).map(|name| (id.clone(), name.clone())))
+        .collect();
+    others.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()).then_with(|| a.0.cmp(&b.0)));
+    others
+}
+
 /// Код входа: верхний регистр, без пробелов, `-` и `_`, `O→0`, `I,L→1`; ровно 8 знаков Crockford.
 pub fn normalize_user_code(input: &str) -> Option<String> {
     const ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -57,6 +75,24 @@ pub fn spoken_code(code: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn removed_devices_are_not_in_the_filter() {
+        let names = std::collections::HashMap::from([("me".to_owned(), "Ноутбук".to_owned()), ("tel".to_owned(), "Телефон".to_owned())]);
+        // Три устройства, одно удалено из аккаунта: остаётся телефон (и «Это устройство» рядом).
+        let seen = set(&["me", "tel", "gone"]);
+        assert_eq!(filter_devices(&seen, "me", &names), [("tel".to_owned(), "Телефон".to_owned())]);
+        // Все чужие удалены — фильтра нет.
+        assert!(filter_devices(&set(&["me", "gone", "gone2"]), "me", &names).is_empty());
+        // Событие без deviceId (пустая строка) не выбирается.
+        assert!(filter_devices(&set(&["me", ""]), "me", &names).is_empty());
+        // Без списка устройств имён нет — никого не показываем.
+        assert!(filter_devices(&seen, "me", &Default::default()).is_empty());
+    }
 
     #[test]
     fn kinds_by_platform() {

@@ -1063,7 +1063,7 @@ fn apply_history_rows(tx: &SyncTx, response: &SyncResponse) -> rusqlite::Result<
     for row in &response.plays {
         let Some(played_at) = iso::parse(&row.played_at) else { continue };
         tx.ensure_track(&row.video_id, None)?;
-        tx.insert_play(&row.event_id, &row.video_id, played_at, row.play_time_ms, row.device_id.as_deref())?;
+        tx.insert_play(&row.event_id, &row.video_id, played_at, row.play_time_ms, Some(row.device_id.as_deref().unwrap_or_default()))?;
     }
     for row in &response.play_forgets {
         if let Some(before) = iso::parse(&row.events_before) {
