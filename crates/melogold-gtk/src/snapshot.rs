@@ -126,6 +126,20 @@ pub fn maybe_start(window: &MainWindow) {
         ("07a-album", Box::new(|w| w.push(&crate::pages::catalog::album_page(w, "MPREb_OLmD8O5IYNS"))), 3500),
         ("07b-artist", Box::new(|w| w.push(&crate::pages::catalog::artist_page(w, "UCRr1xG_2WIDs18a6cIiCxeA"))), 4000),
         (
+            "07b2-artist-albums",
+            Box::new(|w| {
+                // «Все ›» у синглов Daft Punk: отдельная страница-сетка.
+                w.push(&crate::pages::catalog::artist_items_page(
+                    w,
+                    "Синглы и выпуски — Daft Punk",
+                    "MPADUCRr1xG_2WIDs18a6cIiCxeA",
+                    Some("ggMIegYIAhoCAQI%3D"),
+                    Vec::new(),
+                ))
+            }),
+            4000,
+        ),
+        (
             "07c-playlist",
             Box::new(|w| w.push(&crate::pages::catalog::playlist_page(w, "RDCLAK5uy_n20FRYQXNt1p1wS55Nj2r14IouO5weaYU"))),
             3500,

@@ -12,7 +12,7 @@ use melogold_innertube::YouTubeError;
 use melogold_playback::engine::Command;
 
 use crate::catalog_widgets::{
-    card_grid, description, mood_grid, shelf_view, track_list, CollectionHeader, Toggle, TrackContext, TrackList,
+    card, card_grid, description, mood_grid, shelf_view, track_list, CollectionHeader, Toggle, TrackContext, TrackList,
 };
 use crate::localization::tr;
 use crate::widgets::{catalog_error, StateView};
@@ -383,6 +383,8 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
                                     }
                                 }) as Rc<dyn Fn()>
                             });
+                        // «Все ›» альбомов, синглов и прочих полок с собственной сеткой — отдельная страница.
+                        let more = more.or_else(|| artist_items_more(window, shelf, &artist.name));
                         content.append(&shelf_view(window, shelf, 5, TrackContext::List, more));
                     }
                 }
@@ -390,6 +392,102 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
         },
     );
     page.page
+}
+
+/// «Все ›» полки исполнителя, у которой YouTube Music отдаёт полную сетку (`MPAD…` или `UC…` + `params`).
+fn artist_items_more(window: &MainWindow, shelf: &Shelf, artist: &str) -> Option<Rc<dyn Fn()>> {
+    let browse_id = shelf.more_browse_id.clone()?;
+    if !(browse_id.starts_with("MPAD") || (browse_id.starts_with("UC") && shelf.more_params.is_some())) {
+        return None;
+    }
+    let title = match shelf.title.as_deref().filter(|t| !t.is_empty()) {
+        Some(name) => format!("{name} — {artist}"),
+        None => artist.to_owned(),
+    };
+    let (weak, params, fallback) = (window.downgrade(), shelf.more_params.clone(), shelf.items.clone());
+    Some(Rc::new(move || {
+        if let Some(window) = weak.upgrade() {
+            window.push(&artist_items_page(&window, &title, &browse_id, params.as_deref(), fallback.clone()));
+        }
+    }))
+}
+
+/// Все альбомы, синглы, плейлисты исполнителя сеткой карточек; продолжения подгружаются при прокрутке.
+/// Если YouTube не отдал страницу — те карточки, что были на полке.
+pub fn artist_items_page(
+    window: &MainWindow,
+    title: &str,
+    browse_id: &str,
+    params: Option<&str>,
+    fallback: Vec<MusicItem>,
+) -> adw::NavigationPage {
+    let page = scaffold(title, None, true);
+    let scroller = page.scroller.clone();
+    let (music, id, params) = (window.ctx.services.music.clone(), browse_id.to_owned(), params.map(str::to_owned));
+    load(
+        window,
+        &page,
+        move || {
+            let (music, id, params, fallback) = (music.clone(), id.clone(), params.clone(), fallback.clone());
+            async move {
+                match music.browse_grid(&id, params.as_deref()).await {
+                    Ok(page) => Ok(page),
+                    Err(_) if !fallback.is_empty() => Ok(melogold_core::music::ItemsPage { items: fallback, continuation: None }),
+                    Err(error) => Err(error),
+                }
+            }
+        },
+        move |window, content, first| {
+            let grid = card_grid(window, &first.items);
+            content.append(&grid);
+            let seen: Rc<RefCell<std::collections::HashSet<String>>> = Rc::default();
+            seen.borrow_mut().extend(first.items.iter().filter_map(item_key));
+            let token_cell = Rc::new(RefCell::new(first.continuation));
+            let loading = Rc::new(Cell::new(false));
+            let weak = window.downgrade();
+            scroller.vadjustment().connect_value_changed(move |adjustment| {
+                if adjustment.value() < adjustment.upper() - adjustment.page_size() - 800.0 {
+                    return;
+                }
+                let Some(token) = token_cell.borrow().clone() else { return };
+                if loading.replace(true) {
+                    return;
+                }
+                let Some(window) = weak.upgrade() else { return };
+                let music = window.ctx.services.music.clone();
+                let fetch_token = token.clone();
+                let task = window.ctx.services.run(async move { music.playlist_continuation(&fetch_token).await });
+                let (weak, grid, token_cell, loading, seen) =
+                    (window.downgrade(), grid.clone(), Rc::clone(&token_cell), Rc::clone(&loading), Rc::clone(&seen));
+                glib::spawn_future_local(async move {
+                    let result = task.await;
+                    loading.set(false);
+                    let (Some(window), Some(Ok(page))) = (weak.upgrade(), result) else {
+                        // Ошибка сети — больше не дёргаем, что есть, то показано.
+                        return;
+                    };
+                    for item in &page.items {
+                        if item_key(item).is_none_or(|key| seen.borrow_mut().insert(key)) {
+                            grid.append(&card(&window, item));
+                        }
+                    }
+                    token_cell.replace(if page.continuation.as_deref() == Some(token.as_str()) { None } else { page.continuation });
+                });
+            });
+        },
+    );
+    page.page
+}
+
+/// Ключ карточки для отсева повторов между страницами продолжения.
+fn item_key(item: &MusicItem) -> Option<String> {
+    match item {
+        MusicItem::Album(a) => Some(a.browse_id.clone()),
+        MusicItem::Playlist(p) => Some(p.browse_id()),
+        MusicItem::Artist(a) => Some(a.browse_id.clone()),
+        MusicItem::Track(t) => Some(t.video_id.clone()),
+        _ => None,
+    }
 }
 
 /// Настроение, «Все настроения», «Все новые релизы»: полки страницы, карточки — сеткой.

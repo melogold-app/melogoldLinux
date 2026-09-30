@@ -145,6 +145,17 @@ impl YouTubeMusic {
         parse_browse_shelves(&response).ok_or_else(|| YouTubeError::new(ErrorKind::Parser, format!("no sections in {browse_id}")))
     }
 
+    /// Полный список полки исполнителя («Все ›»): сетка альбомов/синглов и токен продолжения.
+    /// Дальше — `playlist_continuation` (тот же `browse` с `continuation`).
+    pub async fn browse_grid(&self, browse_id: &str, params: Option<&str>) -> Result<ItemsPage, YouTubeError> {
+        let mut body = json!({"browseId": browse_id});
+        if let Some(params) = params {
+            body["params"] = params.into();
+        }
+        let response = self.music("browse", body).await?;
+        parse_browse_grid(&response).ok_or_else(|| YouTubeError::new(ErrorKind::Parser, format!("no grid in {browse_id}")))
+    }
+
     // ── страницы ──
 
     pub async fn album(&self, browse_id: &str) -> Result<AlbumDetails, YouTubeError> {
@@ -303,6 +314,29 @@ impl YouTubeMusic {
 
 pub fn parse_channel(channel_id: &str, response: &Value) -> ChannelPage {
     web_parsers::channel_page(channel_id, response)
+}
+
+/// Страница «Все ›» полки исполнителя (`MPAD…` + `params`, сетка альбомов/синглов): карточки всех полок
+/// страницы и токен продолжения сетки. `None` — у ответа нет секций.
+pub fn parse_browse_grid(response: &Value) -> Option<ItemsPage> {
+    let sections = at!(
+        response,
+        "contents",
+        "singleColumnBrowseResultsRenderer",
+        "tabs",
+        0,
+        "tabRenderer",
+        "content",
+        "sectionListRenderer",
+        "contents"
+    )?;
+    let mut page = ItemsPage::default();
+    for section in Some(sections).items() {
+        let Some(grid) = at!(section, "gridRenderer").or_else(|| at!(section, "musicCarouselShelfRenderer")) else { continue };
+        page.items.extend(parsers::items_of(at!(grid, "items").or_else(|| at!(grid, "contents"))));
+        page.continuation = page.continuation.take().or_else(|| parsers::continuation(Some(grid)));
+    }
+    (!page.items.is_empty()).then_some(page)
 }
 
 pub fn parse_browse_shelves(response: &Value) -> Option<Vec<Shelf>> {
@@ -468,6 +502,9 @@ pub fn parse_playlist_continuation(response: &Value) -> ItemsPage {
         .or_else(|| at!(response, "continuationContents", "musicShelfContinuation"))
     {
         return ItemsPage { items: parsers::items_of(at!(old, "contents")), continuation: parsers::continuation(Some(old)) };
+    }
+    if let Some(grid) = at!(response, "continuationContents", "gridContinuation") {
+        return ItemsPage { items: parsers::items_of(at!(grid, "items")), continuation: parsers::continuation(Some(grid)) };
     }
     let appended = at!(response, "onResponseReceivedActions", 0, "appendContinuationItemsAction", "continuationItems");
     ItemsPage { items: parsers::items_of(appended), continuation: parsers::continuation(appended) }

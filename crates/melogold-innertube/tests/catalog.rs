@@ -97,3 +97,34 @@ fn channel_videos_and_resolve() {
     let resolved = fixture("web/resolve-url-handle-direct.en.json");
     assert!(resolved["endpoint"]["browseEndpoint"]["browseId"].as_str().is_some_and(|id| id.starts_with("UC")));
 }
+
+#[test]
+fn artist_shelves_have_more_links_and_grid_page_parses() {
+    let artist = parse_artist("UCRr1xG_2WIDs18a6cIiCxeA", &fixture("ytm/artist-daft-punk.ru.json")).unwrap();
+    for s in &artist.shelves {
+        println!("{:?}: {} шт., все: {:?} {:?}", s.title, s.items.len(), s.more_browse_id, s.more_params);
+    }
+    let singles =
+        artist.shelves.iter().find(|s| s.more_browse_id.as_deref().is_some_and(|b| b.starts_with("MPAD"))).expect("у синглов есть «Все»");
+    assert!(singles.more_params.is_some());
+    let grid = parse_browse_shelves(&fixture("ytm/artist-singles-all.ru.json")).unwrap();
+    assert_eq!(grid.len(), 1);
+    assert!(grid[0].items.len() >= 20 && grid[0].items.iter().all(|i| matches!(i, MusicItem::Album(_))));
+    assert!(grid[0].items.len() > singles.items.len());
+}
+
+#[test]
+fn grid_continuation_pages_are_parsed() {
+    let card = |id: &str| {
+        serde_json::json!({"musicTwoRowItemRenderer": {"title": {"runs": [{"text": id}]}, "navigationEndpoint": {"browseEndpoint": {
+            "browseId": id, "browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_ALBUM"}}}}}})
+    };
+    let old = serde_json::json!({"continuationContents": {"gridContinuation": {"items": [card("MPREb_a")],
+        "continuations": [{"nextContinuationData": {"continuation": "T1"}}]}}});
+    let page = parse_playlist_continuation(&old);
+    assert_eq!((page.items.len(), page.continuation.as_deref()), (1, Some("T1")));
+    let new = serde_json::json!({"onResponseReceivedActions": [{"appendContinuationItemsAction": {"continuationItems": [
+        card("MPREb_b"), {"continuationItemRenderer": {"continuationEndpoint": {"continuationCommand": {"token": "T2"}}}}]}}]});
+    let page = parse_playlist_continuation(&new);
+    assert_eq!((page.items.len(), page.continuation.as_deref()), (1, Some("T2")));
+}

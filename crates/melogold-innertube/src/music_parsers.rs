@@ -497,7 +497,7 @@ pub fn continuation(shelf: Option<&Value>) -> Option<String> {
     if old.is_some() {
         return old;
     }
-    let contents = at!(shelf, "contents").or(shelf.filter(|v| v.is_array()));
+    let contents = at!(shelf, "contents").or_else(|| at!(shelf, "items")).or(shelf.filter(|v| v.is_array()));
     contents
         .items()
         .iter()
