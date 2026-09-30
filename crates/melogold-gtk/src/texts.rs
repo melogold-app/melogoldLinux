@@ -20,7 +20,7 @@ fn error_kind_text_in(lang: Lang, kind: StreamErrorKind) -> &'static str {
         lang,
         match kind {
             StreamErrorKind::Network | StreamErrorKind::Timeout => "PlayErrorNetwork",
-            StreamErrorKind::BotCheck => "PlayErrorBot",
+            StreamErrorKind::BotCheck => "LinuxPlayErrorBot",
             StreamErrorKind::Geo => "PlayErrorGeo",
             StreamErrorKind::Unavailable => "PlayErrorUnavailable",
             StreamErrorKind::Age => "PlayErrorAge",
@@ -34,6 +34,7 @@ pub fn error_title(error: &PlayerError) -> String {
     let lang = lang();
     match (&error.kind, &error.country) {
         (StreamErrorKind::Geo, Some(code)) => trf_in(lang, "PlayErrorGeoCountryShortFormat", &[&country(lang, code)]),
+        (StreamErrorKind::BotCheck, _) => tr(lang, "LinuxPlayErrorBotShort").to_owned(),
         _ => error_kind_text_in(lang, error.kind).to_owned(),
     }
 }
@@ -82,6 +83,16 @@ mod tests {
             country: country.map(str::to_owned),
             open_countries: open,
         }
+    }
+
+    /// Проверка «вы не бот» — как у Android (REWRITE §3.10.9): причина — адрес, совет — другой сервер.
+    #[test]
+    fn bot_check_texts_in_both_languages() {
+        let error = PlayerError { kind: StreamErrorKind::BotCheck, ..geo(None, None) };
+        assert!(error_text_in(Lang::Ru, &error).starts_with("YouTube просит подтвердить, что вы не бот: он временно не пускает адрес"));
+        assert!(error_text_in(Lang::Ru, &error).ends_with("без VPN — подождите несколько часов"));
+        assert!(error_text_in(Lang::En, &error).contains("With a VPN, pick another server"));
+        assert_eq!(error_notice_in(Lang::Ru, &error), error_text_in(Lang::Ru, &error));
     }
 
     /// Тексты задания 0001 — слово в слово, на обоих языках.

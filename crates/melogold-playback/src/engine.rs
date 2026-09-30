@@ -4,7 +4,7 @@
 //!
 //! Ошибки — по классам: сеть — 2 повтора (через 1 и 3 с), таймаут и бот — 1, гео, возраст,
 //! недоступно — сразу пропуск с причиной; после трёх пропусков подряд воспроизведение
-//! останавливается. Адреса двух следующих треков резолвятся заранее, у ближайшего сразу
+//! останавливается. Проверка «вы не бот» не пропускается — сразу остановка с карточкой. Адреса двух следующих треков резолвятся заранее, у ближайшего сразу
 //! открывается начало звука — переход по очереди не ждёт сети.
 
 use std::collections::{HashMap, HashSet};
@@ -963,11 +963,18 @@ impl Engine {
     }
 
     /// Пропуск включён всегда; после трёх пропусков подряд — остановка с причиной (REWRITE §3.10.9).
+    /// Проверка «вы не бот» не пропускается: YouTube не пускает адрес, а не трек, и следующий упадёт
+    /// так же (2026-09-30: все треки с общего сервера VPN) — сразу остановка с карточкой.
     fn skip_after_error(&mut self, error: PlayerError) {
-        tracing::warn!(трек = %error.track.video_id, итог = ?error.kind, "трек пропущен: {}", error.message);
+        let stop_here = StreamError::stops_queue(error.kind);
+        if stop_here {
+            tracing::warn!(трек = %error.track.video_id, "YouTube просит проверку «не бот» — очередь стоит: {}", error.message);
+        } else {
+            tracing::warn!(трек = %error.track.video_id, итог = ?error.kind, "трек пропущен: {}", error.message);
+        }
         self.error = Some(error.clone());
         self.skips_in_row += 1;
-        if self.skips_in_row >= 3 || self.queue.peek_next(true).is_none() {
+        if stop_here || self.skips_in_row >= 3 || self.queue.peek_next(true).is_none() {
             self.play_when_ready = false;
             self.release_output();
             self.set_status(Status::Error);

@@ -88,6 +88,12 @@ impl StreamError {
         }
     }
 
+    /// Очередь не перебирать: YouTube не пускает адрес (проверка «вы не бот»), а не этот трек, и
+    /// следующий упадёт так же (REWRITE §3.10.9).
+    pub fn stops_queue(kind: StreamErrorKind) -> bool {
+        kind == StreamErrorKind::BotCheck
+    }
+
     /// Пропуск без повторов: причина в самом видео.
     pub fn is_final(&self) -> bool {
         matches!(self.kind, StreamErrorKind::Geo | StreamErrorKind::Unavailable | StreamErrorKind::Age)
@@ -392,6 +398,9 @@ mod tests {
     #[test]
     fn classify_by_youtube_text() {
         assert_eq!(classify("LOGIN_REQUIRED Sign in to confirm you’re not a bot"), StreamErrorKind::BotCheck);
+        assert!(StreamError::stops_queue(StreamErrorKind::BotCheck));
+        assert!(!StreamError::stops_queue(StreamErrorKind::Geo));
+        assert!(!StreamError::stops_queue(StreamErrorKind::Network));
         assert_eq!(classify("UNPLAYABLE Video unavailable"), StreamErrorKind::Unavailable);
         assert_eq!(classify("ERROR"), StreamErrorKind::Unavailable);
         assert_eq!(classify("UNPLAYABLE This video is not available in your country"), StreamErrorKind::Geo);

@@ -35,6 +35,16 @@ impl Lang {
 /// (ключ, русский, английский). Ключи — с префиксом `Linux`, чтобы не спутать с общими.
 const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxMainMenu", "Главное меню", "Main Menu"),
+    // Проверка «вы не бот» (Android 8e2d853, REWRITE §3.10.9): YouTube не пускает адрес, а не трек.
+    // Когда Windows обновит `PlayErrorBot`, перенести в общий каталог.
+    (
+        "LinuxPlayErrorBot",
+        "YouTube просит подтвердить, что вы не бот: он временно не пускает адрес, с которого вы выходите в сеть. \
+         С VPN выберите другой сервер, без VPN — подождите несколько часов",
+        "YouTube asks to confirm you're not a bot: it is temporarily blocking the address you go online from. \
+         With a VPN, pick another server; without one, wait a few hours",
+    ),
+    ("LinuxPlayErrorBotShort", "YouTube просит подтвердить, что вы не бот", "YouTube asks to confirm you're not a bot"),
     ("LinuxAppLanguage", "Язык приложения", "App language"),
     ("LinuxLanguageRestart", "Язык сменится после перезапуска Melogold", "The language changes after Melogold restarts"),
     ("LinuxAbout", "О Melogold", "About Melogold"),
