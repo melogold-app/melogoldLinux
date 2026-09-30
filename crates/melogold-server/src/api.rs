@@ -321,6 +321,24 @@ impl Api {
         self.call(reqwest::Method::GET, &format!("/shares/{share_id}"), None, None, false).await
     }
 
+    // ── воспроизведение и пульт (§4.9); заголовок протокола сервер требует на всём `/playback/*` ──
+
+    pub async fn put_playback(&self, token: &str, put: &PlaybackPut) -> Result<PlaybackPutResult, ApiError> {
+        self.call(reqwest::Method::PUT, "/playback/state", Some(to_value(put)), Some(token), true).await
+    }
+
+    pub async fn playback_state(&self, token: &str) -> Result<PlaybackStateResponse, ApiError> {
+        self.call(reqwest::Method::GET, "/playback/state", None, Some(token), true).await
+    }
+
+    pub async fn remote_devices(&self, token: &str) -> Result<RemoteDeviceList, ApiError> {
+        self.call(reqwest::Method::GET, "/playback/devices", None, Some(token), true).await
+    }
+
+    pub async fn send_command(&self, token: &str, command: &RemoteCommand) -> Result<RemoteCommandResult, ApiError> {
+        self.call(reqwest::Method::POST, "/playback/commands", Some(to_value(command)), Some(token), true).await
+    }
+
     // ── синхронизация (§4.7–§4.8) ──
 
     pub async fn merge_plan(&self, token: &str, playlists: &[MergePlanInput]) -> Result<MergePlanResponse, ApiError> {

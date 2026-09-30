@@ -463,6 +463,32 @@ impl Account {
         .await
     }
 
+    // ── воспроизведение и пульт (§4.9, задание 0011) ──
+
+    pub async fn put_playback(&self, put: PlaybackPut) -> Result<PlaybackPutResult, ApiError> {
+        self.authorized(|api, token| {
+            let put = put.clone();
+            async move { api.put_playback(&token, &put).await }
+        })
+        .await
+    }
+
+    pub async fn playback_state(&self) -> Result<PlaybackStateResponse, ApiError> {
+        self.authorized(|api, token| async move { api.playback_state(&token).await }).await
+    }
+
+    pub async fn remote_devices(&self) -> Result<RemoteDeviceList, ApiError> {
+        self.authorized(|api, token| async move { api.remote_devices(&token).await }).await
+    }
+
+    pub async fn send_command(&self, command: RemoteCommand) -> Result<RemoteCommandResult, ApiError> {
+        self.authorized(|api, token| {
+            let command = command.clone();
+            async move { api.send_command(&token, &command).await }
+        })
+        .await
+    }
+
     // ── ссылки на свои плейлисты (§4.11, задание 0010) ──
 
     pub async fn create_share(&self, name: &str, tracks: Vec<TrackInput>) -> Result<ShareCreated, ApiError> {

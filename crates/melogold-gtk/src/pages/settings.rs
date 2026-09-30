@@ -215,6 +215,20 @@ fn playback_group(window: &MainWindow) -> adw::PreferencesGroup {
             .send(melogold_playback::engine::Command::Settings(crate::services::playback_settings(&window.ctx.settings)));
     });
     group.add(&normalize);
+
+    // «Управление с других устройств» (задание 0011): выключено — поток событий без `remote=1`.
+    let remote = adw::SwitchRow::builder()
+        .title(tr("LinuxRemoteAllow"))
+        .subtitle(tr("LinuxRemoteAllowText"))
+        .active(window.ctx.settings.get(&keys::REMOTE_CONTROL))
+        .build();
+    let weak = window.downgrade();
+    remote.connect_active_notify(move |row| {
+        let Some(window) = weak.upgrade() else { return };
+        window.ctx.settings.set(&keys::REMOTE_CONTROL, row.is_active());
+        window.ctx.services.sync.set_remote_control(row.is_active());
+    });
+    group.add(&remote);
     group
 }
 

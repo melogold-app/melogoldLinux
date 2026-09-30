@@ -419,6 +419,171 @@ pub struct ShareList {
     pub shares: Vec<ShareDto>,
 }
 
+// ── воспроизведение и пульт (§4.9, §6) ──
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackHandoff {
+    pub device_id: String,
+    pub session_id: String,
+    pub at: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackHandoffInput {
+    pub device_id: String,
+    pub session_id: String,
+}
+
+/// Состояние воспроизведения аккаунта: одно на аккаунт, автор — устройство `device_id`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackState {
+    pub rev: i64,
+    pub device_id: String,
+    pub device_name: Option<String>,
+    pub session_id: String,
+    pub queue_version: i64,
+    pub index: i64,
+    pub position_ms: i64,
+    pub duration_ms: Option<i64>,
+    pub playing: bool,
+    /// Когда `position_ms` была верна (время сервера).
+    pub at: String,
+    pub updated_at: String,
+    pub queue: Vec<TrackDto>,
+    pub handoff_from: Option<PlaybackHandoff>,
+    pub volume: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackStateResponse {
+    pub state: Option<PlaybackState>,
+    pub server_time: String,
+}
+
+/// Тело `PUT /playback/state`.
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackPut {
+    pub session_id: String,
+    pub queue_version: i64,
+    pub at: String,
+    pub index: i64,
+    pub position_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    pub playing: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue: Option<Vec<TrackInput>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handoff_from: Option<PlaybackHandoffInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackPutResult {
+    pub applied: bool,
+    pub rev: Option<i64>,
+    /// `newer_state` или `handed_off`, когда `applied == false`.
+    pub reason: Option<String>,
+    pub state: Option<PlaybackState>,
+    pub server_time: String,
+}
+
+/// Кратко о состоянии — в событии `playback.updated` и в списке устройств.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackSummary {
+    pub rev: i64,
+    pub device_id: String,
+    pub device_name: Option<String>,
+    pub session_id: String,
+    pub queue_version: i64,
+    pub index: i64,
+    pub queue_length: i64,
+    pub track: Option<TrackDto>,
+    pub position_ms: i64,
+    pub duration_ms: Option<i64>,
+    pub playing: bool,
+    pub at: String,
+    pub updated_at: String,
+    pub handoff_from: Option<PlaybackHandoff>,
+    pub volume: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteDevice {
+    pub device_id: String,
+    pub name: String,
+    pub platform: String,
+    /// У устройства открыт поток событий прямо сейчас.
+    pub online: bool,
+    /// Хотя бы один его поток открыт с `remote=1`.
+    pub controllable: bool,
+    pub playing: Option<PlaybackSummary>,
+    pub volume: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteDeviceList {
+    pub devices: Vec<RemoteDevice>,
+    pub server_time: String,
+}
+
+/// Тело `POST /playback/commands`.
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCommand {
+    pub command_id: String,
+    pub target_device_id: String,
+    /// `play|pause|toggle|next|previous|seek|volume|play_queue|stop`.
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue: Option<Vec<TrackInput>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteCommandResult {
+    pub delivered: bool,
+}
+
+/// Payload события `playback.updated`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackUpdatedPayload {
+    pub rev: i64,
+    pub cleared: bool,
+    pub state: Option<PlaybackSummary>,
+}
+
+/// Payload события `playback.command`: поля, которых у команды нет, — `null`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlaybackCommandPayload {
+    pub command_id: String,
+    pub from_device_id: String,
+    pub from_device_name: Option<String>,
+    pub action: String,
+    pub position_ms: Option<i64>,
+    pub volume: Option<i64>,
+    pub queue: Option<Vec<TrackDto>>,
+    pub index: Option<i64>,
+}
+
 // ── синхронизация (§4.7–§4.8) ──
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]

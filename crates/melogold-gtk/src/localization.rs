@@ -185,6 +185,29 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxLinkOpening", "Открываем ссылку…", "Opening the link…"),
     ("LinuxLinkKindTrack", "трек", "track"),
     ("LinuxLinkKindArtist", "исполнитель", "artist"),
+    // ── задание 0011: управление другим устройством ──
+    ("LinuxRemoteDevice", "Устройство", "Device"),
+    ("LinuxRemoteThisDevice", "Это устройство", "This device"),
+    ("LinuxRemoteOthers", "Другие устройства", "Other devices"),
+    ("LinuxRemoteOnline", "В сети", "Online"),
+    ("LinuxRemoteOffline", "Не в сети", "Offline"),
+    ("LinuxRemoteControlOff", "Управление выключено", "Control is off"),
+    ("LinuxRemotePlayingOnFormat", "Играет на «{0}»", "Playing on “{0}”"),
+    ("LinuxRemoteListenHere", "Слушать здесь", "Listen here"),
+    ("LinuxRemoteDisconnect", "Отключиться", "Disconnect"),
+    ("LinuxRemoteVolume", "Громкость", "Volume"),
+    ("LinuxRemoteAllow", "Управление с других устройств", "Control from other devices"),
+    (
+        "LinuxRemoteAllowText",
+        "Другие устройства аккаунта смогут ставить музыку на паузу, перематывать и менять громкость",
+        "Other devices of your account can pause, seek and change the volume",
+    ),
+    ("LinuxRemoteControlledByFormat", "Управляет «{0}»", "“{0}” is in control"),
+    ("LinuxRemoteOfflineFormat", "„{0}“ не в сети", "“{0}” is offline"),
+    ("LinuxRemoteDisabledFormat", "На „{0}“ управление выключено", "Control is off on “{0}”"),
+    ("LinuxRemoteNothingPlaying", "Ничего не играет", "Nothing is playing"),
+    ("LinuxRemoteNoDevices", "Других устройств пока нет", "No other devices yet"),
+    ("LinuxRemoteNothingToTake", "На устройстве нечего забрать", "There is nothing to take from the device"),
 ];
 
 static LANG: OnceLock<Lang> = OnceLock::new();

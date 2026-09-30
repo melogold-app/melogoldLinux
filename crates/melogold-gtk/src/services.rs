@@ -54,6 +54,8 @@ pub struct Services {
     pub link_updates: tokio::sync::broadcast::Sender<String>,
     /// Ссылки других сервисов → YouTube Music (задание 0010).
     pub external: Arc<melogold_innertube::external::ExternalResolver>,
+    /// Управление другим устройством и команды этому (задание 0011).
+    pub remote: Arc<crate::remote::RemoteHub>,
 }
 
 impl Services {
@@ -223,6 +225,13 @@ impl Services {
             kugou: KuGou::new(),
             community: Some(community),
         });
+        let remote = crate::remote::RemoteHub::start(runtime.handle(), &account, &sync, &player);
+        sync.set_remote_control(settings.get(&keys::REMOTE_CONTROL));
+        {
+            // Пока это устройство — пульт, команды плееру уходят на управляемое устройство.
+            let control = remote.control.clone();
+            player.set_interceptor(Some(Arc::new(move |command| crate::remote::redirect(&control, command))));
+        }
         // Сессия — в фоне: связка ключей может отвечать не сразу, окно её не ждёт. Прочитанная
         // сессия запускает синхронизацию через подписку.
         let loading = Arc::clone(&account);
@@ -247,6 +256,7 @@ impl Services {
             lyrics_rejected,
             link_updates,
             external,
+            remote,
         }
     }
 

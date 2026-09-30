@@ -272,6 +272,7 @@ impl MainWindow {
         this.connect_sidebar(&top_list);
         this.connect_sidebar(&bottom_list);
         this.install_actions();
+        crate::remote_sheet::install(&this);
         this.install_track_actions();
         this.install_selection_actions();
         this.start_library();
@@ -625,7 +626,8 @@ impl MainWindow {
 
     fn build_player(&self) {
         let bar = PlayerBar::new(self);
-        self.outer.add_bottom_bar(&bar.root);
+        // Над панелью — пульт другого устройства (задание 0011); пока он включён, своя панель скрыта.
+        self.outer.add_bottom_bar(&crate::remote_bar::bottom(self, &bar.root));
         let _ = self.player_bar.set(bar);
         let now_playing = NowPlaying::new(self);
         let _ = self.now_playing.set(now_playing);
@@ -1432,6 +1434,7 @@ fn sidebar_row(icon: &str, label: &str) -> gtk::ListBoxRow {
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
     let section = gio::Menu::new();
+    section.append(Some(tr("LinuxRemoteDevice")), Some("win.remote-devices"));
     section.append(Some(tr("NavSettings")), Some("win.preferences"));
     section.append(Some(tr("MenuShortcuts")), Some("app.shortcuts"));
     section.append(Some(tr("LinuxAbout")), Some("app.about"));

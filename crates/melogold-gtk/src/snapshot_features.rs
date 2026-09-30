@@ -41,6 +41,7 @@ fn back_to_settings_root(window: &MainWindow) {
 pub fn account_steps() -> Vec<Step> {
     let mut steps: Vec<Step> = Vec::new();
     steps.extend(share_account_steps());
+    steps.extend(remote_account_steps());
     steps
 }
 
@@ -108,7 +109,201 @@ pub fn steps() -> Vec<Step> {
     let mut steps: Vec<Step> = Vec::new();
     steps.extend(link_steps());
     steps.extend(share_steps());
+    steps.extend(remote_steps());
     steps
+}
+
+fn sample_devices() -> Vec<melogold_server::dto::RemoteDevice> {
+    use melogold_server::dto::{PlaybackSummary, RemoteDevice, TrackDto};
+    let playing = |title: &str, artist: &str, id: &str, position: i64| PlaybackSummary {
+        rev: 1,
+        device_id: "mac".into(),
+        queue_length: 12,
+        track: Some(TrackDto {
+            video_id: id.into(),
+            title: title.into(),
+            artists_text: Some(artist.into()),
+            thumbnail_url: Some(format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg")),
+            ..Default::default()
+        }),
+        position_ms: position,
+        duration_ms: Some(213_000),
+        playing: true,
+        at: melogold_core::iso::format(now_ms()),
+        volume: Some(40),
+        ..Default::default()
+    };
+    vec![
+        RemoteDevice {
+            device_id: "mac".into(),
+            name: "MacBook Air".into(),
+            platform: "macos".into(),
+            online: true,
+            controllable: true,
+            playing: Some(playing("Never Gonna Give You Up", "Rick Astley", "dQw4w9WgXcQ", 83_000)),
+            volume: Some(40),
+        },
+        RemoteDevice {
+            device_id: "pixel".into(),
+            name: "Pixel 7 Pro".into(),
+            platform: "android".into(),
+            online: true,
+            controllable: false,
+            playing: None,
+            volume: None,
+        },
+        RemoteDevice {
+            device_id: "old".into(),
+            name: "Старый ноутбук".into(),
+            platform: "windows".into(),
+            online: false,
+            controllable: false,
+            playing: None,
+            volume: None,
+        },
+    ]
+}
+
+/// Задание 0011 без сети: лист «Устройство» и пульт.
+fn remote_steps() -> Vec<Step> {
+    vec![
+        (
+            "20a-remote-sheet",
+            Box::new(|w| {
+                back_to_settings_root(w);
+                crate::remote_sheet::preview(w, sample_devices());
+            }),
+            2500,
+        ),
+        (
+            "20b-remote-bar",
+            Box::new(|w| {
+                close_dialog(w);
+                let mac = sample_devices().remove(0);
+                w.ctx.services.remote.control.connect(&mac);
+            }),
+            3000,
+        ),
+        ("20c-remote-off", Box::new(|w| w.ctx.services.remote.control.disconnect()), 500),
+    ]
+}
+
+/// Задание 0011 на настоящем сервере: «телефон» — второе устройство того же временного аккаунта, играет и
+/// слушает события с `remote=1`; окно видит его в листе, подключается и управляет.
+fn remote_account_steps() -> Vec<Step> {
+    vec![
+        (
+            "20d-live-phone",
+            Box::new(|w| {
+                back_to_settings_root(w);
+                let account = std::sync::Arc::clone(&w.ctx.services.account);
+                let task = w.ctx.services.run(async move { spawn_phone(account).await });
+                glib::spawn_future_local(async move {
+                    match task.await {
+                        Some(Ok(())) => println!("телефон вошёл и играет"),
+                        other => eprintln!("телефон не вошёл: {other:?}"),
+                    }
+                });
+            }),
+            6000,
+        ),
+        ("20e-live-sheet", Box::new(crate::remote_sheet::present), 3000),
+        (
+            "20f-live-remote",
+            Box::new(|w| {
+                close_dialog(w);
+                let control = w.ctx.services.remote.control.clone();
+                let task = w.ctx.services.run({
+                    let control = control.clone();
+                    async move { control.devices().await }
+                });
+                glib::spawn_future_local(async move {
+                    if let Some(Ok(devices)) = task.await {
+                        if let Some(phone) = devices.iter().find(|d| d.name == "Pixel 7 Pro") {
+                            control.connect(phone);
+                        }
+                    }
+                });
+            }),
+            3000,
+        ),
+        (
+            "20g-live-command",
+            Box::new(|w| {
+                let control = &w.ctx.services.remote.control;
+                control.set_volume(25);
+                control.seek_to(150_000);
+            }),
+            2500,
+        ),
+        // «Слушать здесь»: очередь и место телефона — сюда, пульт выключается.
+        ("20h-live-listen-here", Box::new(crate::remote_bar::listen_here), 4000),
+    ]
+}
+
+/// «Телефон» для снимков: второе устройство аккаунта окна, вошедшее по коду, с потоком событий `remote=1` и
+/// состоянием «играет Bohemian Rhapsody, громкость 40».
+async fn spawn_phone(account: std::sync::Arc<melogold_server::account::Account>) -> Result<(), String> {
+    use melogold_server::account::{Account, DeviceIdentity};
+    use melogold_server::remote::{AccountReporterPort, PlayerSnapshot, Reporter, ServerClock};
+    use melogold_server::session::SessionStore;
+
+    let dir = std::env::temp_dir().join(format!("melogold-phone-{}", melogold_core::ids::new_uuid()));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let identity = DeviceIdentity {
+        platform_id: melogold_core::ids::new_uuid(),
+        name: "Pixel 7 Pro".into(),
+        os_version: Some("Android 16".into()),
+        model: None,
+        client_version: "0.0.0-snapshot".into(),
+        language: "ru".into(),
+    };
+    let phone = Account::new(identity, SessionStore::file_only(dir.join("phone.json")), Some(account.server_url()));
+    // Вход по коду: приглашение этого окна, телефон вводит код, окно одобряет число.
+    let invite = account.create_invite().await.map_err(|e| e.to_string())?;
+    let claimed = phone.claim_link(&invite.user_code).await.map_err(|e| e.to_string())?;
+    let details = account.link(&invite.link_id).await.map_err(|e| e.to_string())?;
+    if !details.verify_choices.contains(&claimed.verify_code) {
+        return Err("число не среди вариантов".into());
+    }
+    account.approve_link(&invite.link_id, &claimed.verify_code).await.map_err(|e| e.to_string())?;
+    let done = phone.poll_link(&claimed.poll_secret, "claimed").await.map_err(|e| e.to_string())?;
+    if done.status != "completed" {
+        return Err(format!("вход не завершился: {}", done.status));
+    }
+
+    // События с remote=1: телефон «в сети» и «управляемый».
+    let events = std::sync::Arc::clone(&phone);
+    tokio::spawn(async move {
+        let _ = events.authorized(|api, token| async move { api.events(&token, true, |_| {}).await }).await;
+    });
+    let clock = std::sync::Arc::new(ServerClock::default());
+    let shot: Box<dyn Fn() -> Option<PlayerSnapshot> + Send + Sync> = Box::new(|| {
+        let track = |id: &str, title: &str, artist: &str| melogold_core::music::Track {
+            video_id: id.into(),
+            title: title.into(),
+            artists_text: Some(artist.into()),
+            thumbnail_url: Some(format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg")),
+            ..Default::default()
+        };
+        Some(PlayerSnapshot {
+            tracks: vec![
+                track("fJ9rUzIMcZQ", "Bohemian Rhapsody", "Queen"),
+                track("dQw4w9WgXcQ", "Never Gonna Give You Up", "Rick Astley"),
+            ],
+            index: 0,
+            position_ms: 61_000,
+            duration_ms: Some(355_000),
+            playing: true,
+            volume: Some(40),
+        })
+    });
+    let reporter = Reporter::new(AccountReporterPort { account: phone, clock, snapshot: shot }, tokio::runtime::Handle::current(), |_| {});
+    reporter.sound_played();
+    // Докладчик живёт, пока идёт прогон: снимки берутся не позже пары минут.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    std::mem::forget(reporter);
+    Ok(())
 }
 
 /// Задание 0010 без сети: «Плейлист по ссылке» на готовом снимке.

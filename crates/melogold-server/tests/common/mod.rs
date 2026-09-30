@@ -58,3 +58,63 @@ impl Pair {
         self.first.delete_account(&self.password).await.expect("временный аккаунт удаляется");
     }
 }
+
+/// Второе устройство входит в аккаунт первого по коду (режим `request`) — как настоящий телефон.
+pub async fn link_second(pair: &Pair) {
+    use melogold_server::linking::{AccountLinkPort, NewDeviceLinkState, NewDeviceLinker};
+    let linker = NewDeviceLinker::new(AccountLinkPort(Arc::clone(&pair.second)), tokio::runtime::Handle::current());
+    linker.show_code();
+    let code = wait_for(|| match linker.state() {
+        NewDeviceLinkState::ShowingCode { user_code, .. } => Some(user_code),
+        _ => None,
+    })
+    .await;
+    let details = pair.first.resolve_link(&code).await.expect("resolve");
+    let shown = wait_for(|| match linker.state() {
+        NewDeviceLinkState::Verify { verify_code, .. } => Some(verify_code),
+        _ => None,
+    })
+    .await;
+    pair.first.approve_link(&details.link_id, &shown).await.expect("approve");
+    wait_for(|| (linker.state() == NewDeviceLinkState::SignedIn).then_some(())).await;
+}
+
+/// Поток живых событий устройства: события идут в канал, пока задача жива.
+pub fn open_events(
+    account: &Arc<Account>,
+    remote: bool,
+) -> (tokio::task::JoinHandle<()>, tokio::sync::mpsc::UnboundedReceiver<melogold_server::dto::LiveEvent>) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let account = Arc::clone(account);
+    let job = tokio::spawn(async move {
+        let _ = account
+            .authorized(|api, token| {
+                let tx = tx.clone();
+                async move {
+                    api.events(&token, remote, |event| {
+                        let _ = tx.send(event);
+                    })
+                    .await
+                }
+            })
+            .await;
+    });
+    (job, rx)
+}
+
+/// Ждать событие нужного вида.
+pub async fn next_event(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<melogold_server::dto::LiveEvent>,
+    kind: &str,
+) -> melogold_server::dto::LiveEvent {
+    let wait = async {
+        loop {
+            match rx.recv().await {
+                Some(event) if event.kind == kind => return event,
+                Some(_) => {}
+                None => panic!("поток закрыт, а ждали {kind}"),
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), wait).await.unwrap_or_else(|_| panic!("не дождались {kind}"))
+}
