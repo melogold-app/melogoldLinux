@@ -5,7 +5,8 @@
 //! (показать окно, выйти, громкость, скорость, перемешивание, повтор), — в главный поток.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use melogold_core::app_info::APP_ID;
@@ -86,6 +87,72 @@ struct Player {
     state: State,
     /// Свои названия треков (задание 0005): рабочий стол показывает то же, что окно.
     library: Arc<Library>,
+    /// Обложка для рабочего стола, уже квадратом без полей и обводки: адрес картинки → `file://`.
+    art: Option<(String, String)>,
+}
+
+/// Готовые квадратные обложки из окна: адрес картинки и `file://` её квадрата.
+static ART: OnceLock<async_channel::Sender<(String, String)>> = OnceLock::new();
+
+/// Обложка для рабочего стола (задание 0014): картинку «Сейчас играет» — уже без полей и обводки —
+/// окно режет по центру в квадрат и кладёт PNG в кэш; оболочка берёт `file://`. Пока файла нет, в
+/// `mpris:artUrl` — адрес картинки, как раньше.
+pub fn publish_art(cache: &std::path::Path, url: &str, texture: &gtk::gdk::Texture) {
+    use gtk::prelude::*;
+    let Some(sender) = ART.get().cloned() else { return };
+    let (width, height) = (texture.width().max(0) as usize, texture.height().max(0) as usize);
+    let side = width.min(height);
+    if side == 0 {
+        return;
+    }
+    let mut downloader = gtk::gdk::TextureDownloader::new(texture);
+    downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
+    let (bytes, stride) = downloader.download_bytes();
+    let dir = cache.join("mpris");
+    let (url, name) = (url.to_owned(), format!("{:016x}.png", fnv(url)));
+    gtk::glib::spawn_future_local(async move {
+        let file = gtk::gio::spawn_blocking(move || -> Option<PathBuf> {
+            std::fs::create_dir_all(&dir).ok()?;
+            // Одна картинка на трек; прежние не копятся.
+            for entry in std::fs::read_dir(&dir).ok()?.flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+            let path = dir.join(name);
+            square_png(&bytes, width, height, stride, &path)?;
+            Some(path)
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(path) = file {
+            let _ = sender.try_send((url, format!("file://{}", path.display())));
+        }
+    });
+}
+
+/// Центральный квадрат картинки RGBA (`stride` — байт в строке) в PNG.
+fn square_png(rgba: &[u8], width: usize, height: usize, stride: usize, path: &std::path::Path) -> Option<()> {
+    use gtk::prelude::*;
+    let side = width.min(height);
+    let (x0, y0) = ((width - side) / 2, (height - side) / 2);
+    let mut square = Vec::with_capacity(side * side * 4);
+    for y in y0..y0 + side {
+        let start = y * stride + x0 * 4;
+        square.extend_from_slice(rgba.get(start..start + side * 4)?);
+    }
+    let texture = gtk::gdk::MemoryTexture::new(
+        side as i32,
+        side as i32,
+        gtk::gdk::MemoryFormat::R8g8b8a8,
+        &gtk::glib::Bytes::from_owned(square),
+        side * 4,
+    );
+    texture.save_to_png(path).ok()
+}
+
+/// Имя файла по адресу картинки (FNV-1a): новый трек — новое имя, и оболочка перечитывает файл.
+fn fnv(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3))
 }
 
 /// Путь трека для MPRIS: из id элемента очереди — он у каждого элемента свой.
@@ -213,10 +280,11 @@ impl Player {
         if let Some(duration) = self.state.duration.or(track.duration_ms.map(|ms| Duration::from_millis(ms as u64))) {
             put("mpris:length", Value::from(duration.as_micros() as i64));
         }
-        // Квадратная обложка: у видео — середина кадра делается оболочкой, адрес — наш.
+        // Обложка квадратом без полей и обводки — файл из окна (задание 0014); пока его нет — адрес.
         let art = track.thumbnail_url.clone().unwrap_or_else(|| thumbnails::for_video(&track.video_id, 544));
         if let Some(url) = thumbnails::sized(Some(&art), 544) {
-            put("mpris:artUrl", Value::from(url));
+            let file = self.art.as_ref().filter(|(source, _)| *source == url).map(|(_, file)| file.clone());
+            put("mpris:artUrl", Value::from(file.unwrap_or(url)));
         }
         put("xesam:url", Value::from(format!("https://music.youtube.com/watch?v={}", track.video_id)));
         map
@@ -304,6 +372,8 @@ async fn serve(
     let state = player.state();
     // Правка названия играющего трека — новые метаданные.
     let (edited, edits) = async_channel::unbounded();
+    let (art_sender, arts) = async_channel::bounded::<(String, String)>(4);
+    let _ = ART.set(art_sender);
     library.subscribe(move |change| {
         if change.has(Change::OVERRIDES) {
             let _ = edited.try_send(());
@@ -312,7 +382,7 @@ async fn serve(
     let connection = zbus::connection::Builder::session()?
         .name("org.mpris.MediaPlayer2.melogold")?
         .serve_at(PATH, Root { ui: ui.clone() })?
-        .serve_at(PATH, Player { player, ui, state, library })?
+        .serve_at(PATH, Player { player, ui, state, library, art: None })?
         .build()
         .await?;
     tracing::info!("MPRIS: org.mpris.MediaPlayer2.melogold");
@@ -325,6 +395,12 @@ async fn serve(
             },
             Ok(()) = edits.recv() => {
                 iface.get().await.metadata_changed(iface.signal_emitter()).await?;
+                continue;
+            }
+            Ok(art) = arts.recv() => {
+                let mut player = iface.get_mut().await;
+                player.art = Some(art);
+                player.metadata_changed(iface.signal_emitter()).await?;
                 continue;
             }
         };
@@ -367,4 +443,42 @@ async fn serve(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Кадр 16:9 с красной серединой и синими краями → квадрат по центру: краёв в нём нет.
+    #[test]
+    fn desktop_art_is_the_centre_square() {
+        use gtk::prelude::*;
+        let (width, height) = (16usize, 9usize);
+        let mut rgba = Vec::with_capacity(width * height * 4);
+        for _ in 0..height {
+            for x in 0..width {
+                let centre = (4..12).contains(&x);
+                rgba.extend_from_slice(if centre { &[255, 0, 0, 255] } else { &[0, 0, 255, 255] });
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("melogold-mpris-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("папка");
+        let path = dir.join("art.png");
+        square_png(&rgba, width, height, width * 4, &path).expect("PNG записан");
+        let texture = gtk::gdk::Texture::from_filename(&path).expect("PNG читается");
+        assert_eq!((texture.width(), texture.height()), (9, 9));
+        let mut pixels = vec![0u8; 9 * 9 * 4];
+        texture.download(&mut pixels, 9 * 4);
+        // Выгрузка — B, G, R, A. Квадрат — столбцы 3..12 кадра: первый из них синий, дальше красные.
+        assert_eq!(&pixels[0..3], &[255, 0, 0], "столбец 3 кадра — синий");
+        assert_eq!(&pixels[4..7], &[0, 0, 255], "столбец 4 кадра — красный");
+        assert_eq!(&pixels[8 * 4..8 * 4 + 3], &[0, 0, 255], "столбец 11 кадра — красный");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn art_file_name_follows_the_picture() {
+        assert_ne!(fnv("https://i.ytimg.com/vi/a/hq720.jpg"), fnv("https://i.ytimg.com/vi/b/hq720.jpg"));
+        assert_eq!(fnv("x"), fnv("x"));
+    }
 }

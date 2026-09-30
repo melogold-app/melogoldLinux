@@ -497,6 +497,7 @@ impl NowPlaying {
                 self.placeholder.set_visible(true);
                 if let Some(url) = url {
                     let (this, images) = (self.clone(), window.ctx.services.images.clone());
+                    let cache = window.ctx.paths.cache().to_path_buf();
                     glib::spawn_future_local(async move {
                         let texture = images.load(url.clone()).await;
                         if this.requested.borrow().as_deref() == Some(url.as_str()) {
@@ -508,6 +509,7 @@ impl NowPlaying {
                                 this.picture.set_paintable(Some(&texture));
                                 this.placeholder.set_visible(false);
                                 this.tint_from(&url, &texture);
+                                crate::mpris::publish_art(&cache, &url, &texture);
                             }
                         }
                     });
