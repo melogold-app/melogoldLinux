@@ -27,6 +27,7 @@ mod save_file;
 mod selection;
 mod services;
 mod settings_store;
+mod share;
 mod shortcuts;
 mod snapshot;
 mod snapshot_features;

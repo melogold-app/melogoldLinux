@@ -1,0 +1,11 @@
+{
+  "entityUniqueId": "YANDEX_SONG::609676",
+  "userCountry": "RU",
+  "pageUrl": "https://song.link/ya/609676",
+  "entitiesByUniqueId": {
+    "YANDEX_SONG::609676": {"id": "609676", "type": "song", "title": "Группа крови", "artistName": "Кино", "apiProvider": "yandex", "platforms": ["yandex"]}
+  },
+  "linksByPlatform": {
+    "yandex": {"country": "RU", "url": "https://music.yandex.ru/track/609676", "entityUniqueId": "YANDEX_SONG::609676"}
+  }
+}

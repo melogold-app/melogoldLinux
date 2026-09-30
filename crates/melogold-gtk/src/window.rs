@@ -516,8 +516,13 @@ impl MainWindow {
                 // Вход по приглашению другого устройства (QR, API §4.6) — в 0.2.
                 MelogoldLink::Invite { .. } => self.toast(tr("LinuxInviteLater")),
                 MelogoldLink::Request { .. } => self.toast(tr("LinuxLinkRequest")),
+                MelogoldLink::Share { url, id } => self.open_share_link(&url, &id),
                 MelogoldLink::Unsupported => self.toast(tr("LinkUnsupported")),
             }
+            return;
+        }
+        // Снимок плейлиста по адресу `/s/<код>` и ссылки Spotify, Apple, Яндекса, Deezer, Tidal, SoundCloud (задание 0010).
+        if self.open_incoming(text) {
             return;
         }
         self.open_youtube(youtube_links::parse(text));
@@ -554,7 +559,7 @@ impl MainWindow {
 
     /// Ссылка YouTube (REWRITE §2.3 «Ссылки и интенты»): видео играет (с `list=` — очередь плейлиста с
     /// этого видео, `t=` — позиция), плейлист, альбом и канал открываются, `@handle` — через `resolve_url`.
-    fn open_youtube(&self, target: LinkTarget) {
+    pub(crate) fn open_youtube(&self, target: LinkTarget) {
         use pages::catalog;
         tracing::info!(вход = ?std::mem::discriminant(&target), "ссылка YouTube");
         match target {
@@ -1206,6 +1211,10 @@ impl MainWindow {
                 return;
             }
             // Ссылка YouTube в поле — первой строкой «Открыть ссылку: видео YouTube» (§5.4 «Поиск»).
+            if let Some(kind) = crate::share::suggestion_kind(&text) {
+                window.show_suggestions(vec![Suggestion::Link(trf("OpenLinkFormat", &[&tr(kind)]))]);
+                return;
+            }
             let link_kind = match youtube_links::parse(&text) {
                 LinkTarget::Video { .. } => Some("LinkKindVideo"),
                 LinkTarget::Playlist(_) => Some("LinkKindPlaylist"),

@@ -6,64 +6,14 @@
 //!
 //! Только ЛОКАЛЬНЫЙ сервер: тесты создают временные аккаунты `e2elinux…` и удаляют их в конце.
 
-use std::sync::atomic::AtomicBool;
+mod common;
+
 use std::sync::Arc;
 use std::time::Duration;
 
-use melogold_server::account::{Account, AccountState, DeviceIdentity};
+use common::{pair, wait_for};
+use melogold_server::account::AccountState;
 use melogold_server::linking::*;
-use melogold_server::session::SessionStore;
-
-fn server() -> String {
-    std::env::var("MELOGOLD_LIVE_SERVER").expect("MELOGOLD_LIVE_SERVER: адрес локального сервера")
-}
-
-fn account(name: &str, platform_id: &str, dir: &std::path::Path) -> Arc<Account> {
-    let identity = DeviceIdentity {
-        platform_id: platform_id.to_owned(),
-        name: name.to_owned(),
-        os_version: Some("Test OS".into()),
-        model: None,
-        client_version: "0.0.0-test".into(),
-        language: "ru".into(),
-    };
-    Account::new(identity, SessionStore::file_only(dir.join(format!("{platform_id}.json"))), Some(server()))
-}
-
-async fn wait_for<T>(mut probe: impl FnMut() -> Option<T>) -> T {
-    for _ in 0..200 {
-        if let Some(found) = probe() {
-            return found;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("не дождались");
-}
-
-struct Pair {
-    first: Arc<Account>,
-    second: Arc<Account>,
-    login: String,
-    password: String,
-}
-
-async fn pair() -> Pair {
-    let dir = std::env::temp_dir().join(format!("melogold-live-{}", melogold_core::ids::new_uuid()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let suffix: String = melogold_core::ids::new_uuid().chars().filter(|c| c.is_ascii_alphanumeric()).take(10).collect();
-    let login = format!("e2elinux{suffix}");
-    let password = melogold_core::ids::new_uuid().replace('-', "");
-    let first = account("Компьютер", &format!("first-{suffix}"), &dir);
-    first.register(&login, &password, Arc::new(AtomicBool::new(false))).await.expect("аккаунт создаётся");
-    let second = account("Новый телефон", &format!("second-{suffix}"), &dir);
-    Pair { first, second, login, password }
-}
-
-impl Pair {
-    async fn cleanup(self) {
-        self.first.delete_account(&self.password).await.expect("временный аккаунт удаляется");
-    }
-}
 
 #[tokio::test]
 #[ignore = "нужен локальный сервер: MELOGOLD_LIVE_SERVER"]

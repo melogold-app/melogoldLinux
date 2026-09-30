@@ -475,6 +475,29 @@ pub fn account_page(window: &MainWindow) -> adw::NavigationPage {
     sync_group.add(&sync_row);
     preferences.add(&sync_group);
 
+    // «Мои ссылки» (задание 0010): только у сервера с `features.share`.
+    let links_group = adw::PreferencesGroup::builder().visible(false).build();
+    let links_row = super::next_row(tr("LinuxMyLinks"), "");
+    links_group.add(&links_row);
+    preferences.add(&links_group);
+    {
+        let account = Arc::clone(&window.ctx.services.account);
+        let task =
+            window.ctx.services.run(async move { account.ensure_server_info().await.is_some_and(|info| info.features.share.is_some()) });
+        let group = links_group.clone();
+        glib::spawn_future_local(async move {
+            if let Some(true) = task.await {
+                group.set_visible(true);
+            }
+        });
+        let weak = window.downgrade();
+        links_row.connect_activated(move |_| {
+            if let Some(window) = weak.upgrade() {
+                window.push(&super::shares::my_links_page(&window));
+            }
+        });
+    }
+
     let devices_group = adw::PreferencesGroup::builder().title(tr("AccountDevicesGroup")).build();
     let add_device = gtk::Button::builder()
         .child(&adw::ButtonContent::builder().label(tr("AccountAddDevice")).icon_name("list-add-symbolic").build())

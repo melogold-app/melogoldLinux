@@ -7,6 +7,7 @@ pub mod library;
 pub mod link_code;
 pub mod search;
 pub mod settings;
+pub mod shares;
 
 use adw::prelude::*;
 

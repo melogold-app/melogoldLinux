@@ -555,6 +555,7 @@ pub fn local_playlist(window: &MainWindow, id: i64) -> adw::NavigationPage {
     let page = track_page(window, &name, Some(&removal_key_playlist(id)), "playlistItems", &[], RowContext::Playlist(id));
     let menu = gtk::gio::Menu::new();
     menu.append(Some(tr("Rename")), Some(&format!("win.playlist-rename({id})")));
+    menu.append(Some(tr("LinuxCopyLink")), Some(&format!("win.playlist-copy-link({id})")));
     menu.append(Some(tr("DeletePlaylist")), Some(&format!("win.playlist-delete({id})")));
     let more = gtk::MenuButton::builder()
         .icon_name("view-more-symbolic")

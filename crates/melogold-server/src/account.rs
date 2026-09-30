@@ -146,6 +146,14 @@ impl Account {
         self.lock().server_info.clone()
     }
 
+    /// `/server/info` текущего сервера: последний ответ или новый запрос (возможности `share` и `remote`).
+    pub async fn ensure_server_info(&self) -> Option<ServerInfo> {
+        if let Some(info) = self.server_info() {
+            return Some(info);
+        }
+        self.check(&self.server_url()).await.ok()
+    }
+
     pub fn store_kind(&self) -> StoreKind {
         self.lock().store_kind
     }
@@ -453,6 +461,35 @@ impl Account {
             async move { api.cancel_invite(&token, &link_id).await }
         })
         .await
+    }
+
+    // ── ссылки на свои плейлисты (§4.11, задание 0010) ──
+
+    pub async fn create_share(&self, name: &str, tracks: Vec<TrackInput>) -> Result<ShareCreated, ApiError> {
+        let name = name.to_owned();
+        self.authorized(|api, token| {
+            let (name, tracks) = (name.clone(), tracks.clone());
+            async move { api.create_share(&token, &name, &tracks).await }
+        })
+        .await
+    }
+
+    pub async fn shares(&self) -> Result<ShareList, ApiError> {
+        self.authorized(|api, token| async move { api.shares(&token).await }).await
+    }
+
+    pub async fn delete_share(&self, share_id: &str) -> Result<(), ApiError> {
+        let share_id = share_id.to_owned();
+        self.authorized(|api, token| {
+            let share_id = share_id.clone();
+            async move { api.delete_share(&token, &share_id).await }
+        })
+        .await
+    }
+
+    /// Снимок по ссылке на любом сервере, без входа.
+    pub async fn open_share(&self, base_url: &str, share_id: &str) -> Result<ShareDto, ApiError> {
+        Api::new(base_url, &self.identity.client_version, &self.identity.language).share(share_id).await
     }
 
     /// Удалить аккаунт (пароль — повторная проверка на сервере): сессия заканчивается.

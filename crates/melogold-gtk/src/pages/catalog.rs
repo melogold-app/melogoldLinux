@@ -219,6 +219,7 @@ pub fn album_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage {
                     }
                 });
             }
+            crate::share::add_copy_link(window, &header, melogold_core::share_links::album_url(&album.album.browse_id));
             content.append(&header.root);
             content.append(&spacer());
             content.append(&track_list(window, &album.tracks, usize::MAX, TrackContext::List));
@@ -271,6 +272,7 @@ pub fn playlist_page(window: &MainWindow, playlist_id: &str) -> adw::NavigationP
             let play = Rc::clone(&whole);
             header.add_button(tr("PlayAll"), "media-playback-start-symbolic", true, move || play(false));
             header.add_button(tr("Shuffle"), "media-playlist-shuffle-symbolic", false, move || whole(true));
+            crate::share::add_copy_link(window, &header, melogold_core::share_links::playlist_url(&playlist.playlist.playlist_id));
             content.append(&header.root);
             content.append(&spacer());
             let list = TrackList::new(window, &playlist.tracks, usize::MAX, TrackContext::List);
@@ -354,6 +356,7 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
                     });
                 });
             bookmark_state(window, &subscribe, move |library| library.is_artist_saved(&id).unwrap_or(false));
+            crate::share::add_copy_link(window, &header, melogold_core::share_links::artist_url(&artist.browse_id, artist.is_channel));
             content.append(&header.root);
             if let Some(text) = artist.description.as_deref().filter(|d| !d.is_empty()) {
                 content.append(&description(text));

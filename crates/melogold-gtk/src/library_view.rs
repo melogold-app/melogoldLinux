@@ -365,7 +365,7 @@ impl MainWindow {
             }
         }
         third.append_item(&item(tr("MenuOtherVersions"), "win.track-other-versions", None));
-        third.append_item(&item(tr("MenuCopyLink"), "win.track-copy-link", None));
+        third.append_item(&item(tr("LinuxCopyLink"), "win.track-copy-link", None));
         menu.append_section(None, &third);
 
         let removals = gio::Menu::new();
@@ -472,6 +472,7 @@ impl MainWindow {
         };
         self.window.add_action_entries([
             with_playlist("playlist-rename", |w, id| w.rename_playlist(id)),
+            with_playlist("playlist-copy-link", |w, id| w.share_local_playlist(id)),
             with_playlist("playlist-delete", |w, id| w.delete_playlist(id)),
         ]);
     }

@@ -1,0 +1,36 @@
+{
+  "entityUniqueId": "SPOTIFY_ALBUM::6eUW0wxWtzkFdaEFsTJto6",
+  "userCountry": "US",
+  "pageUrl": "https://album.link/s/6eUW0wxWtzkFdaEFsTJto6",
+  "entitiesByUniqueId": {
+    "SPOTIFY_ALBUM::6eUW0wxWtzkFdaEFsTJto6": {
+      "id": "6eUW0wxWtzkFdaEFsTJto6",
+      "type": "album",
+      "title": "Whenever You Need Somebody",
+      "artistName": "Rick Astley",
+      "thumbnailUrl": "https://i.scdn.co/image/ab67616d0000b273a",
+      "apiProvider": "spotify",
+      "platforms": ["spotify"]
+    },
+    "YOUTUBE_ALBUM::OLAK5uy_kAbCdEfGhIjKlMnOpQrStUvWxYz": {
+      "id": "OLAK5uy_kAbCdEfGhIjKlMnOpQrStUvWxYz",
+      "type": "album",
+      "title": "Whenever You Need Somebody",
+      "artistName": "Rick Astley",
+      "apiProvider": "youtube",
+      "platforms": ["youtubeMusic"]
+    }
+  },
+  "linksByPlatform": {
+    "spotify": {
+      "country": "US",
+      "url": "https://open.spotify.com/album/6eUW0wxWtzkFdaEFsTJto6",
+      "entityUniqueId": "SPOTIFY_ALBUM::6eUW0wxWtzkFdaEFsTJto6"
+    },
+    "youtubeMusic": {
+      "country": "US",
+      "url": "https://music.youtube.com/playlist?list=OLAK5uy_kAbCdEfGhIjKlMnOpQrStUvWxYz",
+      "entityUniqueId": "YOUTUBE_ALBUM::OLAK5uy_kAbCdEfGhIjKlMnOpQrStUvWxYz"
+    }
+  }
+}

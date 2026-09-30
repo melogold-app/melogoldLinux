@@ -341,7 +341,12 @@ pub fn maybe_start(window: &MainWindow) {
     steps.extend(lyrics_steps());
     steps.extend(crate::snapshot_features::steps());
     if std::env::var("MELOGOLD_SNAPSHOT_ACCOUNT").as_deref() == Ok("1") {
-        steps.extend(account_steps());
+        // Живые шаги заданий 0010–0011 — до последнего шага, который удаляет временный аккаунт.
+        let mut account = account_steps();
+        let deletion = account.pop();
+        account.extend(crate::snapshot_features::account_steps());
+        account.extend(deletion);
+        steps.extend(account);
     }
     // Только нужные шаги: MELOGOLD_SNAPSHOT_STEPS=17,08 — по началу имени.
     if let Ok(only) = std::env::var("MELOGOLD_SNAPSHOT_STEPS") {

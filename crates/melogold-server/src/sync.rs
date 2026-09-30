@@ -598,21 +598,7 @@ fn put_tracks(map: &mut Map<String, Value>, tracks: &[Track]) {
     let list: Vec<Value> = tracks
         .iter()
         .map(|track| {
-            let input = TrackInput {
-                video_id: track.video_id.clone(),
-                // Заглушка (название = videoId) — без названия: сервер оставит своё.
-                title: (track.title != track.video_id).then(|| track.title.clone()),
-                artists_text: track.artists_text.clone(),
-                artists: (!track.artists.is_empty())
-                    .then(|| track.artists.iter().map(|a: &ArtistRef| ArtistRefDto { id: a.id.clone(), name: a.name.clone() }).collect()),
-                album_id: track.album_id.clone(),
-                album_title: track.album_title.clone(),
-                duration_ms: track.duration_ms,
-                duration_text: track.duration_text.clone(),
-                thumbnail_url: track.thumbnail_url.clone(),
-                explicit: track.explicit.then_some(true),
-                video_type: track.video_type.clone(),
-            };
+            let input = TrackInput::from_track(track);
             serde_json::to_value(input).unwrap_or(Value::Null)
         })
         .collect();

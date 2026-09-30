@@ -3,6 +3,7 @@
 //! Запросы не отправляют пустых необязательных полей.
 
 use melogold_core::lyrics::sync_rules::LyricsPayload;
+use melogold_core::music::{ArtistRef, Track};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -57,6 +58,46 @@ pub struct TrackInput {
     pub explicit: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_type: Option<String>,
+}
+
+impl TrackInput {
+    /// Метаданные трека для сервера. Заглушка (название = `videoId`) — без названия: сервер оставит своё.
+    pub fn from_track(track: &Track) -> TrackInput {
+        TrackInput {
+            video_id: track.video_id.clone(),
+            title: (track.title != track.video_id).then(|| track.title.clone()),
+            artists_text: track.artists_text.clone(),
+            artists: (!track.artists.is_empty())
+                .then(|| track.artists.iter().map(|a: &ArtistRef| ArtistRefDto { id: a.id.clone(), name: a.name.clone() }).collect()),
+            album_id: track.album_id.clone(),
+            album_title: track.album_title.clone(),
+            duration_ms: track.duration_ms,
+            duration_text: track.duration_text.clone(),
+            thumbnail_url: track.thumbnail_url.clone(),
+            explicit: track.explicit.then_some(true),
+            video_type: track.video_type.clone(),
+        }
+    }
+}
+
+impl TrackDto {
+    /// Трек для показа: как его прислал сервер (пустое название — заглушка `videoId`).
+    pub fn to_track(&self) -> Track {
+        Track {
+            video_id: self.video_id.clone(),
+            title: if self.title.trim().is_empty() { self.video_id.clone() } else { self.title.clone() },
+            artists_text: self.artists_text.clone(),
+            artists: self.artists.iter().map(|a| ArtistRef { id: a.id.clone(), name: a.name.clone() }).collect(),
+            album_id: self.album_id.clone(),
+            album_title: self.album_title.clone(),
+            duration_ms: self.duration_ms,
+            duration_text: self.duration_text.clone(),
+            thumbnail_url: self.thumbnail_url.clone(),
+            explicit: self.explicit,
+            video_type: self.video_type.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
@@ -349,6 +390,33 @@ pub struct LinkPollResponse {
     pub approver_device: Option<LinkApprover>,
     pub verify_code: Option<String>,
     pub session: Option<AuthSession>,
+}
+
+// ── ссылки на свои плейлисты (§4.11) ──
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShareCreated {
+    pub share_id: String,
+    pub url: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShareDto {
+    pub share_id: String,
+    pub kind: String,
+    pub name: String,
+    pub url: String,
+    pub tracks: Vec<TrackDto>,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ShareList {
+    pub shares: Vec<ShareDto>,
 }
 
 // ── синхронизация (§4.7–§4.8) ──

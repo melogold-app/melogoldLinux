@@ -52,6 +52,8 @@ pub struct Services {
     pub lyrics_rejected: async_channel::Receiver<String>,
     /// `link.updated` (задание 0008): `linkId` привязки, которую сменило другое устройство.
     pub link_updates: tokio::sync::broadcast::Sender<String>,
+    /// Ссылки других сервисов → YouTube Music (задание 0010).
+    pub external: Arc<melogold_innertube::external::ExternalResolver>,
 }
 
 impl Services {
@@ -75,6 +77,7 @@ impl Services {
         }
         let client = InnerTube::new(&hl, &gl);
         let music = YouTubeMusic::new(client.clone());
+        let external = Arc::new(melogold_innertube::external::ExternalResolver::new(music.clone()));
         let clients_path = paths.stream_clients();
         let resolver = Arc::new(Resolver::new(client.clone(), stream_clients::load_saved(&clients_path)));
         let limit_mb = settings.get(&keys::STREAM_CACHE_MB);
@@ -243,6 +246,7 @@ impl Services {
             lyrics,
             lyrics_rejected,
             link_updates,
+            external,
         }
     }
 

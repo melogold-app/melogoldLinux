@@ -150,6 +150,41 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxLinkWaitingNew", "Ждём новое устройство…", "Waiting for the new device…"),
     ("LinuxLinkInviteExpired", "Код устарел. Покажите новый", "The code has expired. Show a new one"),
     ("LinuxLinkInviteCancelled", "Приглашение отменено", "The invitation was canceled"),
+    // ── задание 0010: ссылки ──
+    ("LinuxCopyLink", "Скопировать ссылку", "Copy link"),
+    ("LinuxMyLinks", "Мои ссылки", "My links"),
+    (
+        "LinuxMyLinksText",
+        "Плейлисты, которыми вы поделились. Удалённая ссылка перестаёт открываться",
+        "Playlists you shared. A deleted link stops opening",
+    ),
+    ("LinuxMyLinksEmpty", "Ссылок пока нет", "No links yet"),
+    (
+        "LinuxMyLinksEmptyText",
+        "Откройте меню своего плейлиста и выберите «Скопировать ссылку»",
+        "Open the menu of your playlist and choose “Copy link”",
+    ),
+    ("LinuxDeleteLink", "Удалить ссылку", "Delete link"),
+    ("LinuxLinkDeleted", "Ссылка удалена", "Link deleted"),
+    ("LinuxSharedPlaylist", "Плейлист по ссылке", "Playlist from a link"),
+    ("LinuxSaveToLibrary", "Сохранить в Библиотеку", "Save to Library"),
+    ("LinuxSavedToLibrary", "Сохранено в Библиотеку", "Saved to Library"),
+    ("LinuxShareGone", "Ссылка удалена или неверна", "The link was deleted or is invalid"),
+    ("LinuxShareFirst50", "Ссылка откроет первые 50 треков на YouTube", "The link opens the first 50 tracks on YouTube"),
+    (
+        "LinuxShareLimit",
+        "Слишком много ссылок. Удалите ненужные: Аккаунт › Мои ссылки",
+        "Too many links. Delete the ones you don't need: Account › My links",
+    ),
+    ("LinuxShareEmpty", "В плейлисте пока нет треков", "This playlist has no tracks yet"),
+    (
+        "LinuxImportPlaylistsLater",
+        "Импорт плейлистов из других сервисов появится позже",
+        "Importing playlists from other services is coming later",
+    ),
+    ("LinuxLinkOpening", "Открываем ссылку…", "Opening the link…"),
+    ("LinuxLinkKindTrack", "трек", "track"),
+    ("LinuxLinkKindArtist", "исполнитель", "artist"),
 ];
 
 static LANG: OnceLock<Lang> = OnceLock::new();

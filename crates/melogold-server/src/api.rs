@@ -300,6 +300,27 @@ impl Api {
         self.call_empty(reqwest::Method::POST, &format!("/auth/me/links/{link_id}/cancel"), Some(json!({})), Some(token), false).await
     }
 
+    // ── ссылки на свои плейлисты (§4.11) ──
+
+    /// Снимок своего плейлиста: до 1000 треков по порядку.
+    pub async fn create_share(&self, token: &str, name: &str, tracks: &[TrackInput]) -> Result<ShareCreated, ApiError> {
+        let body = json!({ "kind": "playlist", "name": name, "tracks": to_value(&tracks) });
+        self.call(reqwest::Method::POST, "/shares", Some(body), Some(token), false).await
+    }
+
+    pub async fn shares(&self, token: &str) -> Result<ShareList, ApiError> {
+        self.call(reqwest::Method::GET, "/shares", None, Some(token), false).await
+    }
+
+    pub async fn delete_share(&self, token: &str, share_id: &str) -> Result<(), ApiError> {
+        self.call_empty(reqwest::Method::DELETE, &format!("/shares/{share_id}"), None, Some(token), false).await
+    }
+
+    /// Снимок по ссылке — без входа: сервер ссылки может быть чужим.
+    pub async fn share(&self, share_id: &str) -> Result<ShareDto, ApiError> {
+        self.call(reqwest::Method::GET, &format!("/shares/{share_id}"), None, None, false).await
+    }
+
     // ── синхронизация (§4.7–§4.8) ──
 
     pub async fn merge_plan(&self, token: &str, playlists: &[MergePlanInput]) -> Result<MergePlanResponse, ApiError> {
