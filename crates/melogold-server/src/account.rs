@@ -20,6 +20,9 @@ use crate::session::{SessionStore, StoreKind, StoredSession};
 /// Сервер по умолчанию, пока нет официального домена (как у Android и Windows).
 pub const DEFAULT_SERVER_URL: &str = melogold_core::app_info::DEFAULT_SERVER_URL;
 
+/// Устройства аккаунта: `id` → (имя, платформа).
+pub type DeviceNames = HashMap<String, (String, String)>;
+
 const REFRESH_EARLY_MS: i64 = 60_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +71,9 @@ pub struct Account {
     inner: Mutex<Inner>,
     refresh: tokio::sync::Mutex<()>,
     listeners: Mutex<Vec<Listener>>,
+    /// Последний полученный список устройств и `deviceId` сеанса, для которого он получен: без сети
+    /// фильтр устройств берёт имена отсюда (задание 0012).
+    known_devices: Mutex<Option<(String, DeviceNames)>>,
 }
 
 impl Account {
@@ -88,6 +94,7 @@ impl Account {
             }),
             refresh: tokio::sync::Mutex::new(()),
             listeners: Mutex::default(),
+            known_devices: Mutex::default(),
         })
     }
 
@@ -354,13 +361,30 @@ impl Account {
     }
 
     pub async fn devices(&self) -> Result<DeviceListResponse, ApiError> {
-        self.authorized(|api, token| async move { api.devices(&token).await }).await
+        let list = self.authorized(|api, token| async move { api.devices(&token).await }).await?;
+        let session = self.lock().session.as_ref().map(|s| s.device_id.clone());
+        if let Some(session) = session {
+            let names = list.devices.iter().map(|d| (d.id.clone(), (d.name.clone(), d.platform.clone()))).collect();
+            *self.known_devices.lock().unwrap_or_else(|p| p.into_inner()) = Some((session, names));
+        }
+        Ok(list)
     }
 
-    /// Имена устройств аккаунта по `id` (фильтр Истории).
-    pub async fn device_names(&self) -> Result<HashMap<String, (String, String)>, ApiError> {
-        let list = self.devices().await?;
-        Ok(list.devices.into_iter().map(|d| (d.id.clone(), (d.name, d.platform))).collect())
+    /// Последний полученный список устройств этого сеанса аккаунта (без сети, пока свежего нет).
+    pub fn cached_device_names(&self) -> HashMap<String, (String, String)> {
+        let session = self.lock().session.as_ref().map(|s| s.device_id.clone());
+        match (&*self.known_devices.lock().unwrap_or_else(|p| p.into_inner()), session) {
+            (Some((cached_for, names)), Some(session)) if *cached_for == session => names.clone(),
+            _ => HashMap::new(),
+        }
+    }
+
+    /// Имена устройств аккаунта по `id` (фильтр Истории и Итогов); без сети — последний список.
+    pub async fn device_names(&self) -> HashMap<String, (String, String)> {
+        match self.devices().await {
+            Ok(list) => list.devices.into_iter().map(|d| (d.id.clone(), (d.name, d.platform))).collect(),
+            Err(_) => self.cached_device_names(),
+        }
     }
 
     pub async fn revoke(&self, device_id: &str, password: Option<&str>) -> Result<(), ApiError> {

@@ -9,6 +9,7 @@ mod app;
 mod backup_ui;
 mod catalog_widgets;
 mod desktop_integration;
+mod device_filter;
 mod images;
 mod library_view;
 mod localization;

@@ -165,7 +165,6 @@ pub static STRINGS: &[(&str, &str, &str)] = &[
     ("HistoryCleared", "История очищена", "History cleared"),
     ("HistoryDeviceAll", "Все устройства", "All devices"),
     ("HistoryDeviceChoose", "Чьи прослушивания показать", "Whose plays to show"),
-    ("HistoryDeviceOther", "Другое устройство", "Another device"),
     ("HistoryDeviceThis", "Это устройство", "This device"),
     ("HistoryEmpty", "Истории пока нет", "No history yet"),
     ("HistoryEmptyHint", "Послушайте что-нибудь — история появится здесь", "Play something and your history will show up here"),
