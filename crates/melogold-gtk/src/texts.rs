@@ -89,9 +89,18 @@ mod tests {
     #[test]
     fn bot_check_texts_in_both_languages() {
         let error = PlayerError { kind: StreamErrorKind::BotCheck, ..geo(None, None) };
-        assert!(error_text_in(Lang::Ru, &error).starts_with("YouTube просит подтвердить, что вы не бот: он временно не пускает адрес"));
-        assert!(error_text_in(Lang::Ru, &error).ends_with("без VPN — подождите несколько часов"));
-        assert!(error_text_in(Lang::En, &error).contains("With a VPN, pick another server"));
+        assert_eq!(
+            error_text_in(Lang::Ru, &error),
+            "YouTube просит подтвердить, что вы не бот: он временно не пускает адрес, с которого вы выходите в сеть. \
+             С VPN выберите другой сервер, без VPN — подождите несколько часов."
+        );
+        assert_eq!(
+            error_text_in(Lang::En, &error),
+            "YouTube asks to confirm you're not a bot: it is temporarily blocking the address you go online from. \
+             With a VPN, pick another server; without one, wait a few hours."
+        );
+        assert_eq!(tr(Lang::Ru, "LinuxPlayErrorBotShort"), "YouTube не пускает этот адрес — смените сервер VPN");
+        assert_eq!(tr(Lang::En, "LinuxPlayErrorBotShort"), "YouTube is blocking this address — switch VPN server");
         assert_eq!(error_notice_in(Lang::Ru, &error), error_text_in(Lang::Ru, &error));
     }
 

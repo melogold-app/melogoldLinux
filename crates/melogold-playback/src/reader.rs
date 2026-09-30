@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::resolver::{Resolver, StreamError, StreamErrorKind, StreamInfo};
+use crate::resolver::{Intent, Resolver, StreamError, StreamErrorKind, StreamInfo};
 use crate::song_cache::{Entry, SongCache};
 
 pub struct RangeReader {
@@ -25,6 +25,8 @@ pub struct RangeReader {
     cache: Option<Arc<Entry>>,
     songs: Option<Arc<SongCache>>,
     cancelled: AtomicBool,
+    /// Читает заготовка или загрузка: закрытый адрес YouTube не пробуется (задание 0013).
+    background: AtomicBool,
     cancel: tokio::sync::Notify,
 }
 
@@ -43,8 +45,14 @@ impl RangeReader {
             cache,
             songs,
             cancelled: AtomicBool::new(false),
+            background: AtomicBool::new(false),
             cancel: tokio::sync::Notify::new(),
         })
+    }
+
+    /// Заготовка и загрузки: свежий адрес не спрашивать, пока YouTube не пускает адрес.
+    pub fn set_background(&self) {
+        self.background.store(true, Ordering::SeqCst);
     }
 
     pub fn info(&self) -> StreamInfo {
@@ -126,6 +134,11 @@ impl RangeReader {
                             }
                             continue;
                         }
+                        // googlevideo считает запросы с адреса так же, как YouTube: 429 — проверка «вы не бот».
+                        429 => {
+                            self.resolver.close_address();
+                            return Err(StreamError::new(StreamErrorKind::BotCheck, "googlevideo 429"));
+                        }
                         416 => return Ok(Vec::new()),
                         200..=299 => {
                             let full = response
@@ -173,7 +186,8 @@ impl RangeReader {
     async fn refresh(&self, seen: u64) -> Result<(), StreamError> {
         let video_id = self.info().video_id;
         self.resolver.invalidate(&video_id);
-        let fresh = self.resolver.resolve(&video_id).await?;
+        let intent = if self.background.load(Ordering::SeqCst) { Intent::Background } else { Intent::User };
+        let fresh = self.resolver.resolve_as(&video_id, intent).await?;
         if let Ok(mut info) = self.info.lock() {
             // Сведения из кэша (громкость, длительность) остаются, если свежий ответ их не дал.
             let loudness = info.loudness_db;

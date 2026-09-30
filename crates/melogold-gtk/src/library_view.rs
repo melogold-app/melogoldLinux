@@ -236,6 +236,7 @@ impl MainWindow {
             Some(DownloadState::Completed) => Offline::Downloaded,
             Some(DownloadState::Downloading(progress)) => Offline::Downloading(progress),
             Some(DownloadState::Queued) => Offline::Downloading(None),
+            Some(DownloadState::Waiting) => Offline::Waiting,
             Some(DownloadState::Failed) => Offline::Failed,
             None if self.ctx.services.songs.is_complete(video_id) => Offline::Cached,
             None => Offline::None,
@@ -317,7 +318,7 @@ impl MainWindow {
             let (label, action) = match self.ctx.services.downloads.state(&track.video_id) {
                 None => (tr("MenuDownload").to_owned(), "win.track-download"),
                 Some(DownloadState::Completed) => (tr("MenuDownloadRemove").to_owned(), "win.track-download-remove"),
-                Some(DownloadState::Failed) => (tr("MenuDownloadRetry").to_owned(), "win.track-download"),
+                Some(DownloadState::Failed | DownloadState::Waiting) => (tr("MenuDownloadRetry").to_owned(), "win.track-download"),
                 Some(DownloadState::Downloading(Some(progress))) => {
                     (trf("MenuDownloadCancelFormat", &[&((progress * 100.0) as i64)]), "win.track-download-cancel")
                 }
@@ -415,7 +416,7 @@ impl MainWindow {
                 }
             }),
             with_target("track-download", |w, t| {
-                if matches!(w.ctx.services.downloads.state(&t.track.video_id), Some(DownloadState::Failed)) {
+                if matches!(w.ctx.services.downloads.state(&t.track.video_id), Some(DownloadState::Failed | DownloadState::Waiting)) {
                     w.ctx.services.downloads.retry(&t.track.video_id);
                 } else {
                     w.ctx.services.downloads.download(&[t.track]);
@@ -915,6 +916,8 @@ pub enum Offline {
     Cached,
     Downloaded,
     Downloading(Option<f64>),
+    /// Очередь ждёт: YouTube не пускает адрес (проверка «вы не бот»).
+    Waiting,
     Failed,
 }
 
@@ -924,6 +927,7 @@ pub fn show_mark(stack: &gtk::Stack, state: Offline) {
         Offline::Cached => "cached",
         Offline::Downloaded => "downloaded",
         Offline::Downloading(_) => "downloading",
+        Offline::Waiting => "waiting",
         Offline::Failed => "failed",
     };
     stack.set_visible_child_name(name);

@@ -5,17 +5,54 @@
 //! itag 140 (AAC в m4a). Адреса кэшируются (LRU 64) до `expire − 5 мин`; кэш сбрасывается при 403
 //! и смене сети. Одновременно — не больше двух извлечений, у каждого сторож 20 с. Не получилось —
 //! один запрос WEB объясняет почему (задание 0001), и в журнал уходит одна строка.
+//!
+//! Каждый лишний запрос приближает блокировку адреса для всех, кто за ним сидит (задание 0013):
+//! при удаче — один запрос `player`; проверка «вы не бот» (`LOGIN_REQUIRED`, 429) — сразу стоп:
+//! ни следующего клиента, ни диагноза. Адрес после неё считается закрытым 10 минут: фоновые
+//! запросы (заготовка, загрузки) в YouTube не ходят, действие пользователя пробует один запрос.
 
 use std::collections::VecDeque;
-use std::sync::{Mutex, RwLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
+
+use futures_util::future::BoxFuture;
 
 use melogold_core::text::now_ms;
-use melogold_innertube::player::{self, Playability};
-use melogold_innertube::{ClientProfile, ErrorKind, InnerTube};
+use melogold_innertube::player::{self, Playability, PlayerResponse};
+use melogold_innertube::{ClientProfile, ErrorKind, InnerTube, YouTubeError};
 
 const CACHE_SIZE: usize = 64;
 const WATCHDOG: Duration = Duration::from_secs(20);
+/// Сколько помнить, что YouTube закрыл адрес проверкой «вы не бот».
+const CLOSED_FOR: Duration = Duration::from_secs(10 * 60);
+
+/// Откуда резолвер берёт ответы YouTube: настоящий InnerTube или подмена в тестах.
+pub trait YouTubeApi: Send + Sync {
+    fn ensure_visitor(&self) -> BoxFuture<'_, Result<(), YouTubeError>>;
+    fn player<'a>(&'a self, profile: &'a ClientProfile, video_id: &'a str) -> BoxFuture<'a, Result<PlayerResponse, YouTubeError>>;
+    fn playability<'a>(&'a self, video_id: &'a str) -> BoxFuture<'a, Result<Playability, YouTubeError>>;
+}
+
+struct Live(InnerTube);
+
+impl YouTubeApi for Live {
+    fn ensure_visitor(&self) -> BoxFuture<'_, Result<(), YouTubeError>> {
+        Box::pin(self.0.ensure_visitor_data())
+    }
+    fn player<'a>(&'a self, profile: &'a ClientProfile, video_id: &'a str) -> BoxFuture<'a, Result<PlayerResponse, YouTubeError>> {
+        Box::pin(player::player(&self.0, profile, video_id, WATCHDOG))
+    }
+    fn playability<'a>(&'a self, video_id: &'a str) -> BoxFuture<'a, Result<Playability, YouTubeError>> {
+        Box::pin(player::playability(&self.0, video_id))
+    }
+}
+
+/// Кто просит поток: действие пользователя или фон (заготовка, загрузки).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Intent {
+    User,
+    Background,
+}
 
 /// Адрес аудиопотока трека и то, как по нему ходить.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -78,14 +115,19 @@ impl StreamError {
         Self { kind, message: message.into(), country: None, open_countries: None }
     }
 
-    /// Сколько раз повторить, прежде чем пропустить трек: сеть — 2, таймаут, бот и прочее — 1,
-    /// гео, возраст, недоступно — 0.
+    /// Сколько раз повторить, прежде чем пропустить трек: сеть — 2, таймаут и прочее — 1, проверка
+    /// «вы не бот», гео, возраст, недоступно — 0 (повтор только приближает блокировку адреса).
     pub fn retries(&self) -> u32 {
         match self.kind {
             StreamErrorKind::Network => 2,
-            StreamErrorKind::Timeout | StreamErrorKind::BotCheck | StreamErrorKind::Extractor => 1,
+            StreamErrorKind::Timeout | StreamErrorKind::Extractor => 1,
             _ => 0,
         }
+    }
+
+    /// Ошибка «адрес закрыт» без запроса в YouTube.
+    pub fn address_closed() -> Self {
+        Self::new(StreamErrorKind::BotCheck, "YouTube bot check: the address is closed, no request sent")
     }
 
     /// Очередь не перебирать: YouTube не пускает адрес (проверка «вы не бот»), а не этот трек, и
@@ -102,6 +144,9 @@ impl StreamError {
 
 pub struct Resolver {
     client: InnerTube,
+    api: Arc<dyn YouTubeApi>,
+    /// Когда YouTube закрыл адрес проверкой «вы не бот»; `None` — открыт.
+    closed_at: Mutex<Option<Instant>>,
     clients: RwLock<Vec<ClientProfile>>,
     cache: Mutex<VecDeque<StreamInfo>>,
     slots: tokio::sync::Semaphore,
@@ -109,7 +154,63 @@ pub struct Resolver {
 
 impl Resolver {
     pub fn new(client: InnerTube, clients: Vec<ClientProfile>) -> Self {
-        Self { client, clients: RwLock::new(clients), cache: Mutex::default(), slots: tokio::sync::Semaphore::new(2) }
+        let api = Arc::new(Live(client.clone()));
+        Self::with_api(client, clients, api)
+    }
+
+    /// С подменой YouTube (тесты плеера и загрузок).
+    pub fn with_api(client: InnerTube, clients: Vec<ClientProfile>, api: Arc<dyn YouTubeApi>) -> Self {
+        Self {
+            client,
+            api,
+            closed_at: Mutex::new(None),
+            clients: RwLock::new(clients),
+            cache: Mutex::default(),
+            slots: tokio::sync::Semaphore::new(2),
+        }
+    }
+
+    /// YouTube закрыл адрес проверкой «вы не бот» меньше 10 минут назад.
+    pub fn is_address_closed(&self) -> bool {
+        let Ok(mut closed) = self.closed_at.lock() else { return false };
+        match *closed {
+            Some(at) if at.elapsed() < CLOSED_FOR => true,
+            Some(_) => {
+                *closed = None;
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Проверка «вы не бот» (в том числе 429 googlevideo): помнить 10 минут.
+    pub fn close_address(&self) {
+        if let Ok(mut closed) = self.closed_at.lock() {
+            if closed.is_none_or(|at| at.elapsed() >= CLOSED_FOR) {
+                tracing::warn!("YouTube не пускает адрес: запросы в YouTube приостановлены на 10 минут");
+            }
+            *closed = Some(Instant::now());
+        }
+    }
+
+    /// Удача, смена сети или 10 минут: отметка снимается.
+    pub fn reopen_address(&self) {
+        if let Ok(mut closed) = self.closed_at.lock() {
+            *closed = None;
+        }
+    }
+
+    /// Сеть сменилась: адреса потоков привязаны к адресу клиента, а закрытие — к адресу выхода.
+    pub fn network_changed(&self) {
+        self.invalidate_all();
+        self.reopen_address();
+    }
+
+    #[cfg(test)]
+    fn backdate_closed(&self, by: Duration) {
+        if let Ok(mut closed) = self.closed_at.lock() {
+            *closed = closed.map(|at| at - by);
+        }
     }
 
     pub fn set_clients(&self, clients: Vec<ClientProfile>) {
@@ -122,21 +223,45 @@ impl Resolver {
         &self.client
     }
 
+    /// Поток по действию пользователя: при закрытом адресе — один пробный запрос.
     pub async fn resolve(&self, video_id: &str) -> Result<StreamInfo, StreamError> {
+        self.resolve_as(video_id, Intent::User).await
+    }
+
+    /// Поток для заготовки и загрузок: при закрытом адресе — сразу ошибка, без запроса.
+    pub async fn resolve_background(&self, video_id: &str) -> Result<StreamInfo, StreamError> {
+        self.resolve_as(video_id, Intent::Background).await
+    }
+
+    pub async fn resolve_as(&self, video_id: &str, intent: Intent) -> Result<StreamInfo, StreamError> {
         if let Some(cached) = self.cached(video_id) {
             return Ok(cached);
+        }
+        if intent == Intent::Background && self.is_address_closed() {
+            return Err(StreamError::address_closed());
         }
         let _slot = self.slots.acquire().await.map_err(|_| StreamError::new(StreamErrorKind::Extractor, "resolver closed"))?;
         if let Some(cached) = self.cached(video_id) {
             return Ok(cached);
+        }
+        // Пока ждали место, другой запрос мог узнать, что адрес закрыт.
+        if intent == Intent::Background && self.is_address_closed() {
+            return Err(StreamError::address_closed());
         }
         let clients = self.clients.read().map(|c| c.clone()).unwrap_or_default();
         let mut last = StreamError::new(StreamErrorKind::Extractor, "no stream clients");
         for profile in &clients {
             match tokio::time::timeout(WATCHDOG, self.ask_client(profile, video_id)).await {
                 Ok(Ok(info)) => {
+                    self.reopen_address();
                     self.remember(info.clone());
                     return Ok(info);
+                }
+                // Проверка «вы не бот»: следующий клиент и диагноз ответят так же — стоп.
+                Ok(Err(error)) if StreamError::stops_queue(error.kind) => {
+                    self.close_address();
+                    tracing::warn!(трек = video_id, клиент = %error.message, "поток не получен: проверка «вы не бот»");
+                    return Err(error);
                 }
                 // Причина в самом видео: другой клиент ответит тем же.
                 Ok(Err(error)) if error.is_final() => return Err(self.explain(video_id, error).await),
@@ -192,8 +317,8 @@ impl Resolver {
             let kind = if error.kind == ErrorKind::Blocked { StreamErrorKind::BotCheck } else { StreamErrorKind::Network };
             StreamError::new(kind, error.message)
         };
-        self.client.ensure_visitor_data().await.map_err(to_stream_error)?;
-        let response = player::player(&self.client, profile, video_id, WATCHDOG).await.map_err(to_stream_error)?;
+        self.api.ensure_visitor().await.map_err(to_stream_error)?;
+        let response = self.api.player(profile, video_id).await.map_err(to_stream_error)?;
         if response.status != "OK" {
             let text = format!("{} {}", response.status, response.reason.as_deref().unwrap_or_default());
             return Err(StreamError::new(classify(&text), format!("{}: {}", profile.name, text.trim())));
@@ -224,7 +349,7 @@ impl Resolver {
             return failure;
         }
         #[allow(unused_mut)]
-        let mut playability = player::playability(&self.client, video_id).await.ok();
+        let mut playability = self.api.playability(video_id).await.ok();
         #[cfg(debug_assertions)]
         if let (Some((id, country)), Some(p)) = (fake_geo(), playability.as_mut()) {
             if id == video_id {
@@ -309,7 +434,7 @@ pub fn diagnose(playability: Option<&Playability>, failure: &StreamError) -> Opt
 pub fn classify(message: &str) -> StreamErrorKind {
     let text = message.to_lowercase();
     let has = |s: &str| text.contains(s);
-    if has("not a bot") || has("confirm you’re not") || has("confirm you're not") || has("sign in to confirm") {
+    if has("not a bot") || has("не бот") || has("confirm you’re not") || has("confirm you're not") {
         StreamErrorKind::BotCheck
     } else if has("country") || has("region") || has("стране") || has("регион") {
         StreamErrorKind::Geo
@@ -327,6 +452,101 @@ pub fn classify(message: &str) -> StreamErrorKind {
         StreamErrorKind::BotCheck
     } else {
         StreamErrorKind::Extractor
+    }
+}
+
+/// Подмена YouTube для тестов резолвера, плеера и загрузок: считает запросы, ответ — по сценарию.
+#[cfg(test)]
+pub(crate) mod fake {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use melogold_innertube::player::AudioFormat;
+
+    type Script = Box<dyn Fn(&str, usize) -> Result<PlayerResponse, YouTubeError> + Send + Sync>;
+
+    pub struct FakeApi {
+        pub players: Mutex<Vec<String>>,
+        pub playabilities: AtomicUsize,
+        script: Script,
+    }
+
+    impl FakeApi {
+        /// `script(имя клиента, номер запроса с нуля)`.
+        pub fn new(script: impl Fn(&str, usize) -> Result<PlayerResponse, YouTubeError> + Send + Sync + 'static) -> Arc<FakeApi> {
+            Arc::new(FakeApi { players: Mutex::default(), playabilities: AtomicUsize::new(0), script: Box::new(script) })
+        }
+
+        pub fn player_calls(&self) -> usize {
+            self.players.lock().unwrap().len()
+        }
+
+        pub fn clients(&self) -> Vec<String> {
+            self.players.lock().unwrap().clone()
+        }
+    }
+
+    impl YouTubeApi for FakeApi {
+        fn ensure_visitor(&self) -> BoxFuture<'_, Result<(), YouTubeError>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn player<'a>(&'a self, profile: &'a ClientProfile, _video_id: &'a str) -> BoxFuture<'a, Result<PlayerResponse, YouTubeError>> {
+            let index = {
+                let mut calls = self.players.lock().unwrap();
+                calls.push(profile.name.clone());
+                calls.len() - 1
+            };
+            let answer = (self.script)(&profile.name, index);
+            Box::pin(async move { answer })
+        }
+        fn playability<'a>(&'a self, _video_id: &'a str) -> BoxFuture<'a, Result<Playability, YouTubeError>> {
+            self.playabilities.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(Playability::default()) })
+        }
+    }
+
+    /// Ответ YouTube: «Sign in to confirm you’re not a bot».
+    pub fn bot_check() -> Result<PlayerResponse, YouTubeError> {
+        Ok(PlayerResponse {
+            status: "LOGIN_REQUIRED".into(),
+            reason: Some("Sign in to confirm you’re not a bot".into()),
+            audio_formats: Vec::new(),
+            loudness_db: None,
+            duration_ms: None,
+        })
+    }
+
+    pub fn http_500() -> Result<PlayerResponse, YouTubeError> {
+        Err(YouTubeError::new(ErrorKind::Offline, "HTTP 500 from player"))
+    }
+
+    pub fn http_429() -> Result<PlayerResponse, YouTubeError> {
+        Err(YouTubeError::new(ErrorKind::Blocked, "HTTP 429 from player"))
+    }
+
+    pub fn playable() -> Result<PlayerResponse, YouTubeError> {
+        Ok(PlayerResponse {
+            status: "OK".into(),
+            reason: None,
+            audio_formats: vec![AudioFormat {
+                itag: 140,
+                url: "https://rr1.example.invalid/videoplayback?expire=4102444800&itag=140".into(),
+                mime_type: "audio/mp4; codecs=\"mp4a.40.2\"".into(),
+                content_length: Some(1000),
+                bitrate: Some(128_000),
+                loudness_db: Some(-1.0),
+            }],
+            loudness_db: None,
+            duration_ms: Some(180_000),
+        })
+    }
+
+    pub fn resolver(api: &Arc<FakeApi>, clients: Vec<ClientProfile>) -> Arc<Resolver> {
+        Arc::new(Resolver::with_api(InnerTube::new("en", "US"), clients, api.clone()))
+    }
+
+    pub fn two_clients() -> Vec<ClientProfile> {
+        vec![ClientProfile::vision_os(), ClientProfile::android_music()]
     }
 }
 
@@ -399,6 +619,7 @@ mod tests {
     fn classify_by_youtube_text() {
         assert_eq!(classify("LOGIN_REQUIRED Sign in to confirm you’re not a bot"), StreamErrorKind::BotCheck);
         assert!(StreamError::stops_queue(StreamErrorKind::BotCheck));
+        assert_eq!(StreamError::new(StreamErrorKind::BotCheck, "x").retries(), 0);
         assert!(!StreamError::stops_queue(StreamErrorKind::Geo));
         assert!(!StreamError::stops_queue(StreamErrorKind::Network));
         assert_eq!(classify("UNPLAYABLE Video unavailable"), StreamErrorKind::Unavailable);
@@ -413,5 +634,108 @@ mod tests {
         assert_eq!(expires_at("https://rr1.googlevideo.com/videoplayback?expire=2000&itag=140", now), 2_000_000 - 300_000);
         assert_eq!(expires_at("https://x/videoplayback?itag=140", now), now + 5 * 3_600_000);
         assert_eq!(expires_at("https://x/videoplayback?expire=1", now), now + 60_000);
+    }
+
+    use super::fake::{self, FakeApi};
+
+    #[tokio::test]
+    async fn bot_check_from_the_first_client_is_one_request() {
+        let api = FakeApi::new(|_, _| fake::bot_check());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        let error = resolver.resolve("a").await.unwrap_err();
+        assert_eq!(error.kind, StreamErrorKind::BotCheck);
+        assert_eq!(api.player_calls(), 1, "второй клиент не спрошен");
+        assert_eq!(api.playabilities.load(std::sync::atomic::Ordering::SeqCst), 0, "диагноз не спрошен");
+        assert_eq!(error.retries(), 0);
+        assert!(resolver.is_address_closed());
+    }
+
+    #[tokio::test]
+    async fn http_429_is_a_bot_check_and_http_500_asks_the_next_client() {
+        let api = FakeApi::new(|_, _| fake::http_429());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        assert_eq!(resolver.resolve("a").await.unwrap_err().kind, StreamErrorKind::BotCheck);
+        assert_eq!(api.player_calls(), 1);
+
+        let api = FakeApi::new(|name, _| if name == "VISIONOS" { fake::http_500() } else { fake::playable() });
+        let resolver = fake::resolver(&api, fake::two_clients());
+        let info = resolver.resolve("a").await.unwrap();
+        assert_eq!(api.clients(), ["VISIONOS", "ANDROID_MUSIC"], "после 500 спрошен второй клиент");
+        assert_eq!(info.source, "ANDROID_MUSIC");
+        assert!(!resolver.is_address_closed());
+    }
+
+    #[tokio::test]
+    async fn success_is_one_request_and_cached() {
+        let api = FakeApi::new(|_, _| fake::playable());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        let info = resolver.resolve("a").await.unwrap();
+        assert_eq!((info.loudness_db, info.duration_ms), (Some(-1.0), Some(180_000)), "метаданные из того же ответа");
+        resolver.resolve("a").await.unwrap();
+        assert_eq!(api.player_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn closed_address_stops_background_and_lets_the_user_try_once() {
+        let api = FakeApi::new(|_, _| fake::bot_check());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        resolver.resolve("a").await.unwrap_err();
+        assert_eq!(api.player_calls(), 1);
+        // Заготовка двух следующих треков — ноль запросов.
+        for id in ["b", "c"] {
+            assert_eq!(resolver.resolve_background(id).await.unwrap_err().kind, StreamErrorKind::BotCheck);
+        }
+        assert_eq!(api.player_calls(), 1);
+        // «Повторить» — ровно один.
+        resolver.resolve("b").await.unwrap_err();
+        assert_eq!(api.player_calls(), 2);
+        assert!(resolver.is_address_closed());
+    }
+
+    #[tokio::test]
+    async fn closed_address_still_serves_cached_urls_and_reopens_on_success() {
+        let opened = std::sync::atomic::AtomicBool::new(false);
+        let opened = Arc::new(opened);
+        let flag = Arc::clone(&opened);
+        let api =
+            FakeApi::new(move |_, _| if flag.load(std::sync::atomic::Ordering::SeqCst) { fake::playable() } else { fake::bot_check() });
+        let resolver = fake::resolver(&api, fake::two_clients());
+        opened.store(true, std::sync::atomic::Ordering::SeqCst);
+        resolver.resolve("cached").await.unwrap();
+        opened.store(false, std::sync::atomic::Ordering::SeqCst);
+        resolver.resolve("other").await.unwrap_err();
+        assert!(resolver.is_address_closed());
+        assert_eq!(resolver.resolve_background("cached").await.unwrap().video_id, "cached");
+        assert_eq!(api.player_calls(), 2);
+        // Удача пробного запроса снимает отметку.
+        opened.store(true, std::sync::atomic::Ordering::SeqCst);
+        resolver.resolve("other").await.unwrap();
+        assert!(!resolver.is_address_closed());
+    }
+
+    #[tokio::test]
+    async fn network_change_and_ten_minutes_reopen_the_address() {
+        let api = FakeApi::new(|_, _| fake::bot_check());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        resolver.resolve("a").await.unwrap_err();
+        assert!(resolver.is_address_closed());
+        resolver.network_changed();
+        assert!(!resolver.is_address_closed());
+        resolver.resolve("a").await.unwrap_err();
+        resolver.backdate_closed(Duration::from_secs(9 * 60));
+        assert!(resolver.is_address_closed());
+        resolver.backdate_closed(Duration::from_secs(2 * 60));
+        assert!(!resolver.is_address_closed());
+        let before = api.player_calls();
+        resolver.resolve_background("z").await.unwrap_err();
+        assert_eq!(api.player_calls(), before + 1, "через 10 минут запрос снова идёт");
+    }
+
+    #[test]
+    fn age_and_private_are_not_bot_checks() {
+        assert_eq!(classify("LOGIN_REQUIRED Sign in to confirm your age"), StreamErrorKind::Age);
+        assert_eq!(classify("LOGIN_REQUIRED This is a private video. Please sign in"), StreamErrorKind::Unavailable);
+        assert_eq!(classify("LOGIN_REQUIRED"), StreamErrorKind::BotCheck);
+        assert_eq!(classify("LOGIN_REQUIRED Подтвердите, что вы не бот"), StreamErrorKind::BotCheck);
     }
 }
