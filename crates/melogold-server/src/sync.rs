@@ -68,6 +68,7 @@ pub enum SyncStatus {
 type StatusListener = Box<dyn Fn(&SyncStatus) + Send + Sync>;
 type Listener = Box<dyn Fn() + Send + Sync>;
 type VideoListener = Box<dyn Fn(&str) + Send + Sync>;
+type EventListener = Box<dyn Fn(&LiveEvent) + Send + Sync>;
 
 pub struct LibrarySync {
     account: Arc<Account>,
@@ -78,6 +79,10 @@ pub struct LibrarySync {
     status_listeners: Mutex<Vec<StatusListener>>,
     devices_listeners: Mutex<Vec<Listener>>,
     rejected_listeners: Mutex<Vec<VideoListener>>,
+    /// Все живые события как есть: вход по коду (`link.updated`), пульт (`playback.*`).
+    event_listeners: Mutex<Vec<EventListener>>,
+    /// Разрешено ли управлять этим устройством с других: SSE с `remote=1` (§6, задание 0011).
+    remote_control: AtomicBool,
     /// Поколение сессии: смена аккаунта или сети останавливает живые события прошлой.
     session: AtomicU64,
     debounce: AtomicU64,
@@ -104,6 +109,8 @@ impl LibrarySync {
             status_listeners: Mutex::default(),
             devices_listeners: Mutex::default(),
             rejected_listeners: Mutex::default(),
+            event_listeners: Mutex::default(),
+            remote_control: AtomicBool::new(true),
             session: AtomicU64::new(0),
             debounce: AtomicU64::new(0),
             pending_local: AtomicBool::new(false),
@@ -144,6 +151,22 @@ impl LibrarySync {
     /// Свой текст не ушёл на сервер: он длиннее лимита (§4.10) и остаётся только здесь.
     pub fn subscribe_lyrics_rejected(&self, listener: impl Fn(&str) + Send + Sync + 'static) {
         self.rejected_listeners.lock().unwrap_or_else(|p| p.into_inner()).push(Box::new(listener));
+    }
+
+    /// Живое событие сервера (§6), любое. Слушатель не должен ждать: работа — в свой поток.
+    pub fn subscribe_events(&self, listener: impl Fn(&LiveEvent) + Send + Sync + 'static) {
+        self.event_listeners.lock().unwrap_or_else(|p| p.into_inner()).push(Box::new(listener));
+    }
+
+    /// «Управление с других устройств» (Настройки › Плеер): переоткрывает поток событий с `remote=1` или без.
+    pub fn set_remote_control(self: &Arc<Self>, allowed: bool) {
+        if self.remote_control.swap(allowed, Ordering::SeqCst) != allowed && matches!(self.account.state(), AccountState::SignedIn { .. }) {
+            self.on_account_changed(&self.account.state());
+        }
+    }
+
+    pub fn remote_control(&self) -> bool {
+        self.remote_control.load(Ordering::SeqCst)
     }
 
     fn lyrics_rejected(&self, video_id: &str) {
@@ -499,7 +522,8 @@ impl LibrarySync {
                     let this = Arc::clone(&this);
                     async move {
                         let runtime = this.runtime.clone();
-                        api.events(&token, |event| {
+                        let remote = this.remote_control();
+                        api.events(&token, remote, |event| {
                             if this.session.load(Ordering::SeqCst) == generation {
                                 let this = Arc::clone(&this);
                                 runtime.spawn(async move { this.on_live_event(event).await });
@@ -527,6 +551,9 @@ impl LibrarySync {
 
     async fn on_live_event(self: Arc<Self>, event: LiveEvent) {
         tracing::debug!(событие = %event.kind, "живое событие");
+        for listener in self.event_listeners.lock().unwrap_or_else(|p| p.into_inner()).iter() {
+            listener(&event);
+        }
         match event.kind.as_str() {
             "system.connected" | "sync.changed" | "lyrics.changed" => {
                 self.sync(true).await;

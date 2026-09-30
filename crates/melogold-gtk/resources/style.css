@@ -175,3 +175,22 @@ button.track-link:hover > label {
 .now-playing-page {
   transition: background-color 400ms ease-out, color 400ms ease-out;
 }
+
+/* ── задания 0008–0011 ── */
+
+/* Вход по коду: код и число крупно, в тональном контейнере. */
+.link-code-card {
+  background-color: alpha(@accent_bg_color, 0.16);
+  border-radius: 18px;
+  padding: 24px 12px;
+}
+.link-code-text {
+  font-family: monospace;
+  font-size: 45pt;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+.link-number-text {
+  font-size: 120pt;
+  font-weight: 800;
+}

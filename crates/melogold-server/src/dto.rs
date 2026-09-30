@@ -167,6 +167,10 @@ pub struct Features {
     pub account_deletion: Option<VersionFeature>,
     pub registration_pow: Option<VersionFeature>,
     pub lyrics: Option<VersionFeature>,
+    /// Ссылки на свои плейлисты (§4.11).
+    pub share: Option<VersionFeature>,
+    /// Управление другим устройством (§4.9 «Пульт»).
+    pub remote: Option<VersionFeature>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -290,6 +294,61 @@ pub struct LinkDetails {
 pub struct LinkDecisionResponse {
     pub link_id: String,
     pub status: String,
+}
+
+/// Ответ на `POST /auth/link/requests` и `POST /auth/me/links` (§4.6).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkCreated {
+    pub link_id: String,
+    pub mode: String,
+    pub server_id: String,
+    pub link_token: String,
+    pub user_code: String,
+    /// Только у режима `request`.
+    pub poll_secret: Option<String>,
+    pub expires_at: String,
+    pub long_poll_seconds: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkAccount {
+    pub login: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkApprover {
+    pub name: String,
+    pub platform: String,
+}
+
+/// Ответ `POST /auth/link/claim`: код принят, дальше нужно число на другом устройстве.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkClaimed {
+    pub link_id: String,
+    pub status: String,
+    pub poll_secret: String,
+    pub account: LinkAccount,
+    pub approver_device: LinkApprover,
+    pub verify_code: String,
+    pub expires_at: String,
+    pub long_poll_seconds: i64,
+}
+
+/// Ответ `POST /auth/link/poll`: `pending`, `claimed` или `completed` (с сессией).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinkPollResponse {
+    pub link_id: String,
+    pub status: String,
+    pub expires_at: String,
+    pub account: Option<LinkAccount>,
+    pub approver_device: Option<LinkApprover>,
+    pub verify_code: Option<String>,
+    pub session: Option<AuthSession>,
 }
 
 // ── синхронизация (§4.7–§4.8) ──

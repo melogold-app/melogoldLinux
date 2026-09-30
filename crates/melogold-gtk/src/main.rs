@@ -29,6 +29,7 @@ mod services;
 mod settings_store;
 mod shortcuts;
 mod snapshot;
+mod snapshot_features;
 mod strings_generated;
 mod texts;
 mod track_row;

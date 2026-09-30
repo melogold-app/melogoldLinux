@@ -401,6 +401,60 @@ impl Account {
         .await
     }
 
+    // ── вход по коду (§4.6, задание 0008) ──
+
+    /// Режим `request`: код этого (нового) устройства. Ответ несёт `pollSecret`.
+    pub async fn request_link(&self) -> Result<LinkCreated, ApiError> {
+        let device = self.device_for_server().await?;
+        self.api(None).create_link_request(&device).await
+    }
+
+    /// Режим `invite`: ввели код, который показывает вошедшее устройство.
+    pub async fn claim_link(&self, user_code: &str) -> Result<LinkClaimed, ApiError> {
+        let device = self.device_for_server().await?;
+        self.api(None).claim_link(user_code, &device).await
+    }
+
+    /// Длинный опрос новой привязки. При `completed` сессия берётся так же, как после входа по
+    /// паролю: то же хранилище, то же состояние, тот же первый синк по подписке.
+    pub async fn poll_link(&self, poll_secret: &str, known_status: &str) -> Result<LinkPollResponse, ApiError> {
+        let mut response = self.api(None).poll_link(poll_secret, known_status).await?;
+        if response.status == "completed" {
+            match response.session.take() {
+                Some(session) => self.save(session).await,
+                None => return Err(ApiError::new(200, "invalid_response", "completed without a session")),
+            }
+        }
+        Ok(response)
+    }
+
+    pub async fn cancel_link_request(&self, poll_secret: &str) -> Result<(), ApiError> {
+        self.api(None).cancel_link_request(poll_secret).await
+    }
+
+    /// «Показать код для нового устройства»: приглашение (`POST /auth/me/links`).
+    pub async fn create_invite(&self) -> Result<LinkCreated, ApiError> {
+        self.authorized(|api, token| async move { api.create_invite(&token).await }).await
+    }
+
+    pub async fn link(&self, link_id: &str) -> Result<LinkDetails, ApiError> {
+        let link_id = link_id.to_owned();
+        self.authorized(|api, token| {
+            let link_id = link_id.clone();
+            async move { api.link(&token, &link_id).await }
+        })
+        .await
+    }
+
+    pub async fn cancel_invite(&self, link_id: &str) -> Result<(), ApiError> {
+        let link_id = link_id.to_owned();
+        self.authorized(|api, token| {
+            let link_id = link_id.clone();
+            async move { api.cancel_invite(&token, &link_id).await }
+        })
+        .await
+    }
+
     /// Удалить аккаунт (пароль — повторная проверка на сервере): сессия заканчивается.
     pub async fn delete_account(&self, password: &str) -> Result<(), ApiError> {
         let password = password.to_owned();

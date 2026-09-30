@@ -91,13 +91,13 @@ pub fn device_icon(platform: Option<&str>) -> (&'static str, &'static str) {
 // ── общая разметка форм ──
 
 /// Страница-форма: узкая колонка, заголовок, пояснение, поля.
-struct Form {
-    page: adw::NavigationPage,
-    body: gtk::Box,
-    error: gtk::Label,
+pub(crate) struct Form {
+    pub(crate) page: adw::NavigationPage,
+    pub(crate) body: gtk::Box,
+    pub(crate) error: gtk::Label,
 }
 
-fn form(title: &str, description: Option<&str>) -> Form {
+pub(crate) fn form(title: &str, description: Option<&str>) -> Form {
     let body = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(18)
@@ -122,12 +122,12 @@ fn form(title: &str, description: Option<&str>) -> Form {
     Form { page, body, error }
 }
 
-fn show_error(label: &gtk::Label, text: Option<&str>) {
+pub(crate) fn show_error(label: &gtk::Label, text: Option<&str>) {
     label.set_label(text.unwrap_or_default());
     label.set_visible(text.is_some());
 }
 
-fn boxed_list(rows: &[&gtk::Widget]) -> gtk::ListBox {
+pub(crate) fn boxed_list(rows: &[&gtk::Widget]) -> gtk::ListBox {
     let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build();
     list.add_css_class("boxed-list");
     for row in rows {
@@ -138,13 +138,13 @@ fn boxed_list(rows: &[&gtk::Widget]) -> gtk::ListBox {
 
 /// Кнопка действия формы: на время запроса — крутилка вместо текста.
 #[derive(Clone)]
-struct ActionButton {
-    button: gtk::Button,
-    stack: gtk::Stack,
+pub(crate) struct ActionButton {
+    pub(crate) button: gtk::Button,
+    pub(crate) stack: gtk::Stack,
 }
 
 impl ActionButton {
-    fn new(label: &str, suggested: bool) -> ActionButton {
+    pub(crate) fn new(label: &str, suggested: bool) -> ActionButton {
         let stack = gtk::Stack::new();
         stack.add_named(&gtk::Label::new(Some(label)), Some("label"));
         stack.add_named(&adw::Spinner::new(), Some("busy"));
@@ -157,11 +157,11 @@ impl ActionButton {
         ActionButton { button, stack }
     }
 
-    fn set_busy(&self, busy: bool) {
+    pub(crate) fn set_busy(&self, busy: bool) {
         self.stack.set_visible_child_name(if busy { "busy" } else { "label" });
     }
 
-    fn busy(&self) -> bool {
+    pub(crate) fn busy(&self) -> bool {
         self.stack.visible_child_name().as_deref() == Some("busy")
     }
 }
@@ -175,7 +175,7 @@ fn server_caption(window: &MainWindow) -> gtk::Label {
 }
 
 /// К корню Настроек — после входа, выхода, смены сервера.
-fn back_to_root(window: &MainWindow) {
+pub(crate) fn back_to_root(window: &MainWindow) {
     let nav = window.nav(melogold_core::settings::Tab::Settings);
     if let Some(root) = nav.navigation_stack().item(0).and_downcast::<adw::NavigationPage>() {
         nav.pop_to_page(&root);
@@ -200,6 +200,16 @@ pub fn sign_in_page(window: &MainWindow) -> adw::NavigationPage {
     f.body.append(&f.error);
     let submit = ActionButton::new(tr("AccountSignIn"), true);
     f.body.append(&submit.button);
+    // Вход по коду (задание 0008): второстепенная кнопка под «Войти».
+    let by_code = gtk::Button::builder().label(tr("LinuxLinkSignInByCode")).halign(gtk::Align::Center).width_request(200).build();
+    by_code.add_css_class("pill");
+    f.body.append(&by_code);
+    let weak = window.downgrade();
+    by_code.connect_clicked(move |_| {
+        if let Some(window) = weak.upgrade() {
+            window.push(&super::link_code::sign_in_by_code_page(&window));
+        }
+    });
     let register = gtk::Button::builder().label(tr("AccountNoAccount")).halign(gtk::Align::Center).build();
     register.add_css_class("flat");
     f.body.append(&register);
@@ -644,18 +654,20 @@ type Action = Rc<
 
 /// Окно в несколько шагов (`AdwAlertDialog` закрывается при любом ответе): заголовок, пояснение,
 /// содержимое, ошибка и кнопки «Отмена» · действие.
-struct StepDialog {
-    dialog: adw::Dialog,
-    text: gtk::Label,
-    body: gtk::Box,
-    error: gtk::Label,
-    buttons: gtk::Box,
-    cancel: gtk::Button,
-    confirm: ActionButton,
+pub(crate) struct StepDialog {
+    pub(crate) dialog: adw::Dialog,
+    pub(crate) text: gtk::Label,
+    pub(crate) body: gtk::Box,
+    pub(crate) error: gtk::Label,
+    pub(crate) buttons: gtk::Box,
+    pub(crate) cancel: gtk::Button,
+    pub(crate) confirm: ActionButton,
+    /// Число выбрано или «Отклонить» нажато: приглашение больше не отменяется (задание 0008).
+    pub(crate) decided: Cell<bool>,
 }
 
 impl StepDialog {
-    fn new(title: &str, text: &str, confirm: &str, destructive: bool) -> StepDialog {
+    pub(crate) fn new(title: &str, text: &str, confirm: &str, destructive: bool) -> StepDialog {
         let text_label = gtk::Label::builder().label(text).wrap(true).xalign(0.0).build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
         let error = gtk::Label::builder().xalign(0.0).wrap(true).visible(false).build();
@@ -693,7 +705,7 @@ impl StepDialog {
                 dialog.close();
             }
         });
-        StepDialog { dialog, text: text_label, body, error, buttons, cancel, confirm }
+        StepDialog { dialog, text: text_label, body, error, buttons, cancel, confirm, decided: Cell::new(false) }
     }
 }
 
@@ -801,6 +813,18 @@ pub fn link_device_dialog(window: &MainWindow) {
     step.confirm.button.connect_clicked(move |_| r());
     let r = Rc::clone(&resolve);
     code.connect_entry_activated(move |_| r());
+    // «Показать код для нового устройства» (режим invite): под «Продолжить».
+    let show_code = gtk::Button::builder().label(tr("LinuxLinkShowCode")).halign(gtk::Align::Center).build();
+    show_code.add_css_class("flat");
+    if let Some(content) = step.buttons.parent().and_downcast::<gtk::Box>() {
+        content.append(&show_code);
+    }
+    let (weak, step_ref) = (window.downgrade(), Rc::clone(&step));
+    show_code.connect_clicked(move |_| {
+        if let Some(window) = weak.upgrade() {
+            super::link_code::show_invite(&window, &step_ref);
+        }
+    });
     step.dialog.present(Some(&window.window));
     code.grab_focus();
 }
@@ -818,7 +842,7 @@ fn link_error(error: &ApiError) -> &'static str {
 
 /// Какое устройство просится: значок, имя, модель и система, та же ли сеть, сколько ещё действует
 /// код; три числа и «Отклонить».
-fn show_link_device(window: &MainWindow, step: &Rc<StepDialog>, link: &LinkDetails) {
+pub(crate) fn show_link_device(window: &MainWindow, step: &Rc<StepDialog>, link: &LinkDetails) {
     while let Some(child) = step.body.first_child() {
         step.body.remove(&child);
     }
@@ -885,6 +909,7 @@ fn decide(window: &MainWindow, step: &Rc<StepDialog>, link: &LinkDetails, verify
         return;
     }
     step.body.set_sensitive(false);
+    step.decided.set(true);
     let account = Arc::clone(&window.ctx.services.account);
     let (link_id, verify) = (link.link_id.clone(), verify.map(str::to_owned));
     let approve = verify.is_some();
@@ -916,6 +941,8 @@ fn decide(window: &MainWindow, step: &Rc<StepDialog>, link: &LinkDetails, verify
             }
             Err(e) => {
                 show_error(&step.error, Some(link_error(&e)));
+                // Решение не дошло (нет связи и т. п.): приглашение ещё живо и при закрытии отменяется.
+                step.decided.set(e.code == "link_verify_mismatch");
                 if e.code == "link_verify_mismatch" {
                     // После «число не совпало» выбирать больше нечего: остаётся только закрыть.
                     step.body.set_visible(false);
