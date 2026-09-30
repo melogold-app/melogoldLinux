@@ -282,6 +282,11 @@ fn build_mark(stack: &gtk::Stack) {
     let progress = gtk::DrawingArea::builder().content_width(16).content_height(16).build();
     progress.set_tooltip_text(Some(tr("MenuDownloadCancel")));
     stack.add_named(&progress, Some("downloading"));
+    // Очередь ждёт, пока YouTube не пускает адрес: не сбой, причина — в подсказке.
+    let waiting = gtk::Image::from_icon_name("media-playback-pause-symbolic");
+    waiting.set_tooltip_text(Some(tr("LinuxPlayErrorBotShort")));
+    waiting.update_property(&[gtk::accessible::Property::Label(tr("LinuxPlayErrorBotShort"))]);
+    stack.add_named(&waiting, Some("waiting"));
     let failed = gtk::Image::from_icon_name("dialog-error-symbolic");
     failed.add_css_class("error");
     failed.set_tooltip_text(Some(tr("MenuDownloadRetry")));

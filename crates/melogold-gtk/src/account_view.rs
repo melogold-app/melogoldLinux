@@ -88,10 +88,15 @@ impl MainWindow {
         let monitor = gio::NetworkMonitor::default();
         let sync = Arc::clone(&services.sync);
         let handle = services.handle();
+        let downloads = Arc::clone(&services.downloads);
         monitor.connect_network_changed(move |_, available| {
             let sync = Arc::clone(&sync);
             let _guard = handle.enter();
             sync.network_changed(available);
+            // Смена сети — другой адрес выхода: отметка «YouTube не пускает» снимается, загрузки идут дальше.
+            if available {
+                downloads.network_changed();
+            }
         });
     }
 

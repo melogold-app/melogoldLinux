@@ -40,11 +40,15 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     (
         "LinuxPlayErrorBot",
         "YouTube просит подтвердить, что вы не бот: он временно не пускает адрес, с которого вы выходите в сеть. \
-         С VPN выберите другой сервер, без VPN — подождите несколько часов",
+         С VPN выберите другой сервер, без VPN — подождите несколько часов.",
         "YouTube asks to confirm you're not a bot: it is temporarily blocking the address you go online from. \
-         With a VPN, pick another server; without one, wait a few hours",
+         With a VPN, pick another server; without one, wait a few hours.",
     ),
-    ("LinuxPlayErrorBotShort", "YouTube просит подтвердить, что вы не бот", "YouTube asks to confirm you're not a bot"),
+    (
+        "LinuxPlayErrorBotShort",
+        "YouTube не пускает этот адрес — смените сервер VPN",
+        "YouTube is blocking this address — switch VPN server",
+    ),
     ("LinuxAppLanguage", "Язык приложения", "App language"),
     ("LinuxLanguageRestart", "Язык сменится после перезапуска Melogold", "The language changes after Melogold restarts"),
     ("LinuxAbout", "О Melogold", "About Melogold"),

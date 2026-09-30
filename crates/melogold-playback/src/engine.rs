@@ -2,10 +2,12 @@
 //! автовоспроизведение. Живёт отдельной задачей tokio: окно и MPRIS шлют ей команды
 //! ([`Command`]) и получают события ([`Event`]); позицию спрашивают напрямую у конвейера.
 //!
-//! Ошибки — по классам: сеть — 2 повтора (через 1 и 3 с), таймаут и бот — 1, гео, возраст,
+//! Ошибки — по классам: сеть — 2 повтора (через 1 и 3 с), таймаут — 1, гео, возраст,
 //! недоступно — сразу пропуск с причиной; после трёх пропусков подряд воспроизведение
-//! останавливается. Проверка «вы не бот» не пропускается — сразу остановка с карточкой. Адреса двух следующих треков резолвятся заранее, у ближайшего сразу
-//! открывается начало звука — переход по очереди не ждёт сети.
+//! останавливается. Проверка «вы не бот» — без повторов и без пропуска, сразу остановка с
+//! карточкой (задание 0013). Адреса двух следующих треков резолвятся заранее (пока YouTube не
+//! пускает адрес — не ходят в сеть), у ближайшего сразу открывается начало звука — переход по
+//! очереди не ждёт сети.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -20,7 +22,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::output::Output;
 use crate::reader::RangeReader;
-use crate::resolver::{Resolver, StreamError, StreamErrorKind, StreamInfo};
+use crate::resolver::{Intent, Resolver, StreamError, StreamErrorKind, StreamInfo};
 use crate::song_cache::SongCache;
 use crate::stream::TrackStream;
 
@@ -336,6 +338,8 @@ struct Engine {
     generation: u64,
     error: Option<PlayerError>,
     skips_in_row: u32,
+    /// Следующая загрузка — сама очередь дошла до трека, а не действие пользователя.
+    auto_advance: bool,
     played_session: HashSet<String>,
     preloaded: HashMap<String, Arc<TrackStream>>,
     preloading: HashSet<String>,
@@ -371,6 +375,7 @@ impl Engine {
             generation: 0,
             error: None,
             skips_in_row: 0,
+            auto_advance: false,
             played_session: HashSet::new(),
             preloaded: HashMap::new(),
             preloading: HashSet::new(),
@@ -710,7 +715,9 @@ impl Engine {
     fn next(&mut self, user_action: bool) {
         self.finish_listening();
         self.skips_in_row = 0;
+        self.auto_advance = !user_action;
         if !self.queue.move_next(user_action) {
+            self.auto_advance = false;
             // Конец очереди без автовоспроизведения: остановка на последнем треке в начале.
             if let Some(output) = &self.output {
                 output.pause();
@@ -796,6 +803,8 @@ impl Engine {
         self.set_status(Status::Resolving);
 
         let preloaded = self.preloaded.remove(&track.video_id);
+        // Пользователь просит — YouTube спрашивается (при закрытом адресе один раз); дошла очередь — нет.
+        let intent = if std::mem::take(&mut self.auto_advance) { Intent::Background } else { Intent::User };
         let (resolver, songs, downloads, http, tx) = (
             Arc::clone(&self.deps.resolver),
             Arc::clone(&self.deps.songs),
@@ -816,7 +825,7 @@ impl Engine {
             let result = loop {
                 let opened = match &preloaded {
                     Some(stream) if attempt == 0 && !stream.reader().is_cancelled() => Ok(Arc::clone(stream)),
-                    _ => open(&resolver, &songs, downloads.as_ref(), &http, &track.video_id).await,
+                    _ => open(&resolver, &songs, downloads.as_ref(), &http, &track.video_id, intent).await,
                 };
                 if opening.elapsed() > SLOW_STEP {
                     tracing::info!(трек = %track.video_id, мс = opening.elapsed().as_millis() as u64, успех = opened.is_ok(), "поток открывался долго");
@@ -1012,7 +1021,7 @@ impl Engine {
                     next.clone(),
                 );
                 tokio::spawn(async move {
-                    if let Ok(stream) = open(&resolver, &songs, downloads.as_ref(), &http, &video_id).await {
+                    if let Ok(stream) = open(&resolver, &songs, downloads.as_ref(), &http, &video_id, Intent::Background).await {
                         let _ = tx.send(Command::Preloaded { video_id, stream });
                     }
                 });
@@ -1025,7 +1034,7 @@ impl Engine {
             let resolver = Arc::clone(&self.deps.resolver);
             tokio::spawn(async move {
                 // Ошибка всплывёт при переходе на трек — там её и обработаем.
-                let _ = resolver.resolve(&video_id).await;
+                let _ = resolver.resolve_background(&video_id).await;
             });
         }
     }
@@ -1223,6 +1232,7 @@ async fn open(
     downloads: Option<&Arc<SongCache>>,
     http: &reqwest::Client,
     video_id: &str,
+    intent: Intent,
 ) -> Result<Arc<TrackStream>, StreamError> {
     let downloaded = downloads.and_then(|store| store.complete(video_id).map(|info| (Arc::clone(store), info)));
     let (store, info) = match downloaded {
@@ -1237,15 +1247,78 @@ async fn open(
             }
             None => {
                 tracing::debug!(трек = %video_id, "открываю из сети");
-                (Arc::clone(songs), resolver.resolve(video_id).await?)
+                (Arc::clone(songs), resolver.resolve_as(video_id, intent).await?)
             }
         },
     };
     let entry = store.entry(&info);
     let reader = RangeReader::new(http.clone(), Arc::clone(resolver), info, Some((store, entry)));
+    if intent == Intent::Background {
+        reader.set_background();
+    }
     let result = TrackStream::open(Arc::clone(&reader)).await;
     if result.is_err() {
         reader.cancel();
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resolver::fake::{self, FakeApi};
+
+    fn track(id: &str) -> Track {
+        Track { video_id: id.into(), title: id.into(), ..Default::default() }
+    }
+
+    async fn until_error(events: &async_channel::Receiver<Event>) -> (State, bool) {
+        let mut skipped = false;
+        loop {
+            match tokio::time::timeout(Duration::from_secs(5), events.recv()).await.expect("плеер отвечает").expect("канал открыт")
+            {
+                Event::Skipped(_) => skipped = true,
+                Event::State(state) if state.status == Status::Error => return (*state, skipped),
+                _ => {}
+            }
+        }
+    }
+
+    /// Три трека, проверка «вы не бот» на первом: карточка, индекс не сдвинулся, плашки нет; один
+    /// запрос; «Повторить» — ровно один ещё.
+    #[tokio::test]
+    async fn bot_check_stops_on_the_card_without_skipping() {
+        let dir = std::env::temp_dir().join(format!("melogold-engine-test-{}", std::process::id()));
+        let api = FakeApi::new(|_, _| fake::bot_check());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        let deps = Deps {
+            resolver: Arc::clone(&resolver),
+            music: YouTubeMusic::new(resolver.client().clone()),
+            songs: SongCache::new(dir.join("songs"), 0),
+            downloads: None,
+            library: None,
+            http: reqwest::Client::new(),
+            settings: Settings::default(),
+            queue_path: None,
+        };
+        let player = start(&tokio::runtime::Handle::current(), deps);
+        let events = player.subscribe();
+        player.send(Command::PlayList { tracks: vec![track("a"), track("b"), track("c")], start: 0, shuffle: false });
+
+        let (state, skipped) = until_error(&events).await;
+        assert!(!skipped, "плашки «Пропущен…» нет");
+        assert_eq!(state.track.as_ref().map(|t| t.video_id.as_str()), Some("a"), "индекс не сдвинулся");
+        assert_eq!(state.error.as_ref().map(|e| e.kind), Some(StreamErrorKind::BotCheck));
+        assert!(!state.playing);
+        assert_eq!(api.player_calls(), 1, "ни повторов, ни следующего клиента, ни заготовки");
+        assert_eq!(api.playabilities.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        player.send(Command::Retry);
+        let (state, skipped) = until_error(&events).await;
+        assert!(!skipped);
+        assert_eq!(state.track.as_ref().map(|t| t.video_id.as_str()), Some("a"));
+        assert_eq!(api.player_calls(), 2, "«Повторить» — ровно один запрос");
+        player.send(Command::Shutdown);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
