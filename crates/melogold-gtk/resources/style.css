@@ -527,3 +527,197 @@ button.track-link:hover > label {
   font-size: 120pt;
   font-weight: 800;
 }
+
+/* ── задания 0009, 0012 ── */
+
+/* Итоги: карточка числа. */
+.stat-card {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background-color: var(--card-bg-color);
+  box-shadow: 0 0 0 1px var(--card-shade-color), 0 2px 8px -4px alpha(black, 0.12);
+}
+
+.stat-number {
+  font-size: 1.7em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-feature-settings: "tnum";
+}
+
+/* В узком окне (360 px) время прослушивания должно уместиться в половине ширины. */
+.compact-window .stat-card {
+  padding: 12px;
+}
+
+.compact-window .stat-number {
+  font-size: 1.35em;
+}
+
+.stat-hero .stat-number {
+  color: var(--accent-color);
+}
+
+.stat-delta {
+  font-weight: 700;
+  font-size: 0.92em;
+  color: var(--accent-color);
+}
+
+.stats-rank {
+  font-weight: 800;
+  font-feature-settings: "tnum";
+  opacity: 0.55;
+}
+
+/* Плитка «Итоги года готовы» над плитками Библиотеки. */
+button.wrapped-banner {
+  padding: 16px 20px;
+  border-radius: 20px;
+  margin-bottom: 4px;
+  color: white;
+  background-image: linear-gradient(120deg, #c061cb, #613583 55%, #1c71d8);
+  box-shadow: 0 10px 24px -12px alpha(black, 0.5);
+}
+
+button.wrapped-banner label {
+  font-weight: 500;
+}
+
+button.wrapped-banner label.title-3 {
+  font-weight: 800;
+}
+
+button.wrapped-banner:hover {
+  background-image: linear-gradient(120deg, #c061cb, #613583 55%, #1c71d8), image(alpha(white, 0.08));
+}
+
+/* Итоги года: карточки на всю страницу, цвета по кругу; текст всегда белый. */
+.wrapped-scroller {
+  background: none;
+}
+
+.wrapped-card {
+  padding: 64px 24px 84px 24px;
+  color: white;
+}
+
+.wrapped-card.c0 { background-image: linear-gradient(160deg, #3584e4, #1a5fb4 60%, #613583); }
+.wrapped-card.c1 { background-image: linear-gradient(160deg, #9141ac, #613583 60%, #1a5fb4); }
+.wrapped-card.c2 { background-image: linear-gradient(160deg, #e66100, #a51d2d 70%, #613583); }
+.wrapped-card.c3 { background-image: linear-gradient(160deg, #26a269, #1a5fb4 75%, #26456e); }
+.wrapped-card.c4 { background-image: linear-gradient(160deg, #c64600, #813d9c 70%, #1a5fb4); }
+.wrapped-card.c5 { background-image: linear-gradient(160deg, #1f8f83, #26a269 40%, #1a5fb4); }
+
+.wrapped-kicker {
+  font-weight: 700;
+  opacity: 0.8;
+  letter-spacing: 0.02em;
+}
+
+.wrapped-huge {
+  font-size: 64px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-feature-settings: "tnum";
+}
+
+.wrapped-big {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.wrapped-heading {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.wrapped-subheading {
+  font-size: 16px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.wrapped-track-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.wrapped-artist {
+  font-size: 18px;
+  opacity: 0.9;
+}
+
+.wrapped-note {
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.wrapped-rank {
+  font-size: 20px;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+
+.wrapped-row-title {
+  font-weight: 700;
+}
+
+.wrapped-row-subtitle,
+.wrapped-row-time {
+  opacity: 0.8;
+  font-size: 0.9em;
+}
+
+.wrapped-card .cover {
+  background-color: alpha(white, 0.16);
+}
+
+.wrapped-segment {
+  border-radius: 999px;
+  background-color: alpha(white, 0.3);
+  transition: background-color 200ms ease-out;
+}
+
+.wrapped-segment.done {
+  background-color: alpha(white, 0.95);
+}
+
+button.wrapped-control {
+  color: white;
+  background-color: alpha(black, 0.22);
+}
+
+button.wrapped-control:hover {
+  background-color: alpha(black, 0.34);
+}
+
+button.wrapped-control:disabled {
+  opacity: 0.35;
+}
+
+menubutton.wrapped-share > button {
+  min-height: 34px;
+  padding: 4px 18px;
+  border-radius: 999px;
+  color: #1a1a1a;
+  background-color: white;
+  box-shadow: 0 6px 16px -8px alpha(black, 0.6);
+}
+
+menubutton.wrapped-share > button:hover {
+  background-color: #f2f2f2;
+}
+
+@media (prefers-contrast: more) {
+  .wrapped-card,
+  button.wrapped-banner {
+    background-image: none;
+    background-color: #1a5fb4;
+  }
+  .stat-card {
+    box-shadow: none;
+  }
+}

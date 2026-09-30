@@ -340,6 +340,7 @@ pub fn maybe_start(window: &MainWindow) {
     let mut steps = steps;
     steps.extend(lyrics_steps());
     steps.extend(crate::snapshot_features::steps());
+    steps.extend(crate::snapshot_stats::steps());
     if std::env::var("MELOGOLD_SNAPSHOT_ACCOUNT").as_deref() == Ok("1") {
         // Живые шаги заданий 0010–0011 — до последнего шага, который удаляет временный аккаунт.
         let mut account = account_steps();

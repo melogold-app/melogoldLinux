@@ -80,7 +80,7 @@ pub enum DeviceFilter {
 
 impl DeviceFilter {
     /// Условие по `play_events` и значение параметра `?2`.
-    fn sql(&self) -> (&'static str, Option<String>) {
+    pub(crate) fn sql(&self) -> (&'static str, Option<String>) {
         match self {
             DeviceFilter::All => ("(?2 IS NULL OR 1)", None),
             DeviceFilter::This(own) => ("(device_id IS NULL OR device_id = ?2)", own.clone()),

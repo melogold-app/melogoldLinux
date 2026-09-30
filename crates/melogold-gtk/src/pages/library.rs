@@ -23,14 +23,14 @@ use crate::widgets::{size_text, StateView};
 use crate::window::MainWindow;
 
 /// Прокручиваемая страница: над содержимым — заголовок и строка фильтра, содержимое — с состояниями.
-struct Page {
-    page: adw::NavigationPage,
+pub(crate) struct Page {
+    pub(crate) page: adw::NavigationPage,
     body: gtk::Box,
-    content: gtk::Box,
-    state: StateView,
+    pub(crate) content: gtk::Box,
+    pub(crate) state: StateView,
 }
 
-fn page(title: &str, tag: Option<&str>) -> Page {
+pub(crate) fn page(title: &str, tag: Option<&str>) -> Page {
     let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
     let state = StateView::new(&content);
     let body = gtk::Box::builder()
@@ -53,26 +53,26 @@ fn page(title: &str, tag: Option<&str>) -> Page {
 
 impl Page {
     /// Поставить виджет над содержимым (заголовок, фильтр).
-    fn above(&self, widget: &impl IsA<gtk::Widget>) {
+    pub(crate) fn above(&self, widget: &impl IsA<gtk::Widget>) {
         widget.insert_before(&self.body, Some(&self.state.root));
     }
 }
 
-fn title_label(text: &str) -> gtk::Label {
+pub(crate) fn title_label(text: &str) -> gtk::Label {
     let label = gtk::Label::builder().label(text).xalign(0.0).wrap(true).build();
     label.add_css_class("title-1");
     label.add_css_class("page-title");
     label
 }
 
-fn clear(container: &gtk::Box) {
+pub(crate) fn clear(container: &gtk::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
 }
 
 /// Перерисовка: сразу и при изменениях `mask`. Обработчик живёт, пока жива страница.
-fn live(window: &MainWindow, page: &adw::NavigationPage, mask: Change, refresh: impl Fn() + 'static) -> Rc<dyn Fn()> {
+pub(crate) fn live(window: &MainWindow, page: &adw::NavigationPage, mask: Change, refresh: impl Fn() + 'static) -> Rc<dyn Fn()> {
     let refresh: Rc<dyn Fn()> = Rc::new(refresh);
     window.library_view.listen(mask, &refresh);
     refresh();
@@ -273,7 +273,7 @@ fn track_list(window: &MainWindow, tracks: &[Track], context: RowContext, plays:
     TrackList::with_rows(window, tracks, usize::MAX, plays, context).list
 }
 
-fn heading(text: &str) -> gtk::Label {
+pub(crate) fn heading(text: &str) -> gtk::Label {
     let label = gtk::Label::builder().label(text).xalign(0.0).margin_top(12).build();
     label.add_css_class("title-4");
     label.add_css_class("shelf-title");
@@ -301,6 +301,10 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
         glib::spawn_future_local(async move {
             let (Some(window), Some((counts, all, downloaded, cached))) = (weak.upgrade(), task.await) else { return };
             clear(&content);
+            // С 1 декабря по 31 января — «Итоги 2026 готовы» (задание 0009).
+            if let Some(year) = wrapped_season_year_now() {
+                content.append(&wrapped_banner(&window, year));
+            }
             // Плитки коллекций по ширине окна, без пустоты справа (§5.4).
             let tiles = gtk::FlowBox::builder()
                 .selection_mode(gtk::SelectionMode::None)
@@ -317,11 +321,19 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
             };
             type Open = fn(&MainWindow) -> adw::NavigationPage;
             // Значок каждой коллекции — в своей цветной плитке, как в Настройках GNOME.
-            let entries: [(&str, &str, &str, String, Open); 6] = [
+            let entries: [(&str, &str, &str, String, Open); 7] = [
                 ("view-list-bullet-symbolic", "blue", tr("AllTracks"), plural("Tracks", all), all_tracks),
                 ("offline-filled-symbolic", "green", tr("Downloads"), downloads_text, downloads_page),
                 ("heart-filled-symbolic", "red", tr("Favorites"), plural("Tracks", counts.likes), favorites),
                 ("document-open-recent-symbolic", "orange", tr("History"), tr("HistoryHint").to_owned(), history),
+                // Задание 0009: Итоги — рядом с Историей.
+                (
+                    "starred-symbolic",
+                    "yellow",
+                    tr("LinuxStats"),
+                    format!("{} · {} · {}", tr("LinuxStatsWeek"), tr("LinuxStatsMonth"), tr("Year")),
+                    crate::pages::stats::page,
+                ),
                 ("media-optical-cd-audio-symbolic", "purple", tr("ResultsAlbums"), plural("Albums", counts.albums), saved_albums),
                 ("avatar-default-symbolic", "teal", tr("ArtistsAndChannels"), plural("Artists", counts.artists), saved_artists),
             ];
@@ -400,6 +412,52 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
         });
     });
     p.page
+}
+
+/// Год, о котором «Итоги готовы», по местной дате; `None` — вне сезона.
+fn wrapped_season_year_now() -> Option<i64> {
+    let now = glib::DateTime::now_local().ok()?;
+    // Снимки (только отладочная сборка): карточку можно увидеть и вне сезона.
+    if cfg!(debug_assertions) && std::env::var_os("MELOGOLD_SNAPSHOT_SEASON").is_some() {
+        return Some(i64::from(now.year()));
+    }
+    melogold_core::stats_window::wrapped_season_year(i64::from(now.year()), now.month() as u32)
+}
+
+/// Карточка «Итоги 2026 готовы» над плитками: открывает «Итоги года».
+fn wrapped_banner(window: &MainWindow, year: i64) -> gtk::Button {
+    let title = gtk::Label::builder()
+        .label(trf("LinuxWrappedReady", &[&year]))
+        .xalign(0.0)
+        .wrap(true)
+        .wrap_mode(gtk::pango::WrapMode::WordChar)
+        .max_width_chars(1)
+        .build();
+    title.add_css_class("title-3");
+    let text = gtk::Label::builder()
+        .label(tr("LinuxWrappedReadyText"))
+        .xalign(0.0)
+        .wrap(true)
+        .wrap_mode(gtk::pango::WrapMode::WordChar)
+        .max_width_chars(1)
+        .build();
+    let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).hexpand(true).build();
+    texts.append(&title);
+    texts.append(&text);
+    let star = gtk::Image::builder().icon_name("starred-symbolic").pixel_size(32).valign(gtk::Align::Center).build();
+    let content = gtk::Box::builder().spacing(16).build();
+    content.append(&star);
+    content.append(&texts);
+    content.append(&gtk::Image::builder().icon_name("go-next-symbolic").valign(gtk::Align::Center).build());
+    let button = gtk::Button::builder().child(&content).margin_bottom(4).build();
+    button.add_css_class("wrapped-banner");
+    let weak = window.downgrade();
+    button.connect_clicked(move |_| {
+        if let Some(window) = weak.upgrade() {
+            window.push(&crate::wrapped::page(&window, year));
+        }
+    });
+    button
 }
 
 fn tile(
@@ -608,6 +666,20 @@ pub fn history(window: &MainWindow) -> adw::NavigationPage {
     let title = title_label(tr("History"));
     title.set_hexpand(true);
     top.append(&title);
+    // Задание 0009: «Итоги» — в панели Истории.
+    // Со значком, без подписи: в окне 360 px рядом с «Очистить историю…» подписи уже не хватает места.
+    let stats_button =
+        gtk::Button::builder().icon_name("starred-symbolic").tooltip_text(tr("LinuxStats")).valign(gtk::Align::Center).build();
+    stats_button.add_css_class("flat");
+    stats_button.add_css_class("circular");
+    stats_button.update_property(&[gtk::accessible::Property::Label(tr("LinuxStats"))]);
+    let weak = window.downgrade();
+    stats_button.connect_clicked(move |_| {
+        if let Some(window) = weak.upgrade() {
+            window.push(&crate::pages::stats::page(&window));
+        }
+    });
+    top.append(&stats_button);
     top.append(&clear_button);
     p.top.append(&top);
     let modes = adw::ToggleGroup::builder().halign(gtk::Align::Start).build();

@@ -8,6 +8,7 @@ pub mod link_code;
 pub mod search;
 pub mod settings;
 pub mod shares;
+pub mod stats;
 
 use adw::prelude::*;
 

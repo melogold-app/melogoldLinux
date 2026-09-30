@@ -35,12 +35,16 @@ mod share;
 mod shortcuts;
 mod snapshot;
 mod snapshot_features;
+mod snapshot_stats;
+mod stats_chart;
+mod stats_text;
 mod strings_generated;
 mod texts;
 mod track_row;
 mod updates;
 mod widgets;
 mod window;
+mod wrapped;
 
 use gtk::{gio, glib};
 
