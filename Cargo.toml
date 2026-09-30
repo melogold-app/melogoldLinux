@@ -12,7 +12,7 @@ members = [
 
 [workspace.package]
 # Версия — только здесь (docs/PROMPT.md §3 «Обновления»), без суффиксов.
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
