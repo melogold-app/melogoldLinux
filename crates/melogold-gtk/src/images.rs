@@ -135,20 +135,17 @@ impl Images {
     }
 }
 
-/// Картинка из байтов; у кадра видео — без чёрных полей.
+/// Картинка из байтов: без обводки скана, у кадра видео — ещё и без полей любого цвета (задание 0014).
 fn decode(bytes: Vec<u8>, frame: bool) -> Option<gdk::Texture> {
     use gtk::prelude::*;
     let texture = gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok()?;
-    if !frame {
-        return Some(texture);
-    }
     let (width, height) = (texture.width() as usize, texture.height() as usize);
     let stride = width * 4;
     let mut data = vec![0u8; stride * height];
     // Формат выгрузки — ARGB32 cairo: B, G, R, A в памяти на little-endian; альфа не нужна.
     texture.download(&mut data, stride);
     let pixels = melogold_core::frame_bars::Pixels { data: &data, width, height, stride, channels: [0, 1, 2] };
-    let Some(rect) = melogold_core::frame_bars::content(&pixels) else { return Some(texture) };
+    let Some(rect) = melogold_core::frame_bars::content(&pixels, frame) else { return Some(texture) };
     let mut cropped = Vec::with_capacity(rect.width * rect.height * 4);
     for y in rect.y..rect.y + rect.height {
         let start = y * stride + rect.x * 4;
