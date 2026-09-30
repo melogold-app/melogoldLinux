@@ -370,6 +370,9 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
                     .description(tr("NoPlaylistsHint"))
                     .build();
                 status.add_css_class("compact");
+                // У AdwStatusPage своя прокрутка, и в столбце страницы ей доставалась высота одного
+                // значка: заголовок и подсказка уходили под край. Высота — по всему содержимому.
+                status.set_height_request(230);
                 content.append(&status);
             } else {
                 let grid = gtk::FlowBox::builder()
