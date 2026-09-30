@@ -404,7 +404,7 @@ fn playlist_menu(window: &MainWindow) -> gio::Menu {
     menu.append_section(None, &new);
     let existing = gio::Menu::new();
     for playlist in window.library_view.playlists().iter().take(30) {
-        existing.append(Some(&playlist.name), Some(&format!("win.selection-add-to-playlist({})", playlist.id)));
+        existing.append_item(&crate::widgets::menu_item_i64(&playlist.name, "win.selection-add-to-playlist", playlist.id));
     }
     menu.append_section(None, &existing);
     menu

@@ -566,9 +566,9 @@ pub fn local_playlist(window: &MainWindow, id: i64) -> adw::NavigationPage {
     let name = window.library_view.playlists().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_default();
     let page = track_page(window, &name, Some(&removal_key_playlist(id)), "playlistItems", &[], RowContext::Playlist(id));
     let menu = gtk::gio::Menu::new();
-    menu.append(Some(tr("Rename")), Some(&format!("win.playlist-rename({id})")));
-    menu.append(Some(tr("LinuxCopyLink")), Some(&format!("win.playlist-copy-link({id})")));
-    menu.append(Some(tr("DeletePlaylist")), Some(&format!("win.playlist-delete({id})")));
+    menu.append_item(&crate::widgets::menu_item_i64(tr("Rename"), "win.playlist-rename", id));
+    menu.append_item(&crate::widgets::menu_item_i64(tr("LinuxCopyLink"), "win.playlist-copy-link", id));
+    menu.append_item(&crate::widgets::menu_item_i64(tr("DeletePlaylist"), "win.playlist-delete", id));
     let more = gtk::MenuButton::builder()
         .icon_name("view-more-symbolic")
         .menu_model(&menu)

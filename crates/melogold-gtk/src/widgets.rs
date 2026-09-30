@@ -114,6 +114,15 @@ pub async fn artwork_seed(texture: &gtk::gdk::Texture) -> Option<melogold_core::
     gtk::gio::spawn_blocking(move || melogold_core::artwork_colors::seed(&bytes, width, height, stride)).await.ok().flatten()
 }
 
+/// Пункт меню с числом для действия с параметром `x` (i64). Строкой «win.действие(5)» нельзя: GLib
+/// читает 5 как int32, действие с int64 такой пункт молча не принимает — так не работали «Добавить в
+/// плейлист» у выделенного и меню своего плейлиста.
+pub fn menu_item_i64(label: &str, action: &str, value: i64) -> gtk::gio::MenuItem {
+    let item = gtk::gio::MenuItem::new(Some(label), None);
+    item.set_action_and_target_value(Some(action), Some(&value.to_variant()));
+    item
+}
+
 /// Свои стили одного виджета (цвет плитки, отсвет шапки): поставщик живёт вместе с виджетом.
 pub fn widget_css(widget: &impl IsA<gtk::Widget>, css: &str) {
     let provider = gtk::CssProvider::new();
@@ -293,4 +302,20 @@ pub fn catalog_error(kind: melogold_innertube::ErrorKind) -> &'static str {
         melogold_innertube::ErrorKind::Parser => "ErrorParser",
         melogold_innertube::ErrorKind::Unknown => "ErrorUnknown",
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_items_carry_int64_targets() {
+        let item = menu_item_i64("Вечер", "win.playlist-delete", 5);
+        let target = item.attribute_value("target", None).expect("у пункта есть цель");
+        assert_eq!(target.type_(), glib::VariantTy::INT64);
+        assert_eq!(target.get::<i64>(), Some(5));
+        // Так было: число в строке действия — int32, и действие с int64 его не принимало.
+        let (_, parsed) = gtk::gio::Action::parse_detailed_name("win.playlist-delete(5)").expect("разбор");
+        assert_eq!(parsed.expect("цель").type_(), glib::VariantTy::INT32);
+    }
 }

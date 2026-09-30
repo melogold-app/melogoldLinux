@@ -246,6 +246,17 @@ pub fn maybe_start(window: &MainWindow) {
             1800,
         ),
         (
+            // Действия с выделенным работают и из меню плейлистов: пункт несёт id как int64.
+            "12g2-selection-add",
+            Box::new(|w| {
+                if let Some(id) = w.library_view.playlists().first().map(|p| p.id) {
+                    let target = id.to_variant();
+                    let _ = gtk::prelude::WidgetExt::activate_action(&w.window, "win.selection-add-to-playlist", Some(&target));
+                }
+            }),
+            800,
+        ),
+        (
             // Задание 0005: окно «Сведения о треке» у видео фаната.
             "12h-details",
             Box::new(|w| {
