@@ -43,9 +43,11 @@
 | Система | Файл |
 |---|---|
 | Любая с glibc 2.42+ (Fedora 43+, Ubuntu 25.10+, Arch, openSUSE Tumbleweed) | `Melogold-x86_64.AppImage` — обновляется сам |
-| Fedora 43+ | `melogold-*.rpm`: `sudo dnf install ./melogold-*.rpm` |
-| Ubuntu 25.10+, Debian testing | `melogold_*_amd64.deb`: `sudo apt install ./melogold_*_amd64.deb` |
+| Fedora 43+ | `melogold-*.rpm`: `sudo dnf install ./melogold-*.rpm` — дальше обновляется кнопкой «Обновить» |
+| Ubuntu 25.10+, Debian testing | `melogold_*_amd64.deb`: `sudo apt install ./melogold_*_amd64.deb` — дальше обновляется кнопкой «Обновить» |
 | Ubuntu 24.04, Debian 13, Mint 22 и любая с Flatpak | `Melogold.flatpak`: `flatpak install --user Melogold.flatpak` |
+
+deb и rpm (с 0.1.4) обновляются кнопкой «Обновить» в Настройках без пароля: окно запускает помощника `/usr/libexec/melogold/melogold-update` через polkit. Он ставит только последнюю официальную версию с GitHub. Flatpak открывает страницу релиза.
 
 AppImage при первом запуске сам добавляет себя в меню и открывает ссылки `melogold://`.
 
@@ -63,6 +65,7 @@ cargo test --workspace            # тесты ядра без экрана
 ./scripts/install-local.sh        # в ~/.local: ссылки melogold:// из браузера и значок в меню
 ./scripts/snapshots.sh            # снимки окна во вложенном weston, в target/snapshots
 ./scripts/package.sh              # AppImage, deb, rpm и update.json в dist/ (контейнер Fedora 43, podman)
+./scripts/update-e2e.sh           # живая проверка обновления deb и rpm в чистых Fedora 44 и Ubuntu 25.10 (podman)
 ./scripts/flatpak.sh              # dist/Melogold.flatpak (flatpak-builder в контейнере, рантайм GNOME 49)
 ./scripts/release.sh --publish    # проверки, пакеты и выпуск vX.Y.Z на GitHub
 ```
