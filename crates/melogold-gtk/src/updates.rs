@@ -4,7 +4,11 @@
 //!
 //! - AppImage обновляется сам: скачивание с ходом → проверка размера и SHA-256 → новый файл встаёт
 //!   на место старого → Melogold перезапускается;
-//! - deb, rpm и Flatpak сами себя не обновляют: «Скачать» ведёт на страницу релиза;
+//! - deb и rpm (запуск из `/usr/bin/melogold`, который принадлежит пакету) обновляются так же:
+//!   скачивание с ходом → `pkexec /usr/libexec/melogold/melogold-update <файл>` → перезапуск.
+//!   polkit-действие `app.melogold.Melogold.update` в активном сеансе не спрашивает пароль, а сам
+//!   помощник ставит только последнюю официальную версию (`crates/melogold-update`);
+//! - Flatpak и всё неопознанное: «Скачать» ведёт на страницу релиза;
 //! - отладочная сборка не обновляется совсем.
 
 use std::cell::{Cell, RefCell};
@@ -16,8 +20,7 @@ use gtk::prelude::*;
 use gtk::{gio, glib};
 use melogold_core::app_info::{self, VERSION};
 use melogold_core::settings::keys;
-use melogold_core::updates::{self, UpdateAsset, UpdateManifest};
-use sha2::{Digest, Sha256};
+use melogold_core::updates::{self, PackageFormat, UpdateAsset, UpdateManifest};
 
 use crate::app::AppContext;
 use crate::localization::{tr, trf};
@@ -34,6 +37,8 @@ pub enum UpdateState {
     Installing,
     /// Нет связи с GitHub или файл не прошёл проверку.
     Failed,
+    /// Помощник установки отказал: ключ строки с причиной.
+    InstallFailed(&'static str),
 }
 
 /// Как эта сборка обновляется.
@@ -42,8 +47,57 @@ pub enum Mode {
     Disabled,
     /// AppImage по этому пути заменяется новым.
     AppImage(PathBuf),
-    /// deb, rpm, Flatpak: ссылка на релиз.
+    /// deb или rpm, из которого запущен `/usr/bin/melogold`: скачать и поставить помощником.
+    System(PackageFormat),
+    /// Flatpak и неопознанное: ссылка на релиз.
     Package,
+}
+
+/// Бинарь пакета и помощник установки (`packaging/`).
+const SYSTEM_BINARY: &str = "/usr/bin/melogold";
+const HELPER: &str = "/usr/libexec/melogold/melogold-update";
+const PKEXEC: &str = "/usr/bin/pkexec";
+
+fn owns_binary(program: &str, args: &[&str]) -> bool {
+    std::process::Command::new(program)
+        .args(args)
+        .env("LANG", "C")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Формат пакета, которому принадлежит запущенный бинарь: только `/usr/bin/melogold` при помощнике
+/// и `pkexec` на месте; `rpm -qf` и `dpkg -S` отвечают, чей это файл.
+fn detect_system_format() -> Option<PackageFormat> {
+    let exe = std::env::current_exe().ok()?;
+    if exe != Path::new(SYSTEM_BINARY) || !Path::new(HELPER).is_file() || !Path::new(PKEXEC).is_file() {
+        return None;
+    }
+    if owns_binary("/usr/bin/rpm", &["-qf", SYSTEM_BINARY]) {
+        Some(PackageFormat::Rpm)
+    } else if owns_binary("/usr/bin/dpkg", &["-S", SYSTEM_BINARY]) {
+        Some(PackageFormat::Deb)
+    } else {
+        None
+    }
+}
+
+/// Строка причины по ответу помощника: код выхода и `error <имя>: …` в stdout.
+/// 126 и 127 — pkexec: нет права или окно авторизации закрыто.
+fn helper_failure(code: Option<i32>, stdout: &str) -> &'static str {
+    if matches!(code, Some(126 | 127)) {
+        return "LinuxUpdateInstallDenied";
+    }
+    let name = stdout.lines().rev().find_map(|line| line.strip_prefix("error ")).and_then(|rest| rest.split(':').next());
+    match name {
+        Some("checksum") => "LinuxUpdateInstallChecksum",
+        Some("network") => "LinuxUpdateInstallNetwork",
+        Some("not-newer") => "LinuxUpdateInstallNotNewer",
+        _ => "LinuxUpdateInstallFailed",
+    }
 }
 
 #[derive(Clone)]
@@ -73,6 +127,14 @@ impl UpdateService {
             Mode::Disabled
         } else if let Some(path) = std::env::var_os("APPIMAGE").map(PathBuf::from).filter(|p| p.is_file()) {
             Mode::AppImage(path)
+        } else if let Some(format) = detect_system_format() {
+            Mode::System(format)
+        } else if let Some(format) = cfg!(debug_assertions)
+            .then(|| std::env::var("MELOGOLD_UPDATE_FORMAT").ok().and_then(|key| PackageFormat::parse(&key)))
+            .flatten()
+        {
+            // Снимки окна: отладочная сборка изображает пакет (`scripts/snapshots.sh`).
+            Mode::System(format)
         } else {
             Mode::Package
         };
@@ -91,6 +153,28 @@ impl UpdateService {
             started: Cell::new(false),
             listeners: RefCell::default(),
         }))
+    }
+
+    /// Обновление ставится само (кнопка «Обновить»), а не открывает страницу релиза («Скачать»).
+    pub fn can_self_update(&self) -> bool {
+        self.can_self_update_with(self.available().as_ref())
+    }
+
+    fn can_self_update_with(&self, manifest: Option<&UpdateManifest>) -> bool {
+        match (&self.mode, manifest) {
+            (Mode::AppImage(_), Some(m)) => m.asset().is_some(),
+            (Mode::System(format), Some(m)) => m.package(*format).is_some(),
+            _ => false,
+        }
+    }
+
+    /// Подпись кнопки: «Обновить» или «Скачать».
+    pub fn action_label(&self) -> &'static str {
+        if self.can_self_update() {
+            tr("UpdateAction")
+        } else {
+            tr("MenuDownload")
+        }
     }
 
     pub fn state(&self) -> UpdateState {
@@ -173,9 +257,14 @@ impl UpdateService {
             match task.await {
                 Some(Ok(manifest)) => {
                     this.ctx.settings.set(&keys::UPDATES_LAST_CHECK, now);
-                    // AppImage — только если в релизе есть файл этой архитектуры; пакетам хватает страницы релиза.
+                    // AppImage и пакет — только если в релизе есть их файл этой архитектуры; остальным хватает страницы релиза.
                     let newer = manifest.filter(|m| {
-                        updates::is_newer(&m.version, VERSION) && (!matches!(this.mode, Mode::AppImage(_)) || m.asset().is_some())
+                        updates::is_newer(&m.version, VERSION)
+                            && match &this.mode {
+                                Mode::AppImage(_) => m.asset().is_some(),
+                                Mode::System(format) => m.package(*format).is_some(),
+                                _ => true,
+                            }
                     });
                     this.available.replace(newer.clone());
                     this.set(if newer.is_some() { UpdateState::Available } else { UpdateState::UpToDate });
@@ -192,21 +281,23 @@ impl UpdateService {
         });
     }
 
-    /// «Обновить»: AppImage — скачать, проверить и заменить; пакеты — страница релиза.
+    /// «Обновить»: AppImage — скачать, проверить и заменить; deb и rpm — скачать и поставить
+    /// помощником; остальное — страница релиза.
     pub fn install(&self, parent: Option<&gtk::Window>) {
         let Some(manifest) = self.available() else { return };
-        let path = match &self.mode {
-            Mode::AppImage(path) => path.clone(),
-            _ => {
-                gtk::UriLauncher::new(updates::RELEASES_URL).launch(parent, gio::Cancellable::NONE, |result| {
-                    if let Err(error) = result {
-                        tracing::warn!(%error, "страница релиза не открылась");
-                    }
-                });
-                return;
-            }
+        let asset = match &self.mode {
+            Mode::AppImage(_) => manifest.asset().cloned(),
+            Mode::System(format) => manifest.package(*format).cloned(),
+            _ => None,
         };
-        let Some(asset) = manifest.asset().cloned() else { return };
+        let Some(asset) = asset else {
+            gtk::UriLauncher::new(updates::RELEASES_URL).launch(parent, gio::Cancellable::NONE, |result| {
+                if let Err(error) = result {
+                    tracing::warn!(%error, "страница релиза не открылась");
+                }
+            });
+            return;
+        };
         if matches!(self.state(), UpdateState::Downloading(_) | UpdateState::Installing) {
             return;
         }
@@ -230,17 +321,26 @@ impl UpdateService {
                 return;
             };
             this.set(UpdateState::Installing);
-            match replace_and_restart(&file, &path) {
+            let outcome = match &this.mode {
+                Mode::AppImage(path) => replace_and_restart(&file, path).map_err(|error| {
+                    tracing::warn!(%error, "обновление не встало на место");
+                    "UpdateFailed"
+                }),
+                Mode::System(_) => {
+                    let installed = install_with_helper(&this, file.clone()).await;
+                    let _ = std::fs::remove_file(&file);
+                    installed.and_then(|()| restart(Path::new(SYSTEM_BINARY)).map_err(|_| "LinuxUpdateInstallFailed"))
+                }
+                _ => Err("UpdateFailed"),
+            };
+            match outcome {
                 Ok(()) => {
                     tracing::info!(версия = %manifest.version, "обновление установлено, перезапуск");
                     if let Some(app) = gio::Application::default() {
                         app.quit();
                     }
                 }
-                Err(error) => {
-                    tracing::warn!(%error, "обновление не встало на место");
-                    this.set(UpdateState::Failed);
-                }
+                Err(key) => this.set(UpdateState::InstallFailed(key)),
             }
         });
     }
@@ -255,6 +355,7 @@ impl UpdateService {
             (UpdateState::Downloading(percent), Some(_)) => trf("UpdateDownloadingFormat", &[&percent]),
             (UpdateState::Installing, Some(_)) => tr("UpdateInstalling").to_owned(),
             (UpdateState::Failed, Some(_)) => tr("UpdateFailed").to_owned(),
+            (UpdateState::InstallFailed(key), Some(_)) => tr(key).to_owned(),
             (_, Some(manifest)) => trf("UpdateVersionNewFormat", &[&VERSION, &manifest.version]),
             _ => trf("VersionFormat", &[&VERSION]),
         }
@@ -270,11 +371,35 @@ impl UpdateService {
         let notification = gio::Notification::new(&trf("UpdateAvailableTitle", &[&manifest.version]));
         notification.set_body(Some(tr("UpdateToastText")));
         notification.set_default_action("app.show-update");
-        // AppImage обновляется прямо из уведомления; пакетам — «Скачать» на странице релиза.
-        let label = if matches!(self.mode, Mode::AppImage(_)) { tr("UpdateAction") } else { tr("MenuDownload") };
-        notification.add_button(label, "app.update-install");
+        // AppImage, deb и rpm обновляются прямо из уведомления; остальным — «Скачать» на странице релиза.
+        notification.add_button(self.action_label(), "app.update-install");
         app.send_notification(Some("update"), &notification);
     }
+}
+
+/// `pkexec melogold-update <файл>`: polkit в активном сеансе пускает без пароля, помощник сам
+/// проверяет манифест, версию, размер и SHA-256. Причина отказа — ключом строки.
+async fn install_with_helper(service: &UpdateService, file: PathBuf) -> Result<(), &'static str> {
+    let task = service.ctx.services.run(async move {
+        tokio::task::spawn_blocking(move || {
+            std::process::Command::new(PKEXEC).arg(HELPER).arg(&file).stdin(std::process::Stdio::null()).output()
+        })
+        .await
+    });
+    let output = match task.await {
+        Some(Ok(Ok(output))) => output,
+        other => {
+            tracing::warn!(?other, "помощник установки не запустился");
+            return Err("LinuxUpdateInstallFailed");
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if output.status.success() {
+        tracing::info!(итог = %stdout.trim(), "помощник установил обновление");
+        return Ok(());
+    }
+    tracing::warn!(код = ?output.status.code(), итог = %stdout.trim(), stderr = %String::from_utf8_lossy(&output.stderr).trim(), "помощник отказал");
+    Err(helper_failure(output.status.code(), &stdout))
 }
 
 /// Скачать в папку обновлений; размер и SHA-256 — до установки: битый или подменённый файл не ставится.
@@ -289,7 +414,7 @@ async fn download(
     let name = Path::new(&asset.file_name).file_name().ok_or("имя файла")?.to_owned();
     let target = folder.join(&name);
     if let Ok(bytes) = tokio::fs::read(&target).await {
-        if bytes.len() as u64 == asset.size_bytes && hex::encode(Sha256::digest(&bytes)) == asset.sha256.to_lowercase() {
+        if asset.check(&bytes).is_ok() {
             return Ok(target);
         }
     }
@@ -304,12 +429,7 @@ async fn download(
             let _ = progress.try_send(percent);
         }
     }
-    if data.len() as u64 != asset.size_bytes {
-        return Err(format!("размер {} вместо {}", data.len(), asset.size_bytes));
-    }
-    if hex::encode(Sha256::digest(&data)) != asset.sha256.to_lowercase() {
-        return Err("SHA-256 не совпал".into());
-    }
+    asset.check(&data).map_err(|e| e.to_string())?;
     let part = target.with_extension("part");
     tokio::fs::write(&part, &data).await.map_err(|e| e.to_string())?;
     tokio::fs::rename(&part, &target).await.map_err(|e| e.to_string())?;
@@ -320,7 +440,6 @@ async fn download(
 /// новый процесс стартует, когда этот уже закрылся (иначе он отдал бы запуск этому экземпляру).
 fn replace_and_restart(downloaded: &Path, appimage: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::process::CommandExt;
     let folder = appimage.parent().ok_or_else(|| std::io::Error::other("папка AppImage"))?;
     let name = appimage.file_name().ok_or_else(|| std::io::Error::other("имя AppImage"))?.to_string_lossy().into_owned();
     let staged = folder.join(format!(".{name}.new"));
@@ -328,10 +447,16 @@ fn replace_and_restart(downloaded: &Path, appimage: &Path) -> std::io::Result<()
     std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))?;
     std::fs::rename(&staged, appimage)?;
     let _ = std::fs::remove_file(downloaded);
+    restart(appimage)
+}
+
+/// Новый процесс стартует через секунду, когда этот уже закрылся.
+fn restart(program: &Path) -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
     std::process::Command::new("sh")
         .arg("-c")
         .arg("sleep 1; exec \"$0\"")
-        .arg(appimage)
+        .arg(program)
         .env_remove("APPIMAGE")
         .env_remove("APPDIR")
         .env_remove("ARGV0")
@@ -339,4 +464,20 @@ fn replace_and_restart(downloaded: &Path, appimage: &Path) -> std::io::Result<()
         .process_group(0)
         .spawn()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn helper_answers_become_words() {
+        assert_eq!(helper_failure(Some(126), ""), "LinuxUpdateInstallDenied");
+        assert_eq!(helper_failure(Some(127), ""), "LinuxUpdateInstallDenied");
+        assert_eq!(helper_failure(Some(6), "error checksum: SHA-256 не совпал\n"), "LinuxUpdateInstallChecksum");
+        assert_eq!(helper_failure(Some(4), "error network: нет связи"), "LinuxUpdateInstallNetwork");
+        assert_eq!(helper_failure(Some(3), "error not-newer: в манифесте 0.1.4"), "LinuxUpdateInstallNotNewer");
+        assert_eq!(helper_failure(Some(7), "error install: dnf"), "LinuxUpdateInstallFailed");
+        assert_eq!(helper_failure(None, ""), "LinuxUpdateInstallFailed");
+    }
 }

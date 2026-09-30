@@ -49,6 +49,24 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
         "YouTube не пускает этот адрес — смените сервер VPN",
         "YouTube is blocking this address — switch VPN server",
     ),
+    // Обновление deb и rpm через помощника (`crates/melogold-update`): причины отказа словами.
+    (
+        "LinuxUpdateInstallDenied",
+        "Установка отменена или не разрешена системой. Попробуйте ещё раз",
+        "The install was cancelled or isn't allowed by the system. Try again",
+    ),
+    (
+        "LinuxUpdateInstallChecksum",
+        "Файл обновления не прошёл проверку, ничего не установлено. Попробуйте ещё раз",
+        "The update file failed verification, nothing was installed. Try again",
+    ),
+    ("LinuxUpdateInstallNetwork", "Установщик не связался с GitHub. Попробуйте ещё раз", "The installer couldn't reach GitHub. Try again"),
+    ("LinuxUpdateInstallNotNewer", "Уже установлена такая же или более новая версия", "The same or a newer version is already installed"),
+    (
+        "LinuxUpdateInstallFailed",
+        "Не удалось установить обновление. Попробуйте ещё раз или скачайте пакет со страницы релиза",
+        "Couldn't install the update. Try again or download the package from the release page",
+    ),
     ("LinuxAppLanguage", "Язык приложения", "App language"),
     ("LinuxLanguageRestart", "Язык сменится после перезапуска Melogold", "The language changes after Melogold restarts"),
     ("LinuxAbout", "О Melogold", "About Melogold"),

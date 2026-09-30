@@ -14,7 +14,7 @@ use melogold_server::sync::SyncStatus;
 
 use crate::app::{apply_theme, present_about};
 use crate::localization::{tr, trf};
-use crate::updates::{Mode, UpdateState};
+use crate::updates::UpdateState;
 use crate::window::MainWindow;
 
 const NEW_ISSUE_URL: &str = "https://github.com/melogold-app/melogoldLinux/issues/new";
@@ -650,16 +650,11 @@ fn update_banner(window: &MainWindow) -> adw::Banner {
                 UpdateState::Downloading(percent) => trf("UpdateDownloadingFormat", &[&percent]),
                 UpdateState::Installing => tr("UpdateInstalling").to_owned(),
                 UpdateState::Failed => tr("UpdateFailed").to_owned(),
+                UpdateState::InstallFailed(key) => tr(key).to_owned(),
                 _ => trf("UpdateAvailableTitle", &[&manifest.version]),
             };
             banner.set_title(&title);
-            let label = if busy {
-                None
-            } else if matches!(updates.mode, Mode::AppImage(_)) {
-                Some(tr("UpdateAction"))
-            } else {
-                Some(tr("MenuDownload"))
-            };
+            let label = if busy { None } else { Some(updates.action_label()) };
             banner.set_button_label(label);
             banner.set_revealed(true);
         })
@@ -729,8 +724,7 @@ pub(crate) fn whats_new(window: &MainWindow) {
         .build();
     let dialog = adw::AlertDialog::builder().heading(trf("UpdateWhatsNewTitle", &[&manifest.version])).extra_child(&scroller).build();
     dialog.add_response("later", tr("UpdateLater"));
-    let action = if matches!(window.updates.mode, Mode::AppImage(_)) { tr("UpdateAction") } else { tr("MenuDownload") };
-    dialog.add_response("update", action);
+    dialog.add_response("update", window.updates.action_label());
     dialog.set_response_appearance("update", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("update"));
     dialog.set_close_response("later");

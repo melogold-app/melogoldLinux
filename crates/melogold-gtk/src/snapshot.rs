@@ -63,13 +63,26 @@ pub fn maybe_start(window: &MainWindow) {
                 w.updates.pretend_available(melogold_core::updates::UpdateManifest {
                     version: "9.9.9".into(),
                     notes,
+                    // Файлы пакетов — чтобы в режиме «пакет» (MELOGOLD_UPDATE_FORMAT=rpm|deb) была кнопка «Обновить».
+                    packages: ["deb", "rpm"]
+                        .into_iter()
+                        .map(|format| {
+                            let asset = melogold_core::updates::UpdateAsset {
+                                file_name: format!("melogold.{format}"),
+                                size_bytes: 1,
+                                sha256: String::new(),
+                            };
+                            (format.to_owned(), std::collections::HashMap::from([(std::env::consts::ARCH.to_owned(), asset)]))
+                        })
+                        .collect(),
                     ..Default::default()
                 });
             }),
             700,
         ),
         // Путь обновления: «Что нового» по кнопке полосы, затем загрузка. В AppImage
-        // (APPIMAGE=… MELOGOLD_UPDATES=1) кнопки — «Обновить», в пакете — «Скачать».
+        // (APPIMAGE=… MELOGOLD_UPDATES=1) и в режиме «пакет» (MELOGOLD_UPDATE_FORMAT=rpm) кнопки —
+        // «Обновить», в Flatpak — «Скачать».
         ("04c-update-whats-new", Box::new(crate::pages::settings::whats_new), 700),
         (
             "04d-update-downloading",
@@ -79,6 +92,12 @@ pub fn maybe_start(window: &MainWindow) {
                 }
                 w.updates.pretend_state(crate::updates::UpdateState::Downloading(42));
             }),
+            700,
+        ),
+        ("04d2-update-installing", Box::new(|w| w.updates.pretend_state(crate::updates::UpdateState::Installing)), 700),
+        (
+            "04d3-update-denied",
+            Box::new(|w| w.updates.pretend_state(crate::updates::UpdateState::InstallFailed("LinuxUpdateInstallDenied"))),
             700,
         ),
         ("04e-update-back", Box::new(|w| w.updates.pretend_state(crate::updates::UpdateState::Available)), 300),
