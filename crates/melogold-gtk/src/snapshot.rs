@@ -366,7 +366,37 @@ pub fn maybe_start(window: &MainWindow) {
     });
 }
 
+/// `MELOGOLD_DEBUG_WIDTHS=1`: какие виджеты вылезли за правый край окна (узкое окно 360 — задание
+/// раскладки): так нашлась плитка настроения, чьё длинное слово не давало окну сжаться.
+fn debug_widths(widget: &gtk::Widget, depth: usize) {
+    let Some(root) = widget.root() else { return };
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if c.is_visible() && c.is_mapped() {
+            if let Some(bounds) = c.compute_bounds(root.upcast_ref::<gtk::Widget>()) {
+                let right = bounds.x() + bounds.width();
+                if right > 362.0 {
+                    let (min, nat, _, _) = c.measure(gtk::Orientation::Horizontal, -1);
+                    eprintln!(
+                        "ШИРИНА {}{} {:?} x={} w={} min={min} nat={nat}",
+                        "  ".repeat(depth),
+                        c.type_().name(),
+                        c.css_classes(),
+                        bounds.x(),
+                        bounds.width()
+                    );
+                }
+            }
+            debug_widths(&c, depth + 1);
+        }
+        child = c.next_sibling();
+    }
+}
+
 fn capture(window: &adw::ApplicationWindow, path: &Path) -> Option<()> {
+    if std::env::var_os("MELOGOLD_DEBUG_WIDTHS").is_some() {
+        debug_widths(window.upcast_ref(), 0);
+    }
     let (width, height) = (window.width(), window.height());
     if width <= 0 || height <= 0 {
         return None;

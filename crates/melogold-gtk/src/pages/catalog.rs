@@ -37,8 +37,9 @@ fn scaffold(title: &str, tag: Option<&str>, heading: bool) -> Scaffold {
         .margin_end(12)
         .build();
     if heading {
-        let label = gtk::Label::builder().label(title).xalign(0.0).margin_bottom(6).build();
+        let label = gtk::Label::builder().label(title).xalign(0.0).wrap(true).margin_bottom(6).build();
         label.add_css_class("title-1");
+        label.add_css_class("page-title");
         body.append(&label);
     }
     body.append(&state.root);
@@ -402,8 +403,9 @@ pub fn browse_page(window: &MainWindow, title: &str, browse_id: &str, params: Op
         |window, content, shelves: Vec<Shelf>| {
             for shelf in &shelves {
                 if let Some(title) = shelf.title.as_deref().filter(|t| !t.is_empty()) {
-                    let label = gtk::Label::builder().label(title).xalign(0.0).margin_top(18).build();
+                    let label = gtk::Label::builder().label(title).xalign(0.0).margin_top(18).margin_bottom(6).build();
                     label.add_css_class("title-4");
+                    label.add_css_class("shelf-title");
                     content.append(&label);
                 }
                 if shelf.items.iter().all(|i| matches!(i, MusicItem::Mood(_))) {

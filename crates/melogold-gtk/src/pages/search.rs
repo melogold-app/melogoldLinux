@@ -71,6 +71,7 @@ pub fn page(window: &MainWindow, query: &str) -> adw::NavigationPage {
     filters.add_css_class("flat");
     let title = gtk::Label::builder().label(query).xalign(0.0).wrap(true).build();
     title.add_css_class("title-1");
+    title.add_css_class("page-title");
     let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let header = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
     header.append(&title);
@@ -325,7 +326,7 @@ fn append(inner: &Rc<Inner>, items: Vec<MusicItem>, new_group: bool) {
         Some(pair) => pair,
         None => {
             let list = gtk::ListBox::builder().activate_on_single_click(false).build();
-            list.add_css_class("boxed-list");
+            list.add_css_class("track-rows");
             // Треки выдачи выделяются, как в любом списке (задание 0004); альбомы и исполнители — нет.
             let selection = Selection::for_list_box(&window, &list, crate::library_view::RowContext::Plain);
             let items_of_list: Rc<RefCell<Vec<MusicItem>>> = Rc::default();

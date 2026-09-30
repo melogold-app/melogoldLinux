@@ -61,7 +61,8 @@ glib::wrapper! {
 
 impl TrackRow {
     pub fn new(window: &MainWindow) -> TrackRow {
-        let row: TrackRow = glib::Object::builder().property("spacing", 10).build();
+        let row: TrackRow = glib::Object::builder().property("spacing", 12).build();
+        row.add_css_class("track-row");
         let imp = row.imp();
         let _ = imp.window.set(window.downgrade());
         row.set_margin_top(6);
@@ -92,7 +93,9 @@ impl TrackRow {
         imp.heart.set_valign(gtk::Align::Center);
         imp.heart.set_tooltip_text(Some(tr("PlayerLike.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip")));
         imp.heart.add_css_class("flat");
+        imp.heart.add_css_class("circular");
         imp.heart.add_css_class("heart");
+        imp.heart.add_css_class("row-action");
         let weak = row.downgrade();
         imp.heart.connect_clicked(move |_| {
             let Some(row) = weak.upgrade() else { return };
@@ -115,6 +118,7 @@ impl TrackRow {
         imp.more.set_tooltip_text(Some(tr("RowMenu")));
         imp.more.set_valign(gtk::Align::Center);
         imp.more.add_css_class("flat");
+        imp.more.add_css_class("row-action");
         let weak = row.downgrade();
         imp.more.set_create_popup_func(move |button| {
             if let Some(row) = weak.upgrade() {

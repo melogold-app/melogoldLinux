@@ -34,6 +34,7 @@ impl QueuePanel {
         header.pack_end(&clear);
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build();
         list.add_css_class("navigation-sidebar");
+        list.add_css_class("queue-list");
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&list).vexpand(true).build();
         let empty = adw::StatusPage::builder().icon_name("view-list-bullet-symbolic").title(tr("QueueTitle")).build();
         empty.add_css_class("compact");
@@ -65,7 +66,7 @@ impl QueuePanel {
             let current = Some(index) == view.current;
             // Свои названия — только в подписях; в меню — исходный трек (задание 0005).
             let shown = window.display(&item.track);
-            let cover = Cover::new(40);
+            let cover = Cover::new(44);
             cover.set(&window.ctx.services.images, item.track.thumbnail_url.as_deref(), 120);
             cover.set_playing(current);
             let title = gtk::Label::builder().label(&shown.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
@@ -76,24 +77,30 @@ impl QueuePanel {
             let subtitle = gtk::Label::builder().label(shown.subtitle()).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
             subtitle.add_css_class("dim-label");
             subtitle.add_css_class("caption");
-            let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).valign(gtk::Align::Center).build();
+            let texts =
+                gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).valign(gtk::Align::Center).build();
             texts.append(&title);
             texts.append(&subtitle);
-            let content = gtk::Box::builder().spacing(10).build();
+            let content = gtk::Box::builder().spacing(12).build();
             content.append(&cover.root);
             content.append(&texts);
             if !current {
                 let remove = gtk::Button::builder()
-                    .icon_name("list-remove-symbolic")
+                    .icon_name("window-close-symbolic")
                     .tooltip_text(tr("MenuRemoveFromQueue"))
                     .valign(gtk::Align::Center)
                     .build();
                 remove.add_css_class("flat");
+                remove.add_css_class("circular");
+                remove.add_css_class("row-action");
                 let (player, id) = (player.clone(), item.id);
                 remove.connect_clicked(move |_| player.send(Command::Remove(id)));
                 content.append(&remove);
             }
             let row = gtk::ListBoxRow::builder().child(&content).build();
+            if current {
+                row.add_css_class("current");
+            }
             row.update_property(&[gtk::accessible::Property::Label(&format!("{}, {}", shown.title, shown.subtitle()))]);
             let (player_click, id) = (player.clone(), item.id);
             let click = gtk::GestureClick::new();

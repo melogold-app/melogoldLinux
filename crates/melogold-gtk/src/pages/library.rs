@@ -60,6 +60,7 @@ impl Page {
 fn title_label(text: &str) -> gtk::Label {
     let label = gtk::Label::builder().label(text).xalign(0.0).wrap(true).build();
     label.add_css_class("title-1");
+    label.add_css_class("page-title");
     label
 }
 
@@ -274,6 +275,7 @@ fn track_list(window: &MainWindow, tracks: &[Track], context: RowContext, plays:
 fn heading(text: &str) -> gtk::Label {
     let label = gtk::Label::builder().label(text).xalign(0.0).margin_top(12).build();
     label.add_css_class("title-4");
+    label.add_css_class("shelf-title");
     label
 }
 
@@ -304,8 +306,8 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
                 .homogeneous(true)
                 .min_children_per_line(1)
                 .max_children_per_line(4)
-                .column_spacing(8)
-                .row_spacing(8)
+                .column_spacing(10)
+                .row_spacing(10)
                 .build();
             let downloads_text = if downloaded > 0 {
                 trf("DownloadsCountFormat", &[&downloaded, &cached])
@@ -313,16 +315,17 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
                 trf("DownloadsCachedCountFormat", &[&cached])
             };
             type Open = fn(&MainWindow) -> adw::NavigationPage;
-            let entries: [(&str, &str, String, Open); 6] = [
-                ("view-list-bullet-symbolic", tr("AllTracks"), plural("Tracks", all), all_tracks),
-                ("offline-filled-symbolic", tr("Downloads"), downloads_text, downloads_page),
-                ("heart-filled-symbolic", tr("Favorites"), plural("Tracks", counts.likes), favorites),
-                ("document-open-recent-symbolic", tr("History"), tr("HistoryHint").to_owned(), history),
-                ("media-optical-cd-audio-symbolic", tr("ResultsAlbums"), plural("Albums", counts.albums), saved_albums),
-                ("avatar-default-symbolic", tr("ArtistsAndChannels"), plural("Artists", counts.artists), saved_artists),
+            // Значок каждой коллекции — в своей цветной плитке, как в Настройках GNOME.
+            let entries: [(&str, &str, &str, String, Open); 6] = [
+                ("view-list-bullet-symbolic", "blue", tr("AllTracks"), plural("Tracks", all), all_tracks),
+                ("offline-filled-symbolic", "green", tr("Downloads"), downloads_text, downloads_page),
+                ("heart-filled-symbolic", "red", tr("Favorites"), plural("Tracks", counts.likes), favorites),
+                ("document-open-recent-symbolic", "orange", tr("History"), tr("HistoryHint").to_owned(), history),
+                ("media-optical-cd-audio-symbolic", "purple", tr("ResultsAlbums"), plural("Albums", counts.albums), saved_albums),
+                ("avatar-default-symbolic", "teal", tr("ArtistsAndChannels"), plural("Artists", counts.artists), saved_artists),
             ];
-            for (icon, title, subtitle, open) in entries {
-                tiles.append(&tile(&window, icon, title, &subtitle, open));
+            for (icon, color, title, subtitle, open) in entries {
+                tiles.append(&tile(&window, icon, color, title, &subtitle, open));
             }
             content.append(&tiles);
 
@@ -398,9 +401,17 @@ pub fn root(window: &MainWindow) -> adw::NavigationPage {
     p.page
 }
 
-fn tile(window: &MainWindow, icon: &str, title: &str, subtitle: &str, open: fn(&MainWindow) -> adw::NavigationPage) -> gtk::Button {
-    let image = gtk::Image::builder().icon_name(icon).pixel_size(20).valign(gtk::Align::Center).build();
-    image.add_css_class("accent");
+fn tile(
+    window: &MainWindow,
+    icon: &str,
+    color: &str,
+    title: &str,
+    subtitle: &str,
+    open: fn(&MainWindow) -> adw::NavigationPage,
+) -> gtk::Button {
+    let badge = gtk::Image::builder().icon_name(icon).pixel_size(20).valign(gtk::Align::Center).build();
+    badge.add_css_class("tile-icon");
+    badge.add_css_class(color);
     let title_label = gtk::Label::builder().label(title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
     title_label.add_css_class("heading");
     let subtitle_label = gtk::Label::builder().label(subtitle).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
@@ -409,9 +420,10 @@ fn tile(window: &MainWindow, icon: &str, title: &str, subtitle: &str, open: fn(&
     let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).hexpand(true).build();
     texts.append(&title_label);
     texts.append(&subtitle_label);
-    let content = gtk::Box::builder().spacing(16).margin_top(8).margin_bottom(8).margin_start(8).margin_end(8).build();
-    content.append(&image);
+    let content = gtk::Box::builder().spacing(14).margin_top(6).margin_bottom(6).margin_start(4).margin_end(4).build();
+    content.append(&badge);
     content.append(&texts);
+    content.append(&gtk::Image::builder().icon_name("go-next-symbolic").css_classes(["dim-label", "tile-chevron"]).build());
     let button = gtk::Button::builder().child(&content).build();
     button.add_css_class("library-tile");
     button.update_property(&[gtk::accessible::Property::Label(&format!("{title}, {subtitle}"))]);

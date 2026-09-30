@@ -82,14 +82,17 @@ impl NowPlaying {
         overlay.add_overlay(&picture);
         overlay.add_css_class("cover");
         overlay.add_css_class("large");
+        overlay.add_css_class("now-playing-cover");
         let frame = gtk::AspectFrame::builder().ratio(1.0).obey_child(false).child(&overlay).vexpand(true).build();
         // Обложка уступает место тексту ошибки и кнопкам: окно 800×600 не переполняется.
         frame.set_size_request(160, 160);
 
         let title = gtk::Label::builder().wrap(true).xalign(0.0).build();
-        title.add_css_class("title-2");
+        title.add_css_class("title-1");
+        title.add_css_class("now-playing-title");
         let subtitle = gtk::Label::builder().wrap(true).xalign(0.0).build();
         subtitle.add_css_class("dim-label");
+        subtitle.add_css_class("now-playing-subtitle");
         // ♡ — справа от названия, как у Android (TitleBlock): отметить играющий трек в одно
         // нажатие, не открывая меню. В «…» этой страницы «В Избранное» поэтому нет.
         let heart = gtk::Button::builder()
@@ -153,7 +156,8 @@ impl NowPlaying {
             label.add_css_class("numeric");
             label.add_css_class("dim-label");
         }
-        let seek = gtk::Box::builder().spacing(8).build();
+        let seek = gtk::Box::builder().spacing(10).build();
+        seek.add_css_class("now-playing-seek");
         seek.append(&position);
         seek.append(&scale);
         seek.append(&duration);
@@ -178,7 +182,7 @@ impl NowPlaying {
             tr("PlayerPrevious.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"),
             "win.previous",
         );
-        let play_icon = gtk::Image::builder().icon_name("media-playback-start-symbolic").pixel_size(24).build();
+        let play_icon = gtk::Image::builder().icon_name("media-playback-start-symbolic").pixel_size(30).build();
         let play =
             gtk::Button::builder().child(&play_icon).action_name("win.play-pause").tooltip_text(format!("{} (Space)", tr("Play"))).build();
         play.add_css_class("circular");
@@ -187,7 +191,8 @@ impl NowPlaying {
         let next =
             button("media-skip-forward-symbolic", tr("PlayerNext.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"), "win.next");
         let repeat = button("media-playlist-consecutive-symbolic", tr("RepeatOff"), "win.repeat");
-        let controls = gtk::Box::builder().spacing(12).halign(gtk::Align::Center).build();
+        let controls = gtk::Box::builder().spacing(18).halign(gtk::Align::Center).build();
+        controls.add_css_class("now-playing-controls");
         for widget in
             [shuffle.upcast_ref::<gtk::Widget>(), previous.upcast_ref(), play.upcast_ref(), next.upcast_ref(), repeat.upcast_ref()]
         {
@@ -196,14 +201,15 @@ impl NowPlaying {
 
         // Обложка или (узкое окно, «Текст») текст — сверху колонки, над названием и кнопками.
         let slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).vexpand(true).build();
+        slot.add_css_class("now-playing-glow");
         slot.append(&frame);
         let column = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(12)
+            .spacing(14)
             .margin_top(12)
-            .margin_bottom(24)
-            .margin_start(24)
-            .margin_end(24)
+            .margin_bottom(28)
+            .margin_start(28)
+            .margin_end(28)
             .build();
         column.append(&slot);
         column.append(&heading);
@@ -366,6 +372,12 @@ impl NowPlaying {
                 NowPlaying(inner).apply_tint();
             }
         });
+        let weak = Rc::downgrade(&now_playing.0);
+        adw::StyleManager::default().connect_high_contrast_notify(move |_| {
+            if let Some(inner) = weak.upgrade() {
+                NowPlaying(inner).apply_tint();
+            }
+        });
         now_playing.place(window);
         now_playing
     }
@@ -440,23 +452,19 @@ impl NowPlaying {
     }
 
     /// Фон, текст и подложка строки в цветах обложки; серая обложка — цвета темы. Зависит от
-    /// темы: при смене светлой и тёмной вызывается заново.
+    /// темы: при смене светлой и тёмной вызывается заново. Цвет обложки получают и панель
+    /// плеера (отсвет слева и кнопка «Играть»), и тень обложки — поставщик общий на всё окно.
+    /// В высоком контрасте цвета не меняются: палитру там выбирает человек.
     fn apply_tint(&self) {
-        let Some(seed) = self.seed.get() else {
+        let manager = adw::StyleManager::default();
+        let Some(seed) = self.seed.get().filter(|_| !manager.is_high_contrast()) else {
             self.page.remove_css_class("now-playing-tinted");
+            self.tint.load_from_string("");
             self.lyrics.set_pill_color(None);
             return;
         };
-        let palette = artwork_colors::palette(seed, adw::StyleManager::default().is_dark());
-        let hex = |rgb: artwork_colors::Rgb| format!("#{rgb:06x}");
-        let (background, text, secondary) = (hex(palette.background), hex(palette.text), hex(palette.secondary_text));
-        self.tint.load_from_string(&format!(
-            ".now-playing-tinted {{ background-color: {background}; color: {text}; }}
-             .now-playing-tinted headerbar {{ background: none; box-shadow: none; color: {text}; }}
-             .now-playing-tinted .dim-label {{ color: {secondary}; opacity: 1; }}
-             .now-playing-tinted .lyrics-fade-top {{ background: linear-gradient(to bottom, {background}, alpha({background}, 0)); }}
-             .now-playing-tinted .lyrics-fade-bottom {{ background: linear-gradient(to top, {background}, alpha({background}, 0)); }}"
-        ));
+        let palette = artwork_colors::palette(seed, manager.is_dark());
+        self.tint.load_from_string(&tint_css(&palette));
         self.page.add_css_class("now-playing-tinted");
         let pill = palette.pill;
         let channel = |shift: u32| ((pill >> shift) & 0xFF) as f32 / 255.0;
@@ -545,4 +553,30 @@ impl NowPlaying {
         self.updating.set(false);
         self.position.set_label(&format_duration(position.as_millis() as i64));
     }
+}
+
+/// Стили в цветах обложки: страница «Сейчас играет», тень обложки и панель плеера.
+fn tint_css(palette: &artwork_colors::ArtworkPalette) -> String {
+    let hex = |rgb: artwork_colors::Rgb| format!("#{rgb:06x}");
+    let (background, text, secondary) = (hex(palette.background), hex(palette.text), hex(palette.secondary_text));
+    let (accent, on_accent, glow) = (hex(palette.accent), hex(palette.on_accent), hex(palette.glow));
+    format!(
+        ".now-playing-tinted {{ background-color: {background}; color: {text}; }}
+         .now-playing-tinted headerbar {{ background: none; box-shadow: none; color: {text}; }}
+         .now-playing-tinted .dim-label {{ color: {secondary}; opacity: 1; }}
+         .now-playing-tinted .lyrics-fade-top {{ background: linear-gradient(to bottom, {background}, alpha({background}, 0)); }}
+         .now-playing-tinted .lyrics-fade-bottom {{ background: linear-gradient(to top, {background}, alpha({background}, 0)); }}
+         .now-playing-tinted .now-playing-play {{ background-color: {accent}; color: {on_accent}; }}
+         .now-playing-tinted .now-playing-play:hover {{ background-color: mix({accent}, {on_accent}, 0.12); }}
+         .now-playing-tinted scale > trough > highlight {{ background-color: {accent}; }}
+         .now-playing-tinted scale > trough {{ background-color: alpha({text}, 0.14); }}
+         .now-playing-tinted .now-playing-controls button:checked {{ color: {accent}; }}
+         .now-playing-tinted .heart.liked {{ color: {accent}; }}
+         .now-playing-tinted .now-playing-cover {{ box-shadow: 0 24px 56px -12px alpha({accent}, 0.55), 0 6px 18px -6px alpha(black, 0.3); }}
+         .now-playing-tinted .now-playing-glow {{ background-image: radial-gradient(closest-side, alpha({glow}, 0.55), alpha({glow}, 0)); }}
+         .player-bar {{ background-image: linear-gradient(to right, alpha({accent}, 0.14), alpha({accent}, 0.0) 40%); }}
+         .player-bar .play-button {{ background-color: {accent}; color: {on_accent}; }}
+         .player-bar .play-button:hover {{ background-color: mix({accent}, {on_accent}, 0.12); }}
+         .player-bar scale > trough > highlight {{ background-color: {accent}; }}"
+    )
 }

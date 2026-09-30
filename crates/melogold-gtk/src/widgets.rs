@@ -23,6 +23,8 @@ pub struct Cover {
     requested: Rc<RefCell<Option<String>>>,
     /// Столбики «играет» поверх затемнённой обложки; создаются, когда трек заиграл.
     playing: Rc<RefCell<Option<gtk::Box>>>,
+    /// Картинка встала — шапка коллекции берёт из неё цвет.
+    loaded: Rc<RefCell<Option<Box<dyn Fn(&gtk::gdk::Texture)>>>>,
 }
 
 impl Cover {
@@ -36,7 +38,7 @@ impl Cover {
         root.add_css_class("cover");
         root.set_valign(gtk::Align::Center);
         root.set_halign(gtk::Align::Center);
-        Cover { root, picture, placeholder, requested: Rc::default(), playing: Rc::default() }
+        Cover { root, picture, placeholder, requested: Rc::default(), playing: Rc::default(), loaded: Rc::default() }
     }
 
     /// У играющего трека вместо обложки — столбики под звук (§5.3).
@@ -89,7 +91,35 @@ impl Cover {
     fn show(&self, texture: &gtk::gdk::Texture) {
         self.picture.set_paintable(Some(texture));
         self.placeholder.set_visible(false);
+        if let Some(loaded) = &*self.loaded.borrow() {
+            loaded(texture);
+        }
     }
+
+    /// Позвать `loaded`, когда картинка встанет (и сразу, если она уже стоит).
+    pub fn on_loaded(&self, loaded: impl Fn(&gtk::gdk::Texture) + 'static) {
+        if let Some(texture) = self.picture.paintable().and_downcast::<gtk::gdk::Texture>() {
+            loaded(&texture);
+        }
+        self.loaded.replace(Some(Box::new(loaded)));
+    }
+}
+
+/// Цвет-зерно картинки — в фоне, не в потоке окна (`None` — картинка серая).
+pub async fn artwork_seed(texture: &gtk::gdk::Texture) -> Option<melogold_core::artwork_colors::Rgb> {
+    let mut downloader = gtk::gdk::TextureDownloader::new(texture);
+    downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
+    let (bytes, stride) = downloader.download_bytes();
+    let (width, height) = (texture.width().max(0) as usize, texture.height().max(0) as usize);
+    gtk::gio::spawn_blocking(move || melogold_core::artwork_colors::seed(&bytes, width, height, stride)).await.ok().flatten()
+}
+
+/// Свои стили одного виджета (цвет плитки, отсвет шапки): поставщик живёт вместе с виджетом.
+pub fn widget_css(widget: &impl IsA<gtk::Widget>, css: &str) {
+    let provider = gtk::CssProvider::new();
+    provider.load_from_string(css);
+    #[allow(deprecated)]
+    widget.style_context().add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
 // ── строки ──

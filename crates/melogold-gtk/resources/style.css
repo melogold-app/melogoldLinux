@@ -1,12 +1,83 @@
-/* Своих стилей — минимум: всё остальное — стандартные классы libadwaita (docs/PROMPT.md §2). */
+/* Оформление Melogold поверх libadwaita (docs/PROMPT.md §5.1): виджеты и цвета — системные (акцент,
+   светлая и тёмная тема, высокий контраст), а своё — иерархия заголовков, обложки с тенью, карточки,
+   залитые цветом плитки и цвет играющей обложки. Цвет обложки ставит `now_playing.rs` (`tint_css`)
+   своим поставщиком поверх этого файла: у серой обложки и в высоком контрасте его нет. */
+
+/* ── заголовки ── */
+
+.page-title {
+  font-size: 2.3em;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.shelf-title {
+  font-size: 1.3em;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+button.see-all {
+  min-height: 28px;
+  padding: 2px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.92em;
+  background-color: alpha(currentColor, 0.07);
+}
+
+button.see-all:hover {
+  background-color: alpha(currentColor, 0.12);
+}
+
+button.see-all:active {
+  background-color: alpha(currentColor, 0.18);
+}
+
+.sidebar-brand {
+  font-weight: 800;
+  font-size: 1.1em;
+  letter-spacing: -0.01em;
+}
+
+/* ── боковая панель: выбранный раздел — цветом акцента, а не серым ── */
+
+.navigation-sidebar.main-nav > row {
+  min-height: 40px;
+  margin: 2px 0;
+  padding: 0 10px;
+  border-radius: 10px;
+}
+
+.navigation-sidebar.main-nav > row:selected {
+  background-color: alpha(var(--accent-bg-color), 0.14);
+  color: var(--accent-color);
+  font-weight: 700;
+}
+
+.navigation-sidebar.main-nav > row:selected:hover {
+  background-color: alpha(var(--accent-bg-color), 0.2);
+}
+
+/* ── поиск в заголовке — «таблетка» ── */
+
+entry.main-search,
+searchbar entry.main-search {
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 0 12px;
+}
+
+/* ── обложки ── */
 
 .cover {
-  border-radius: 6px;
+  border-radius: 8px;
   background-color: alpha(currentColor, 0.08);
 }
 
 .cover.large {
-  border-radius: 12px;
+  border-radius: 16px;
+  box-shadow: 0 14px 36px -10px alpha(black, 0.4), 0 2px 8px -2px alpha(black, 0.15);
 }
 
 /* Исполнитель и канал — кругом, и крупным тоже: правило ниже «крупного», чтобы его не перебивало. */
@@ -16,42 +87,83 @@
 
 .cover-button {
   padding: 0;
+  border-radius: 10px;
+}
+
+.player-cover {
+  border-radius: 10px;
+  box-shadow: 0 4px 12px -4px alpha(black, 0.35);
+}
+
+.now-playing-cover {
+  border-radius: 20px;
+  box-shadow: 0 24px 56px -12px alpha(black, 0.45), 0 6px 18px -6px alpha(black, 0.25);
 }
 
 .explicit-badge {
-  font-size: 0.7em;
-  font-weight: bold;
+  font-size: 0.68em;
+  font-weight: 800;
   padding: 0 4px;
-  border-radius: 3px;
-  background-color: alpha(currentColor, 0.15);
+  border-radius: 4px;
+  background-color: alpha(currentColor, 0.14);
 }
 
-.play-button {
-  min-width: 40px;
-  min-height: 40px;
+/* ── карточки каталога: обложка с тенью, при наведении — подложка и тень глубже ── */
+
+button.card-button {
+  padding: 8px 8px 10px 8px;
+  border-radius: 16px;
+  transition: background-color 150ms ease-out;
 }
 
-.now-playing-play {
-  min-width: 56px;
-  min-height: 56px;
+button.card-button:hover {
+  background-color: alpha(currentColor, 0.06);
 }
 
-.card-button {
-  padding: 6px;
+button.card-button:active {
+  background-color: alpha(currentColor, 0.1);
 }
 
-.mood-tile {
-  padding: 0;
-  min-height: 44px;
+.card-cover {
+  border-radius: 12px;
+  box-shadow: 0 8px 20px -8px alpha(black, 0.4), 0 1px 3px alpha(black, 0.1);
+  transition: box-shadow 200ms ease-out;
 }
 
-.mood-tile > box > label {
-  padding: 10px 12px 10px 0;
+.card-cover.round {
+  border-radius: 9999px;
 }
 
-.mood-stripe {
-  border-radius: 6px 0 0 6px;
-  background-color: alpha(currentColor, 0.2);
+button.card-button:hover .card-cover {
+  box-shadow: 0 14px 28px -8px alpha(black, 0.5), 0 2px 6px alpha(black, 0.12);
+}
+
+.card-title {
+  font-weight: 700;
+}
+
+/* ── «Настроения и жанры»: плитки, залитые цветом настроения (цвет — в catalog_widgets.rs) ── */
+
+button.mood-tile {
+  min-height: 50px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-weight: 800;
+  font-size: 1.05em;
+  color: white;
+  background-color: #5e5c64;
+  background-image: linear-gradient(135deg, #77767b, #3d3846);
+  box-shadow: inset 0 0 0 1px alpha(white, 0.06), 0 6px 16px -10px alpha(black, 0.6);
+  transition: filter 150ms ease-out, box-shadow 150ms ease-out;
+}
+
+button.mood-tile:hover {
+  filter: brightness(1.08);
+  box-shadow: inset 0 0 0 1px alpha(white, 0.1), 0 10px 22px -10px alpha(black, 0.7);
+}
+
+button.mood-tile:active {
+  filter: brightness(0.94);
 }
 
 /* ♡ лайкнутого трека — цветом акцента, как у всех клиентов. */
@@ -59,21 +171,69 @@
   color: var(--accent-color);
 }
 
-/* Плитки коллекций Библиотеки: карточкой, а не плоской кнопкой (§5.4). */
-.library-tile {
-  padding: 4px 8px;
-  min-height: 52px;
-  border-radius: 12px;
+/* ── плитки коллекций Библиотеки: карточка со значком в цветной плитке, как в Настройках GNOME ── */
+
+button.library-tile {
+  padding: 8px 12px;
+  min-height: 60px;
+  border-radius: 16px;
   background-color: var(--card-bg-color);
-  box-shadow: 0 0 0 1px var(--card-shade-color);
+  box-shadow: 0 0 0 1px var(--card-shade-color), 0 2px 8px -4px alpha(black, 0.12);
+  transition: box-shadow 150ms ease-out, background-color 150ms ease-out;
 }
 
-.library-tile:hover {
-  background-image: image(alpha(currentColor, 0.04));
+button.library-tile:hover {
+  background-image: image(alpha(currentColor, 0.03));
+  box-shadow: 0 0 0 1px var(--card-shade-color), 0 8px 18px -8px alpha(black, 0.2);
 }
 
-.library-tile:active {
-  background-image: image(alpha(currentColor, 0.08));
+button.library-tile:active {
+  background-image: image(alpha(currentColor, 0.07));
+}
+
+.tile-icon {
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 12px;
+  color: white;
+  box-shadow: inset 0 1px alpha(white, 0.2), 0 3px 8px -3px alpha(black, 0.35);
+}
+
+.tile-icon.blue   { background-image: linear-gradient(160deg, #62a0ea, #1c71d8); }
+.tile-icon.green  { background-image: linear-gradient(160deg, #57e389, #26a269); }
+.tile-icon.red    { background-image: linear-gradient(160deg, #f66151, #c01c28); }
+.tile-icon.orange { background-image: linear-gradient(160deg, #ffa348, #e66100); }
+.tile-icon.purple { background-image: linear-gradient(160deg, #c061cb, #813d9c); }
+.tile-icon.teal   { background-image: linear-gradient(160deg, #5bc8af, #1f8f83); }
+.tile-icon.yellow { background-image: linear-gradient(160deg, #f8e45c, #e5a50a); color: rgba(0, 0, 0, 0.8); }
+
+.tile-chevron {
+  opacity: 0.5;
+}
+
+/* ── строки треков: без рамки списка, подложка при наведении, действия — при наведении ── */
+
+list.track-rows {
+  background: none;
+}
+
+list.track-rows > row {
+  border-radius: 10px;
+  margin: 1px 0;
+}
+
+list.track-rows > row:hover {
+  background-color: alpha(currentColor, 0.05);
+}
+
+list.track-rows > row:selected,
+listview.track-list > row:selected {
+  background-color: alpha(var(--accent-bg-color), 0.16);
+}
+
+list.track-rows > row:selected:hover,
+listview.track-list > row:selected:hover {
+  background-color: alpha(var(--accent-bg-color), 0.22);
 }
 
 /* Длинные списки Библиотеки (GtkListView): поля — как у заголовка над списком. */
@@ -83,16 +243,173 @@ listview.track-list {
 }
 
 listview.track-list > row {
-  border-radius: 8px;
+  border-radius: 10px;
+  margin: 1px 0;
 }
+
+/* ♡ и «…» — видны при наведении, фокусе и выделении, как у Windows; отмеченное ♡ видно всегда.
+   В узком окне (скорее сенсорный экран) — всегда. Кнопки остаются на месте: колонки не прыгают. */
+.row-action {
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+row:hover .row-action,
+row:focus-within .row-action,
+row:selected .row-action,
+.row-action:focus-visible,
+.row-action.liked,
+menubutton.row-action:checked,
+.compact-window .row-action {
+  opacity: 1;
+}
+
+/* ── очередь ── */
+
+.queue-list > row {
+  border-radius: 10px;
+  padding: 4px 6px;
+}
+
+.queue-list > row.current {
+  background-color: alpha(var(--accent-bg-color), 0.14);
+}
+
+/* ── панель плеера ── */
+
+.player-bar {
+  background-color: var(--headerbar-bg-color);
+  box-shadow: 0 -1px alpha(black, 0.06), inset 0 1px alpha(currentColor, 0.06);
+}
+
+.player-bar .heading {
+  font-weight: 700;
+}
+
+.play-button {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.player-bar button.play-button {
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+  box-shadow: 0 4px 12px -4px alpha(black, 0.35);
+  transition: background-color 150ms ease-out, transform 150ms ease-out;
+}
+
+.player-bar button.play-button:hover {
+  transform: scale(1.06);
+}
+
+.player-bar button.play-button:active {
+  transform: scale(0.96);
+}
+
+/* Ползунки перемотки и громкости — тонкие; шарик виден под указателем и с клавиатуры. */
+.player-bar scale > trough,
+.now-playing-seek scale > trough {
+  min-height: 4px;
+  border-radius: 999px;
+}
+
+.player-bar scale > trough > slider {
+  min-width: 14px;
+  min-height: 14px;
+  margin: -5px;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+.player-bar scale:hover > trough > slider,
+.player-bar scale:focus-within > trough > slider,
+.player-bar scale:active > trough > slider,
+.compact-window .player-bar scale > trough > slider {
+  opacity: 1;
+}
+
+.now-playing-seek scale > trough {
+  min-height: 6px;
+}
+
+.now-playing-seek scale > trough > slider {
+  min-width: 16px;
+  min-height: 16px;
+  margin: -5px;
+}
+
+/* ── «Сейчас играет» ── */
+
+.now-playing-title {
+  font-size: 1.9em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.now-playing-subtitle {
+  font-size: 1.1em;
+  font-weight: 500;
+}
+
+.now-playing-play {
+  min-width: 72px;
+  min-height: 72px;
+  box-shadow: 0 10px 24px -10px alpha(black, 0.55);
+  transition: background-color 400ms ease-out, transform 150ms ease-out;
+}
+
+.now-playing-play:hover {
+  transform: scale(1.05);
+}
+
+.now-playing-play:active {
+  transform: scale(0.96);
+}
+
+.now-playing-controls > button:not(.now-playing-play) {
+  min-width: 46px;
+  min-height: 46px;
+}
+
+.now-playing-controls > button:not(.now-playing-play) image {
+  -gtk-icon-size: 22px;
+}
+
+/* ── шапка альбома, плейлиста, исполнителя: отсвет цветом обложки (catalog_widgets.rs) ── */
+
+.collection-header {
+  padding: 24px;
+  border-radius: 28px;
+  background-image: linear-gradient(160deg, alpha(currentColor, 0.07), alpha(currentColor, 0.0) 70%);
+}
+
+.collection-title {
+  font-size: 2.6em;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.collection-header button.pill:not(.suggested-action) {
+  background-color: alpha(currentColor, 0.1);
+}
+
+.collection-header button.pill:not(.suggested-action):hover {
+  background-color: alpha(currentColor, 0.15);
+}
+
+.collection-header button.pill.suggested-action {
+  box-shadow: 0 6px 16px -8px alpha(black, 0.5);
+}
+
+/* ── прочее ── */
 
 /* Панель выделенного (задание 0004): поверх списка над плеером, как всплывающая плашка. */
 .selection-bar {
   padding: 6px;
-  border-radius: 14px;
+  border-radius: 16px;
   background-color: var(--popover-bg-color);
   color: var(--popover-fg-color);
-  box-shadow: 0 1px 3px 1px alpha(black, 0.12), 0 2px 12px 2px alpha(black, 0.12), 0 0 0 1px var(--border-color);
+  box-shadow: 0 1px 3px 1px alpha(black, 0.12), 0 6px 20px 2px alpha(black, 0.16), 0 0 0 1px var(--border-color);
 }
 
 /* Код восстановления: крупно, моноширинным, переносится между группами. */
@@ -174,4 +491,20 @@ button.track-link:hover > label {
 /* «Сейчас играет» в цветах обложки: новый трек перетекает в свои цвета, а не мигает. */
 .now-playing-page {
   transition: background-color 400ms ease-out, color 400ms ease-out;
+}
+
+/* Высокий контраст: без теней и заливок — палитру выбирает человек. */
+@media (prefers-contrast: more) {
+  .cover.large,
+  .card-cover,
+  .now-playing-cover,
+  .player-cover,
+  .tile-icon,
+  button.mood-tile,
+  .player-bar button.play-button {
+    box-shadow: none;
+  }
+  .collection-header {
+    background-image: none;
+  }
 }

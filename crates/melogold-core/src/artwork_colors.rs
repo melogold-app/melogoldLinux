@@ -23,15 +23,20 @@ const MIN_CONTENT: usize = 3;
 /// Цвет в `0xRRGGBB`.
 pub type Rgb = u32;
 
-/// Палитра страницы: фон, текст, вторичный текст и подложка текущей строки текста песни.
+/// Палитра страницы: фон, текст, вторичный текст и подложка текущей строки текста песни; кнопка
+/// «Играть» и ползунки — цветом обложки (`accent` / `on_accent`), свечение за обложкой — `glow`.
 /// Фон ровный, как у Windows: тон сверху, как у Android, дал бы полосу под затуханием края
-/// текста — оно нарисовано цветом фона.
+/// текста — оно нарисовано цветом фона. Фон — свой тон цвета обложки, а не `surface`: у схемы
+/// Content поверхность почти нейтральна, и оттенок обложки на ней не читался.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArtworkPalette {
     pub background: Rgb,
     pub text: Rgb,
     pub secondary_text: Rgb,
     pub pill: Rgb,
+    pub accent: Rgb,
+    pub on_accent: Rgb,
+    pub glow: Rgb,
 }
 
 /// Цвет-зерно обложки по её пикселям RGBA (`stride` — байт в строке); `None` — обложка серая.
@@ -57,11 +62,17 @@ pub fn seed(rgba: &[u8], width: usize, height: usize, stride: usize) -> Option<R
 pub fn palette(seed: Rgb, dark: bool) -> ArtworkPalette {
     let source = Hct::new(Argb::from_u32(0xFF00_0000 | seed));
     let scheme = SchemeContent::new(source, dark, None).scheme;
+    // Фон — тон цвета обложки с приглушённой насыщенностью: заметно окрашен, но спокоен; подложка
+    // строки — на ступень контрастнее фона в обеих темах.
+    let background = Hct::from(source.get_hue(), (source.get_chroma() * 0.4).clamp(4.0, 20.0), if dark { 11.0 } else { 94.0 });
     ArtworkPalette {
-        background: rgb(scheme.surface()),
+        background: rgb(background.into()),
         text: rgb(scheme.on_surface()),
         secondary_text: rgb(scheme.on_surface_variant()),
-        pill: rgb(scheme.secondary_container()),
+        pill: rgb(scheme.secondary_palette.tone(if dark { 30 } else { 86 })),
+        accent: rgb(scheme.primary()),
+        on_accent: rgb(scheme.on_primary()),
+        glow: rgb(scheme.primary_container()),
     }
 }
 
@@ -198,7 +209,10 @@ mod tests {
         let light = palette(0x14AA96, false);
         assert!(luminance(dark.background) < 20.0);
         assert!(luminance(dark.text) > 80.0);
-        assert!(luminance(light.background) > 90.0);
+        assert!(luminance(light.background) > 88.0);
+        // Кнопка «Играть» контрастна со своим значком.
+        assert!((luminance(light.accent) - luminance(light.on_accent)).abs() > 40.0);
+        assert!((luminance(dark.accent) - luminance(dark.on_accent)).abs() > 40.0);
         assert!(luminance(light.text) < 20.0);
         // Фон — с оттенком обложки, а не серый.
         assert!(Hct::new(Argb::from_u32(0xFF00_0000 | dark.background)).get_chroma() > 1.0);

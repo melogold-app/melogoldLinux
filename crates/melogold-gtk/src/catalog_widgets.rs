@@ -46,7 +46,7 @@ impl TrackList {
     /// Список, строки которого знают своё место: из плейлиста и истории меню предлагает «Убрать из…».
     pub fn with_rows(window: &MainWindow, tracks: &[Track], shown: usize, context: TrackContext, row: RowContext) -> TrackList {
         let list = gtk::ListBox::builder().activate_on_single_click(false).build();
-        list.add_css_class("boxed-list");
+        list.add_css_class("track-rows");
         let selection = Selection::for_list_box(window, &list, row);
         let all = Rc::new(RefCell::new(tracks.to_vec()));
         let (weak, shared) = (window.downgrade(), Rc::clone(&all));
@@ -106,7 +106,7 @@ impl TrackListView {
         let model = gtk::MultiSelection::new(Some(store.clone()));
         let tracks: Rc<RefCell<Vec<Track>>> = Rc::default();
         let factory = gtk::SignalListItemFactory::new();
-        let view = gtk::ListView::builder().model(&model).factory(&factory).single_click_activate(false).show_separators(true).build();
+        let view = gtk::ListView::builder().model(&model).factory(&factory).single_click_activate(false).show_separators(false).build();
         view.add_css_class("track-list");
         let selection = Selection::for_list_view(window, &view, &model, Rc::clone(&tracks), place);
         let weak = window.downgrade();
@@ -198,6 +198,7 @@ pub fn card(window: &MainWindow, item: &MusicItem) -> gtk::Button {
 /// Карточка без действия: обложка и две строки подписи (свои плейлисты Библиотеки — тоже ею).
 pub fn card_view(window: &MainWindow, title: &str, subtitle: &str, thumbnail: Option<&str>, round: bool, wide: bool) -> gtk::Button {
     let cover = Cover::new(160);
+    cover.root.add_css_class("card-cover");
     if wide {
         // Клипы — карточкой 16:9: кадр видео целиком (§5.3 «Видео и песни»).
         cover.root.set_size_request(240, 135);
@@ -216,6 +217,7 @@ pub fn card_view(window: &MainWindow, title: &str, subtitle: &str, thumbnail: Op
         .max_width_chars(1)
         .width_request(width)
         .build();
+    title_label.add_css_class("card-title");
     let subtitle_label = gtk::Label::builder()
         .label(subtitle)
         .xalign(0.0)
@@ -225,7 +227,8 @@ pub fn card_view(window: &MainWindow, title: &str, subtitle: &str, thumbnail: Op
         .build();
     subtitle_label.add_css_class("dim-label");
     subtitle_label.add_css_class("caption");
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
+    cover.root.set_margin_bottom(6);
     content.append(&cover.root);
     content.append(&title_label);
     if !subtitle.is_empty() {
@@ -240,7 +243,7 @@ pub fn card_view(window: &MainWindow, title: &str, subtitle: &str, thumbnail: Op
 
 /// Горизонтальный ряд карточек.
 pub fn card_row(window: &MainWindow, items: &[MusicItem]) -> gtk::ScrolledWindow {
-    let row = gtk::Box::builder().spacing(8).margin_bottom(6).build();
+    let row = gtk::Box::builder().spacing(6).margin_bottom(6).build();
     for item in items {
         row.append(&card(window, item));
     }
@@ -267,32 +270,38 @@ pub fn card_grid(window: &MainWindow, items: &[MusicItem]) -> gtk::FlowBox {
     grid
 }
 
-/// Плитки «Настроения и жанры» с цветной полоской.
+/// Плитки «Настроения и жанры» — залитые цветом настроения, как у YouTube Music и Android: цвет
+/// сверху слева переходит в тон темнее. Подпись — белая, на светлом цвете — тёмная (контраст).
 pub fn mood_grid(window: &MainWindow, items: &[MusicItem]) -> gtk::FlowBox {
     let grid = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .homogeneous(true)
         .min_children_per_line(2)
         .max_children_per_line(8)
-        .column_spacing(8)
-        .row_spacing(8)
+        .column_spacing(10)
+        .row_spacing(10)
         .build();
     for item in items {
         let MusicItem::Mood(mood) = item else { continue };
-        let stripe = gtk::Box::builder().width_request(6).build();
-        stripe.add_css_class("mood-stripe");
-        if let Some(color) = mood.color {
-            let provider = gtk::CssProvider::new();
-            provider.load_from_string(&format!(".mood-stripe {{ background-color: #{:06x}; }}", color & 0xFF_FFFF));
-            #[allow(deprecated)]
-            stripe.style_context().add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-        }
-        let label = gtk::Label::builder().label(&mood.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).hexpand(true).build();
-        let content = gtk::Box::builder().spacing(10).build();
-        content.append(&stripe);
-        content.append(&label);
-        let button = gtk::Button::builder().child(&content).build();
+        let label = gtk::Label::builder()
+            .label(&mood.title)
+            .xalign(0.0)
+            .yalign(1.0)
+            .wrap(true)
+            // По словам, а длинное слово — по буквам: иначе «Концентрация» задавала бы ширину плитки,
+            // и две плитки в ряд не давали окну сжаться до 360.
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .lines(2)
+            .width_chars(8)
+            .max_width_chars(14)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .hexpand(true)
+            .build();
+        let button = gtk::Button::builder().child(&label).build();
         button.add_css_class("mood-tile");
+        if let Some(color) = mood.color {
+            crate::widgets::widget_css(&button, &mood_css(color & 0xFF_FFFF));
+        }
         let (weak, item) = (window.downgrade(), item.clone());
         button.connect_clicked(move |_| {
             if let Some(window) = weak.upgrade() {
@@ -302,6 +311,15 @@ pub fn mood_grid(window: &MainWindow, items: &[MusicItem]) -> gtk::FlowBox {
         grid.append(&button);
     }
     grid
+}
+
+/// Заливка плитки настроения: цвет → тот же на 30 % темнее; подпись по яркости цвета.
+fn mood_css(color: u32) -> String {
+    let channel = |shift: u32| f64::from((color >> shift) & 0xFF) / 255.0;
+    let linear = |c: f64| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    let luminance = 0.2126 * linear(channel(16)) + 0.7152 * linear(channel(8)) + 0.0722 * linear(channel(0));
+    let text = if luminance > 0.45 { "rgba(0, 0, 0, 0.85)" } else { "white" };
+    format!("button.mood-tile {{ background-image: linear-gradient(135deg, #{color:06x}, shade(#{color:06x}, 0.7)); color: {text}; }}")
 }
 
 /// Клипы и видео YTM приходят карточками 16:9 без длительности — их показываем рядом, а не строками.
@@ -316,6 +334,7 @@ pub fn shelf_view(window: &MainWindow, shelf: &Shelf, max_rows: usize, context: 
     if let Some(title) = shelf.title.as_deref().filter(|t| !t.is_empty()) {
         let label = gtk::Label::builder().label(title).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
         label.add_css_class("title-4");
+        label.add_css_class("shelf-title");
         label.set_accessible_role(gtk::AccessibleRole::Heading);
         header.append(&label);
     }
@@ -334,7 +353,7 @@ pub fn shelf_view(window: &MainWindow, shelf: &Shelf, max_rows: usize, context: 
     });
     if let Some(more) = more {
         let button = gtk::Button::builder().label(format!("{} ›", tr("SeeAll"))).valign(gtk::Align::Center).build();
-        button.add_css_class("flat");
+        button.add_css_class("see-all");
         button.connect_clicked(move |_| more());
         header.append(&button);
     }
@@ -386,7 +405,7 @@ impl CollectionHeader {
         thumbnail: Option<&str>,
         round: bool,
     ) -> CollectionHeader {
-        let cover = Cover::new(200);
+        let cover = Cover::new(220);
         if round {
             cover.root.add_css_class("round");
         }
@@ -394,6 +413,7 @@ impl CollectionHeader {
         cover.set(&window.ctx.services.images, thumbnail, 544);
         let title_label = gtk::Label::builder().label(title).xalign(0.0).wrap(true).selectable(true).build();
         title_label.add_css_class("title-1");
+        title_label.add_css_class("collection-title");
         let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).valign(gtk::Align::Center).hexpand(true).build();
         texts.append(&title_label);
         for (text, class) in [(Some(subtitle), "heading"), (detail, "dim-label")] {
@@ -403,14 +423,37 @@ impl CollectionHeader {
                 texts.append(&label);
             }
         }
-        let buttons = gtk::Box::builder().spacing(8).margin_top(12).build();
+        let buttons = gtk::Box::builder().spacing(8).margin_top(14).build();
         let scroller =
             gtk::ScrolledWindow::builder().child(&buttons).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).build();
         texts.append(&scroller);
-        let root = gtk::Box::builder().spacing(24).build();
+        let root = gtk::Box::builder().spacing(28).build();
+        root.add_css_class("collection-header");
         root.append(&cover.root);
         root.append(&texts);
         window.register_header(&root);
+        // Отсвет шапки — цветом обложки (как фон «Сейчас играет»): сверху слева гуще, к низу сходит
+        // на нет. Серая обложка — отсвет нейтральный, из стилей приложения.
+        let weak = root.downgrade();
+        cover.on_loaded(move |texture| {
+            let (weak, texture) = (weak.clone(), texture.clone());
+            glib::spawn_future_local(async move {
+                let seed = crate::widgets::artwork_seed(&texture).await;
+                let (Some(root), Some(seed)) = (weak.upgrade(), seed) else { return };
+                let manager = adw::StyleManager::default();
+                if manager.is_high_contrast() {
+                    return;
+                }
+                let palette = melogold_core::artwork_colors::palette(seed, manager.is_dark());
+                let glow = format!("#{:06x}", palette.glow);
+                crate::widgets::widget_css(
+                    &root,
+                    &format!(
+                        ".collection-header {{ background-image: linear-gradient(160deg, alpha({glow}, 0.95), alpha({glow}, 0.35) 55%, alpha({glow}, 0.0)); }}"
+                    ),
+                );
+            });
+        });
         CollectionHeader { root, buttons }
     }
 

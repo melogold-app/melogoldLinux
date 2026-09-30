@@ -137,7 +137,9 @@ impl MainWindow {
         sidebar_box.append(&bottom_list);
         let sidebar = adw::ToolbarView::new();
         let sidebar_header = adw::HeaderBar::new();
-        sidebar_header.set_title_widget(Some(&adw::WindowTitle::new("Melogold", "")));
+        let brand = gtk::Label::builder().label("Melogold").build();
+        brand.add_css_class("sidebar-brand");
+        sidebar_header.set_title_widget(Some(&brand));
         sidebar.add_top_bar(&sidebar_header);
         sidebar.set_content(Some(&sidebar_box));
 
@@ -158,6 +160,7 @@ impl MainWindow {
         header.pack_start(&sidebar_toggle);
         header.pack_start(&back);
         let search = gtk::SearchEntry::builder().placeholder_text(tr("SearchBox.PlaceholderText")).hexpand(true).build();
+        search.add_css_class("main-search");
         search.update_property(&[gtk::accessible::Property::Label(tr("SearchBox.PlaceholderText"))]);
         let clamp = adw::Clamp::builder().maximum_size(520).tightening_threshold(360).child(&search).hexpand(true).build();
         header.set_title_widget(Some(&clamp));
@@ -720,6 +723,12 @@ impl MainWindow {
 
     fn set_compact(&self, compact: bool) {
         self.compact.set(compact);
+        // Узкое окно — скорее всего сенсорный экран: действия строк видны и без наведения.
+        if compact {
+            self.window.add_css_class("compact-window");
+        } else {
+            self.window.remove_css_class("compact-window");
+        }
         let orientation = if compact { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal };
         self.headers.borrow_mut().retain(|header| match header.upgrade() {
             Some(header) => {
@@ -1410,6 +1419,7 @@ fn suggestion_row(item: &Suggestion) -> gtk::ListBoxRow {
 fn sidebar_list() -> gtk::ListBox {
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
+    list.add_css_class("main-nav");
     list
 }
 

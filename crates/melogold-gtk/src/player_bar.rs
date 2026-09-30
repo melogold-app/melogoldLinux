@@ -98,6 +98,7 @@ impl PlayerBar {
     pub fn new(window: &MainWindow) -> PlayerBar {
         // ── слева: трек ──
         let cover = Cover::new(48);
+        cover.root.add_css_class("player-cover");
         let cover_button = gtk::Button::builder().child(&cover.root).valign(gtk::Align::Center).tooltip_text(tr("NowPlaying")).build();
         cover_button.add_css_class("flat");
         cover_button.add_css_class("cover-button");
@@ -163,7 +164,7 @@ impl PlayerBar {
             tr("PlayerPrevious.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip"),
             tr("Previous"),
         );
-        let play_icon = gtk::Image::from_icon_name("media-playback-start-symbolic");
+        let play_icon = gtk::Image::builder().icon_name("media-playback-start-symbolic").pixel_size(20).build();
         let spinner = adw::Spinner::new();
         let play_stack = gtk::Stack::new();
         play_stack.add_named(&play_icon, Some("icon"));
