@@ -31,6 +31,11 @@
   - `404` → «Ссылка удалена или неверна»; нет сети → обычная ошибка сети с «Повторить».
 - **Ссылки других сервисов** — Spotify, Apple Music, Яндекс Музыка, Deezer, Tidal, SoundCloud (вставлены в поиск,
   открыты, присланы в приложение):
+  - **Уточнение 2026-09-30:** song.link без ключа теперь отвечает `401 PUBLIC_API_ACCESS_DEPRECATED`. Без ключа
+    запрос к нему не делать: прочитать начало страницы самой ссылки (до ~400 КБ, User-Agent браузера), взять название и
+    исполнителя из `<title>` / `og:title` / `og:description` по правилам сервиса и искать на YouTube Music. Образцы с
+    реальными заголовками: Android `providers/songlink/PageTitles.kt` (тесты с HTML-фикстурами), Apple
+    `Packages/MelogoldKit/Sources/MelogoldInnerTube/ExternalLinks.swift`. song.link — только если в сборке задан ключ.
   - `GET https://api.song.link/v1-alpha.1/links?url=<ссылка>` → `linksByPlatform.youtubeMusic`, иначе `youtube` →
     videoId или browseId → открыть трек или альбом;
   - song.link не нашёл или недоступен → поиск по названию и исполнителю (из `entitiesByUniqueId` ответа или из
