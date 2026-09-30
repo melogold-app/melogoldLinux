@@ -8,6 +8,8 @@ License:        GPL-3.0-or-later
 URL:            https://github.com/melogold-app/melogoldLinux
 Requires:       gtk4 >= 4.20
 Requires:       libadwaita >= 1.8
+# pkexec для обновления из окна (помощник /usr/libexec/melogold/melogold-update).
+Requires:       polkit
 Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
 # Декодер AAC: fdk-aac из bad-free обычно уже стоит; libav тянет ffmpeg.
@@ -27,6 +29,8 @@ cp -a %{melogold_stage}/. %{buildroot}/
 %files
 %license /usr/share/licenses/melogold/LICENSE
 /usr/bin/melogold
+/usr/libexec/melogold/melogold-update
+/usr/share/polkit-1/actions/app.melogold.Melogold.update.policy
 /usr/share/applications/app.melogold.Melogold.desktop
 /usr/share/metainfo/app.melogold.Melogold.metainfo.xml
 /usr/share/icons/hicolor/*/apps/app.melogold.Melogold.png

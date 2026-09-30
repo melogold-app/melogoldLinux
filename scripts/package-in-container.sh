@@ -20,6 +20,11 @@ strip "${binary}"
 # ── дерево установки (/usr) ──────────────────────────────────────────────────────
 stage="$(mktemp -d)"
 install -D -m 0755 "${binary}" "${stage}/usr/bin/melogold"
+# Помощник обновления deb и rpm (запускается окном через pkexec) и его polkit-действие.
+helper="${CARGO_TARGET_DIR}/release/melogold-update"
+strip "${helper}"
+install -D -m 0755 "${helper}" "${stage}/usr/libexec/melogold/melogold-update"
+install -D -m 0644 "packaging/polkit/${app_id}.update.policy" "${stage}/usr/share/polkit-1/actions/${app_id}.update.policy"
 install -D -m 0644 "packaging/${app_id}.desktop" "${stage}/usr/share/applications/${app_id}.desktop"
 install -D -m 0644 "packaging/${app_id}.metainfo.xml" "${stage}/usr/share/metainfo/${app_id}.metainfo.xml"
 for icon in packaging/icons/hicolor/*/apps/"${app_id}".png; do
@@ -54,6 +59,8 @@ dpkg-deb --root-owner-group --build "${deb}" "${out}/melogold_${version}_amd64.d
 appdir="$(mktemp -d)/AppDir"
 mkdir -p "${appdir}"
 cp -a "${stage}/usr" "${appdir}/"
+# AppImage обновляет себя сам, помощник и polkit ему не нужны.
+rm -rf "${appdir}/usr/libexec/melogold" "${appdir}/usr/share/polkit-1"
 install -m 0755 packaging/appimage/AppRun "${appdir}/AppRun"
 cp "packaging/${app_id}.desktop" "${appdir}/${app_id}.desktop"
 cp "packaging/icons/hicolor/256x256/apps/${app_id}.png" "${appdir}/${app_id}.png"
@@ -109,20 +116,33 @@ ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "${appimagetool}" --no-appstream "${appdi
 chmod +x "${out}/Melogold-x86_64.AppImage"
 
 # ── update.json: формат Android плюс файл по архитектуре ─────────────────────────
-appimage="${out}/Melogold-x86_64.AppImage"
-note() { [[ -f release-notes/${version}.$1.md ]] && python3 -c 'import json,sys; print(json.dumps(open(sys.argv[1]).read().strip()))' "release-notes/${version}.$1.md" || echo null; }
-cat > "${out}/update.json" <<JSON
-{
-  "version": "${version}",
-  "notes": { "ru": $(note ru), "en": $(note en) },
-  "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "assets": {
-    "x86_64": {
-      "fileName": "Melogold-x86_64.AppImage",
-      "sizeBytes": $(stat -c %s "${appimage}"),
-      "sha256": "$(sha256sum "${appimage}" | cut -d' ' -f1)"
-    }
-  }
+# assets (AppImage) читают и 0.1.3 и старше — не менять; packages (deb, rpm) старые версии пропускают.
+python3 - "${out}" "${version}" <<'PY'
+import hashlib, json, os, sys, glob, datetime
+
+out, version = sys.argv[1], sys.argv[2]
+
+def asset(path):
+    data = open(path, "rb").read()
+    return {"fileName": os.path.basename(path), "sizeBytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+def note(lang):
+    path = f"release-notes/{version}.{lang}.md"
+    return open(path, encoding="utf-8").read().strip() if os.path.exists(path) else None
+
+rpm, = glob.glob(f"{out}/melogold-{version}-1.*.x86_64.rpm")
+manifest = {
+    "version": version,
+    "notes": {"ru": note("ru"), "en": note("en")},
+    "publishedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "assets": {"x86_64": asset(f"{out}/Melogold-x86_64.AppImage")},
+    "packages": {
+        "deb": {"x86_64": asset(f"{out}/melogold_{version}_amd64.deb")},
+        "rpm": {"x86_64": asset(rpm)},
+    },
 }
-JSON
+with open(f"{out}/update.json", "w", encoding="utf-8") as f:
+    json.dump(manifest, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
 ls -la "${out}"

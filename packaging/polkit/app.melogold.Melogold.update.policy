@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Обновление Melogold из окна (docs/PROMPT.md §3 «Обновления»): pkexec запускает только помощника,
+     а тот ставит лишь последнюю официальную версию с github.com/melogold-app/melogoldLinux. В активном
+     локальном сеансе пароль не нужен; удалённому и неактивному сеансу — пароль администратора. -->
+<policyconfig>
+  <vendor>Melogold</vendor>
+  <vendor_url>https://github.com/melogold-app/melogoldLinux</vendor_url>
+  <action id="app.melogold.Melogold.update">
+    <description>Update Melogold</description>
+    <description xml:lang="ru">Обновить Melogold</description>
+    <message>Authentication is required to update Melogold</message>
+    <message xml:lang="ru">Для обновления Melogold нужно подтверждение</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/melogold/melogold-update</annotate>
+  </action>
+</policyconfig>

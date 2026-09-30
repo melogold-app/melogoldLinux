@@ -3,7 +3,7 @@ Version: @VERSION@
 Architecture: amd64
 Maintainer: Melogold <noreply@melogold.app>
 Installed-Size: @SIZE@
-Depends: libc6 (>= 2.39), libgtk-4-1 (>= 4.20.0), libadwaita-1-0 (>= 1.8.0), libgstreamer1.0-0 (>= 1.24), libgstreamer-plugins-base1.0-0 (>= 1.24), gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-libav | gstreamer1.0-plugins-bad
+Depends: libc6 (>= 2.39), libgtk-4-1 (>= 4.20.0), libadwaita-1-0 (>= 1.8.0), libgstreamer1.0-0 (>= 1.24), libgstreamer-plugins-base1.0-0 (>= 1.24), gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-libav | gstreamer1.0-plugins-bad, pkexec | policykit-1
 Recommends: gnome-keyring | kwalletmanager, xdg-desktop-portal
 Section: sound
 Priority: optional
