@@ -12,7 +12,7 @@ use melogold_innertube::YouTubeError;
 use melogold_playback::engine::Command;
 
 use crate::catalog_widgets::{
-    card, card_grid, description, mood_grid, shelf_view, track_list, CollectionHeader, Toggle, TrackContext, TrackList,
+    card, card_grid, description, mood_grid, shelf_view, track_list, CollectionHeader, DescriptionOwner, Toggle, TrackContext, TrackList,
 };
 use crate::localization::tr;
 use crate::widgets::{catalog_error, StateView};
@@ -222,6 +222,15 @@ pub fn album_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage {
             }
             crate::share::add_copy_link(window, &header, melogold_core::share_links::album_url(&album.album.browse_id));
             content.append(&header.root);
+            if let Some(text) = album.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                let owner = DescriptionOwner {
+                    title: album.album.title.clone(),
+                    line: subtitle.clone(),
+                    cover: album.album.thumbnail_url.clone(),
+                    round: false,
+                };
+                content.append(&description(window, text, owner));
+            }
             content.append(&spacer());
             content.append(&track_list(window, &album.tracks, usize::MAX, TrackContext::List));
             for shelf in &album.shelves {
@@ -359,8 +368,19 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
             bookmark_state(window, &subscribe, move |library| library.is_artist_saved(&id).unwrap_or(false));
             crate::share::add_copy_link(window, &header, melogold_core::share_links::artist_url(&artist.browse_id, artist.is_channel));
             content.append(&header.root);
-            if let Some(text) = artist.description.as_deref().filter(|d| !d.is_empty()) {
-                content.append(&description(text));
+            if let Some(text) = artist.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                let owner = DescriptionOwner {
+                    title: artist.name.clone(),
+                    line: [kind, artist.subscribers_text.as_deref().unwrap_or_default()]
+                        .iter()
+                        .filter(|part| !part.is_empty())
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                    cover: artist.thumbnail_url.clone(),
+                    round: true,
+                };
+                content.append(&description(window, text, owner));
             }
             match channel {
                 Some(channel) if artist.is_channel => {

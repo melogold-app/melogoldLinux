@@ -1,6 +1,6 @@
 # Описание альбома и исполнителя: «Ещё» открывает окно со ссылкой на Википедию
 
-Статус: открыто
+Статус: сделано — разбор `melogold_core::description` (тесты Windows и CC BY-SA 4.0), окно `catalog_widgets::description_dialog`; у альбома описание появилось впервые (раньше не показывалось вовсе). Снимки на образце — шаг `07a5-description-sample`; на живых «OK Computer» и «Кино» не снято — YouTube с этой машины не открывался
 
 То же на Windows — сделано в 0.1.13 (`melogoldWindows`, коммит 585e5ce: `src/Melogold.Core/Domain/DescriptionText.cs`,
 `src/Melogold.App/Controls/DescriptionDialog.cs`, тесты `DescriptionTextTests`).

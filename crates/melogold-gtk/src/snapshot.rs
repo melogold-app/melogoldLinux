@@ -124,6 +124,11 @@ pub fn maybe_start(window: &MainWindow) {
             4000,
         ),
         ("07a-album", Box::new(|w| w.push(&crate::pages::catalog::album_page(w, "MPREb_OLmD8O5IYNS"))), 3500),
+        ("07a3-album-description", Box::new(|w| click_button(w, crate::localization::tr("ResultsMore"))), 1500),
+        ("07a4-album-description-closed", Box::new(close_dialog), 300),
+        // Окно описания на образцовых данных — без сети (задание 0023).
+        ("07a5-description-sample", Box::new(description_sample), 900),
+        ("07a6-description-sample-closed", Box::new(close_dialog), 300),
         ("07b-artist", Box::new(|w| w.push(&crate::pages::catalog::artist_page(w, "UCRr1xG_2WIDs18a6cIiCxeA"))), 4000),
         (
             // Полки альбомов и синглов исполнителя — у каждой «Все ›» (у альбомов без ссылки YouTube —
@@ -767,4 +772,47 @@ fn account_steps() -> Vec<Step> {
             4000,
         ),
     ]
+}
+
+/// Нажать видимую кнопку с подписью `label` на открытой странице (шаг съёмки).
+fn click_button(window: &MainWindow, label: &str) {
+    fn walk(widget: &gtk::Widget, label: &str) -> Option<gtk::Button> {
+        if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+            if button.label().as_deref() == Some(label) && button.is_mapped() {
+                return Some(button.clone());
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            if let Some(found) = walk(&current, label) {
+                return Some(found);
+            }
+            child = current.next_sibling();
+        }
+        None
+    }
+    match walk(window.window.upcast_ref(), label) {
+        Some(button) => button.emit_clicked(),
+        None => eprintln!("снимок: кнопки «{label}» на экране нет"),
+    }
+}
+
+/// Закрыть открытый диалог (шаг съёмки).
+fn close_dialog(window: &MainWindow) {
+    if let Some(dialog) = window.window.visible_dialog() {
+        dialog.close();
+    }
+}
+
+/// Окно «Ещё» альбома с источником из Википедии — образец ответа YouTube Music.
+fn description_sample(window: &MainWindow) {
+    let text = "OK Computer is the third studio album by the English rock band Radiohead, released in May 1997.\n\nRadiohead self-produced the album with Nigel Godrich, an arrangement they have used for their subsequent albums.\n\nFrom Wikipedia (https://en.wikipedia.org/wiki/OK_Computer) under Creative Commons Attribution CC-BY-SA 3.0 (https://creativecommons.org/licenses/...)";
+    let (body, source) = melogold_core::description::split(Some(text));
+    let owner = crate::catalog_widgets::DescriptionOwner {
+        title: "OK Computer".into(),
+        line: "Альбом · Radiohead · 1997".into(),
+        cover: None,
+        round: false,
+    };
+    crate::catalog_widgets::description_dialog(window, &owner, &body, source.as_ref());
 }

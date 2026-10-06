@@ -507,10 +507,23 @@ impl Toggle {
     }
 }
 
-/// Описание: три строки, «Ещё» раскрывает целиком (§5.4). Свёрнутое — одним абзацем: Pango
-/// ограничивает строки в каждом абзаце отдельно, и описание с абзацами не сворачивалось.
-pub fn description(text: &str) -> gtk::Box {
-    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+/// Кому принадлежит описание — для окна «Ещё»: обложка, название, строка «Альбом · Исполнитель · Год».
+pub struct DescriptionOwner {
+    pub title: String,
+    pub line: String,
+    pub cover: Option<String>,
+    /// Исполнитель — круглое фото, альбом — квадратная обложка.
+    pub round: bool,
+}
+
+/// Описание в шапке альбома и исполнителя: три строки и «Ещё», которое открывает системное окно с
+/// текстом целиком и источником (задание 0023, Windows `DescriptionDialog`). Строка «From Wikipedia
+/// (…) under …» в конце текста — не текст, а источник: в шапке её нет, в окне она ссылками.
+pub fn description(window: &MainWindow, text: &str, owner: DescriptionOwner) -> gtk::Box {
+    let (body, source) = melogold_core::description::split(Some(text));
+    // Свёрнутое — одним абзацем: Pango ограничивает строки в каждом абзаце отдельно, и описание с
+    // абзацами не сворачивалось.
+    let collapsed = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let label = gtk::Label::builder().label(&collapsed).xalign(0.0).wrap(true).lines(3).ellipsize(gtk::pango::EllipsizeMode::End).build();
     label.add_css_class("dim-label");
     let more = gtk::Button::builder().label(tr("ResultsMore")).halign(gtk::Align::Start).build();
@@ -518,12 +531,114 @@ pub fn description(text: &str) -> gtk::Box {
     let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).margin_top(12).build();
     root.append(&label);
     root.append(&more);
-    let full = text.to_owned();
-    more.connect_clicked(move |button| {
-        label.set_label(&full);
-        label.set_lines(-1);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::None);
-        button.set_visible(false);
+    // «Ещё» — если текст не уместился в три строки или есть источник. Уместился ли, видно только
+    // после раскладки: проверяем, когда подпись показана; длинный текст — «Ещё» сразу.
+    let has_source = source.is_some() || body.chars().count() > 280 || body.contains('\n');
+    more.set_visible(has_source);
+    let check = {
+        let (label, more) = (label.downgrade(), more.downgrade());
+        move || {
+            if let (Some(label), Some(more)) = (label.upgrade(), more.upgrade()) {
+                more.set_visible(has_source || label.layout().is_ellipsized());
+            }
+        }
+    };
+    label.connect_map(move |_| {
+        let check = check.clone();
+        glib::idle_add_local_once(check);
+    });
+    let (weak, body) = (window.downgrade(), body.clone());
+    more.connect_clicked(move |_| {
+        if let Some(window) = weak.upgrade() {
+            description_dialog(&window, &owner, &body, source.as_ref());
+        }
     });
     root
+}
+
+/// «CC-BY-SA 3.0» из длинного названия лицензии — короткая подпись ссылки, как у Windows.
+fn short_license(name: &str) -> String {
+    let upper = name.to_uppercase();
+    for version in ["3.0", "4.0"] {
+        if upper.contains(&format!("CC-BY-SA {version}")) || upper.contains(&format!("CC BY-SA {version}")) {
+            return format!("CC BY-SA {version}");
+        }
+    }
+    name.to_owned()
+}
+
+/// Окно описания: обложка, название, строка, текст целиком (выделяется, прокручивается) и внизу
+/// «Источник: Википедия · Лицензия: CC BY-SA 3.0» ссылками. Ссылка ставится, только если адрес —
+/// https на `*.wikipedia.org` и `creativecommons.org`: адрес пришёл из сети. Esc закрывает.
+pub(crate) fn description_dialog(
+    window: &MainWindow,
+    owner: &DescriptionOwner,
+    body: &str,
+    source: Option<&melogold_core::description::DescriptionSource>,
+) {
+    let cover = Cover::new(160);
+    cover.root.set_halign(gtk::Align::Center);
+    cover.root.add_css_class("card-cover");
+    if owner.round {
+        cover.root.add_css_class("round");
+    }
+    cover.set(&window.ctx.services.images, owner.cover.as_deref(), 320);
+
+    let title = gtk::Label::builder().label(&owner.title).wrap(true).justify(gtk::Justification::Center).build();
+    title.add_css_class("title-2");
+    let line = gtk::Label::builder().label(&owner.line).wrap(true).justify(gtk::Justification::Center).build();
+    line.add_css_class("dim-label");
+    line.set_visible(!owner.line.is_empty());
+    // Без клавиатурного фокуса: окно отдаёт фокус первому, что его принимает, а выделяемая подпись,
+    // получив его, выделяет весь текст — будто его уже скопировали. Мышью текст выделяется как прежде.
+    let text = gtk::Label::builder().label(body).wrap(true).xalign(0.0).selectable(true).can_focus(false).build();
+    text.add_css_class("body");
+
+    let column = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(6)
+        .margin_bottom(24)
+        .margin_start(24)
+        .margin_end(24)
+        .build();
+    column.append(&cover.root);
+    column.append(&title);
+    column.append(&line);
+    column.append(&text);
+
+    if let Some(source) = source {
+        let escape = |s: &str| glib::markup_escape_text(s).to_string();
+        let link = |url: &str, label: &str| format!("<a href=\"{}\">{}</a>", escape(url), escape(label));
+        let mut parts = Vec::new();
+        if melogold_core::description::is_wikipedia(&source.article_url) {
+            parts.push(format!("{} {}", escape(tr("DescriptionSource")), link(&source.article_url, tr("DescriptionWikipedia"))));
+        }
+        if let Some(license) = &source.license {
+            let name = short_license(license);
+            let shown = match &source.license_url {
+                Some(url) if melogold_core::description::is_license(url) => link(url, &name),
+                _ => escape(&name),
+            };
+            parts.push(format!("{} {shown}", escape(tr("DescriptionLicense"))));
+        }
+        if !parts.is_empty() {
+            let footer = gtk::Label::builder().label(parts.join(" · ")).use_markup(true).wrap(true).xalign(0.0).build();
+            footer.add_css_class("caption");
+            footer.add_css_class("dim-label");
+            column.append(&footer);
+        }
+    }
+
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .child(&adw::Clamp::builder().maximum_size(560).child(&column).build())
+        .build();
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&scroller));
+    // Высота — по содержимому (не выше окна): короткое описание не оставляет пустоты внизу.
+    let dialog = adw::Dialog::builder().title(&owner.title).content_width(520).child(&toolbar).build();
+    dialog.present(Some(&window.window));
 }

@@ -7,6 +7,7 @@ pub mod app_info;
 pub mod artwork_colors;
 pub mod countries;
 mod countries_generated;
+pub mod description;
 pub mod devices;
 pub mod frame_bars;
 pub mod hwid;
