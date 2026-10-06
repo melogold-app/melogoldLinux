@@ -24,6 +24,10 @@ struct Scaffold {
     content: gtk::Box,
     state: StateView,
     scroller: gtk::ScrolledWindow,
+    /// Над колонкой страницы, во всю ширину: шапка исполнителя (задание 0019). У остальных страниц пусто.
+    hero: gtk::Box,
+    /// Поверх верха страницы: полоса с именем исполнителя при прокрутке.
+    sticky: gtk::Box,
 }
 
 fn scaffold(title: &str, tag: Option<&str>, heading: bool) -> Scaffold {
@@ -44,12 +48,19 @@ fn scaffold(title: &str, tag: Option<&str>, heading: bool) -> Scaffold {
     }
     body.append(&state.root);
     let clamp = adw::Clamp::builder().maximum_size(1100).child(&body).build();
-    let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&clamp).vexpand(true).build();
-    let mut builder = adw::NavigationPage::builder().title(title).child(&scroller);
+    let hero = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    column.append(&hero);
+    column.append(&clamp);
+    let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&column).vexpand(true).build();
+    let sticky = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Start).build();
+    let overlay = gtk::Overlay::builder().child(&scroller).build();
+    overlay.add_overlay(&sticky);
+    let mut builder = adw::NavigationPage::builder().title(title).child(&overlay);
     if let Some(tag) = tag {
         builder = builder.tag(tag);
     }
-    Scaffold { page: builder.build(), content, state, scroller }
+    Scaffold { page: builder.build(), content, state, scroller, hero, sticky }
 }
 
 /// Загрузить в рантайме tokio и показать; ошибка — текст по классу и «Повторить».
@@ -295,16 +306,31 @@ pub fn playlist_page(window: &MainWindow, playlist_id: &str) -> adw::NavigationP
 
 /// Исполнитель YTM; без музыкального профиля — канал YouTube с бесконечной лентой видео.
 pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage {
+    artist_page_with(window, browse_id, None)
+}
+
+/// Страница исполнителя из готового ответа — снимки окна без сети (отладочная сборка).
+#[cfg(debug_assertions)]
+pub fn artist_page_from(window: &MainWindow, details: melogold_core::music::ArtistDetails) -> adw::NavigationPage {
+    let id = details.browse_id.clone();
+    artist_page_with(window, &id, Some(details))
+}
+
+fn artist_page_with(window: &MainWindow, browse_id: &str, ready: Option<melogold_core::music::ArtistDetails>) -> adw::NavigationPage {
     let page = scaffold("Melogold", None, false);
     let (music, id) = (window.ctx.services.music.clone(), browse_id.to_owned());
     let (title_page, scroller) = (page.page.clone(), page.scroller.clone());
+    let (hero_slot, sticky_slot) = (page.hero.clone(), page.sticky.clone());
     load(
         window,
         &page,
         move || {
-            let (music, id) = (music.clone(), id.clone());
+            let (music, id, ready) = (music.clone(), id.clone(), ready.clone());
             async move {
-                let artist = music.artist(&id).await?;
+                let artist = match ready {
+                    Some(artist) => artist,
+                    None => music.artist(&id).await?,
+                };
                 // У канала — продолжения ленты видео.
                 let channel = if artist.is_channel { music.channel(&id).await.ok() } else { None };
                 Ok((artist, channel))
@@ -312,15 +338,12 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
         },
         move |window, content, (artist, channel)| {
             title_page.set_title(&artist.name);
+            for slot in [&hero_slot, &sticky_slot] {
+                while let Some(child) = slot.first_child() {
+                    slot.remove(&child);
+                }
+            }
             let kind = if artist.is_channel { tr("YouTubeChannel") } else { "" };
-            let header = CollectionHeader::new(
-                window,
-                &artist.name,
-                kind,
-                artist.subscribers_text.as_deref(),
-                artist.thumbnail_url.as_deref(),
-                true,
-            );
             let item = ArtistItem {
                 browse_id: artist.browse_id.clone(),
                 name: artist.name.clone(),
@@ -329,10 +352,11 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
                 is_channel: artist.is_channel,
             };
             let top: Vec<Track> = artist.shelves.first().map(|s| s.tracks().cloned().collect()).unwrap_or_default();
-            if !top.is_empty() {
+            // «Слушать» — все песни исполнителя (плейлист «Песни»), не вышло — популярные.
+            let all_songs: Option<Rc<dyn Fn(bool)>> = (!top.is_empty()).then(|| {
                 let (weak, music, songs, top_tracks) =
                     (window.downgrade(), window.ctx.services.music.clone(), artist.songs_playlist_id.clone(), top.clone());
-                let all_songs = Rc::new(move |shuffle: bool| {
+                Rc::new(move |shuffle: bool| {
                     let Some(window) = weak.upgrade() else { return };
                     let player = window.ctx.services.player.clone();
                     let Some(songs) = songs.clone() else {
@@ -348,14 +372,11 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
                         };
                         player.send(Command::PlayList { tracks, start: 0, shuffle });
                     });
-                });
-                let play = Rc::clone(&all_songs);
-                header.add_button(tr("PlayAll"), "media-playback-start-symbolic", true, move || play(false));
-                header.add_button(tr("Shuffle"), "media-playlist-shuffle-symbolic", false, move || all_songs(true));
-            }
-            let (weak, id) = (window.downgrade(), item.browse_id.clone());
-            let subscribe =
-                header.add_toggle([tr("Subscribe"), tr("Subscribed")], ["list-add-symbolic", "object-select-symbolic"], move |on| {
+                }) as Rc<dyn Fn(bool)>
+            });
+            let save = {
+                let weak = window.downgrade();
+                move |on: bool| {
                     let Some(window) = weak.upgrade() else { return };
                     let item = item.clone();
                     let task = window.ctx.services.db(move |library| library.set_artist_saved(&item, on));
@@ -364,10 +385,46 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
                             tracing::warn!(%error, "подписка не сохранилась");
                         }
                     });
-                });
-            bookmark_state(window, &subscribe, move |library| library.is_artist_saved(&id).unwrap_or(false));
-            crate::share::add_copy_link(window, &header, melogold_core::share_links::artist_url(&artist.browse_id, artist.is_channel));
-            content.append(&header.root);
+                }
+            };
+            let link = melogold_core::share_links::artist_url(&artist.browse_id, artist.is_channel);
+            let id = artist.browse_id.clone();
+            if artist.is_channel {
+                // Канал обычного YouTube — с прежней шапкой: широкого фото и слушателей у него нет.
+                let header = CollectionHeader::new(
+                    window,
+                    &artist.name,
+                    kind,
+                    artist.subscribers_text.as_deref(),
+                    artist.thumbnail_url.as_deref(),
+                    true,
+                );
+                if let Some(play) = &all_songs {
+                    let (listen, shuffle) = (Rc::clone(play), Rc::clone(play));
+                    header.add_button(tr("PlayAll"), "media-playback-start-symbolic", true, move || listen(false));
+                    header.add_button(tr("Shuffle"), "media-playlist-shuffle-symbolic", false, move || shuffle(true));
+                }
+                let subscribe =
+                    header.add_toggle([tr("Subscribe"), tr("Subscribed")], ["list-add-symbolic", "object-select-symbolic"], save);
+                bookmark_state(window, &subscribe, move |library| library.is_artist_saved(&id).unwrap_or(false));
+                crate::share::add_copy_link(window, &header, link);
+                content.append(&header.root);
+            } else {
+                // Шапка как в Apple Music — над колонкой страницы, во всю ширину (задание 0019).
+                let play = all_songs.clone().unwrap_or_else(|| Rc::new(|_| {}));
+                let weak = window.downgrade();
+                let copy = move || {
+                    if let Some(window) = weak.upgrade() {
+                        window.copy_link_text(&link, None);
+                    }
+                };
+                let hero = Rc::new(crate::artist_hero::build(window, &artist, play, save, copy));
+                bookmark_state(window, &hero.subscribe, move |library| library.is_artist_saved(&id).unwrap_or(false));
+                hero_slot.append(&hero.root);
+                sticky_slot.append(&hero.sticky);
+                let follower = Rc::clone(&hero);
+                scroller.vadjustment().connect_value_changed(move |adjustment| follower.follow_scroll(adjustment.value()));
+            }
             if let Some(text) = artist.description.as_deref().filter(|d| !d.trim().is_empty()) {
                 let owner = DescriptionOwner {
                     title: artist.name.clone(),
@@ -405,7 +462,9 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
                             });
                         // «Все ›» альбомов, синглов и прочих полок с собственной сеткой — отдельная страница.
                         let more = more.or_else(|| artist_items_more(window, shelf, &artist.name));
-                        content.append(&shelf_view(window, shelf, 5, TrackContext::List, more));
+                        // Популярное исполнителя — сеткой на широком окне (задание 0019).
+                        let grid = index == 0 && !artist.is_channel;
+                        content.append(&crate::catalog_widgets::shelf_view_with(window, shelf, 5, TrackContext::List, more, grid));
                     }
                 }
             }

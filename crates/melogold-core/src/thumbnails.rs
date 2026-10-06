@@ -31,6 +31,36 @@ pub fn sized(url: Option<&str>, px: u32) -> Option<String> {
     Some(url)
 }
 
+/// Ширина к высоте по хвосту `=w…-h…` адреса googleusercontent; `None` — не указаны.
+pub fn aspect(url: Option<&str>) -> Option<f64> {
+    let url = url.filter(|u| u.contains("googleusercontent.com") || u.contains("ggpht.com"))?;
+    let tail = &url[url.rfind('=')? + 1..];
+    let mut width = None;
+    let mut height = None;
+    for part in tail.split('-') {
+        if let Some(value) = part.strip_prefix('w') {
+            width = value.parse::<f64>().ok();
+        } else if let Some(value) = part.strip_prefix('h') {
+            height = value.parse::<f64>().ok();
+        }
+    }
+    match (width, height) {
+        (Some(w), Some(h)) if w > 0.0 && h > 0.0 => Some(w / h),
+        _ => None,
+    }
+}
+
+/// Широкое фото шапки исполнителя (`musicImmersiveHeaderRenderer`, около 2,4 : 1) шириной `width` с
+/// теми же пропорциями: [`sized`] сделал бы из баннера квадрат и испортил кадр (задание 0019, Windows
+/// `Thumbnails.Wide`). Пропорций в адресе нет — как [`sized`].
+pub fn wide(url: Option<&str>, width: u32) -> Option<String> {
+    let Some(ratio) = aspect(url) else { return sized(url, width) };
+    let url = url?;
+    let base = &url[..url.rfind('=')?];
+    let height = (f64::from(width) / ratio).round() as u32;
+    Some(format!("{base}=w{width}-h{height}-p-l90-rj"))
+}
+
 /// Кадр видео по его id, когда своей обложки нет.
 pub fn for_video(video_id: &str, px: u32) -> String {
     let file = if px <= 320 { "mqdefault.jpg" } else { "hqdefault.jpg" };
@@ -84,5 +114,17 @@ mod tests {
             Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
         );
         assert_eq!(fallback("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg"), None);
+    }
+
+    #[test]
+    fn a_wide_banner_keeps_its_proportions() {
+        let banner = "https://lh3.googleusercontent.com/abc=w1108-h461-p-l90-rj";
+        assert!((aspect(Some(banner)).unwrap() - 1108.0 / 461.0).abs() < 1e-9);
+        assert_eq!(wide(Some(banner), 1440).as_deref(), Some("https://lh3.googleusercontent.com/abc=w1440-h599-p-l90-rj"));
+        // Квадратное фото без пропорций в адресе — как обычная обложка.
+        let square = "https://lh3.googleusercontent.com/abc=s120";
+        assert_eq!(aspect(Some(square)), None);
+        assert_eq!(wide(Some(square), 480), sized(Some(square), 480));
+        assert_eq!(aspect(Some("https://example.org/a=w10-h5")), None, "не googleusercontent");
     }
 }

@@ -204,6 +204,15 @@ pub struct ArtistDetails {
     pub description: Option<String>,
     pub thumbnail_url: Option<String>,
     pub subscribers_text: Option<String>,
+    /// «14,3 млн слушателей в месяц» (`monthlyListenerCount`) — для «Об исполнителе» (задание 0019).
+    #[serde(default)]
+    pub monthly_listeners_text: Option<String>,
+    /// «739 тыс.» (`subscriberCountText`) — «Подписчиков: 739 тыс.».
+    #[serde(default)]
+    pub subscriber_count: Option<String>,
+    /// «Просмотров: 751 013 381» (`musicDescriptionShelfRenderer.subheader`).
+    #[serde(default)]
+    pub views_text: Option<String>,
     pub is_channel: bool,
     pub shelves: Vec<Shelf>,
     /// Плейлист «Все треки» исполнителя, если YouTube его дал.

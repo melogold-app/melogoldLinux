@@ -206,3 +206,22 @@ fn without_the_card_the_artist_is_raised_by_the_name_rule() {
     summary.items.clear();
     assert!(melogold_core::search_top::pick(&summary, "Кино").is_none());
 }
+
+// ── страница исполнителя (задание 0019) ──
+
+#[test]
+fn an_artist_page_has_a_wide_banner_and_what_about_shows() {
+    for (name, id) in [("kino", "UCkino"), ("michael-jackson", "UCmj")] {
+        let artist = melogold_innertube::music::parse_artist(id, &fixture(&format!("artist/{name}.json"))).expect(name);
+        println!(
+            "{name}: «{}» · фото {:?} · слушатели {:?} · подписчики {:?} · просмотры {:?}",
+            artist.name, artist.thumbnail_url, artist.monthly_listeners_text, artist.subscriber_count, artist.views_text
+        );
+        assert!(!artist.name.is_empty(), "{name}: нет имени");
+        // Шапка — широкий баннер, а не квадрат: пропорции из адреса около 2,4 : 1.
+        let ratio = melogold_core::thumbnails::aspect(artist.thumbnail_url.as_deref()).expect("пропорции баннера");
+        assert!((2.0..2.8).contains(&ratio), "{name}: {ratio}");
+        assert!(artist.monthly_listeners_text.is_some() || artist.subscriber_count.is_some(), "{name}: ни слушателей, ни подписчиков");
+        assert!(!artist.shelves.is_empty(), "{name}: нет полок");
+    }
+}

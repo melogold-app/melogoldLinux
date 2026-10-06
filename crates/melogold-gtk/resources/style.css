@@ -721,3 +721,45 @@ menubutton.wrapped-share > button:hover {
     box-shadow: none;
   }
 }
+
+/* ── Шапка исполнителя (задание 0019, исключение «Страница исполнителя») ─────────────────────
+   Затемнение одинаковое в обеих темах: текст поверх фото всегда светлый. Кнопки — системный
+   `.osd` (HIG «Overlaid Controls»), «Слушать» — акцентная и крупнее. */
+.artist-hero {
+  background-color: #1e1e1e;
+}
+
+.artist-hero-shade {
+  background-image: linear-gradient(to bottom, alpha(black, 0) 35%, alpha(black, 0.72));
+}
+
+.artist-hero-name {
+  color: white;
+  font-size: 2.6em;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.artist-hero button.artist-hero-play {
+  min-width: 56px;
+  min-height: 56px;
+}
+
+.artist-hero button.artist-hero-play image {
+  -gtk-icon-size: 24px;
+}
+
+.artist-sticky {
+  background-color: @window_bg_color;
+  box-shadow: 0 1px alpha(currentColor, 0.12);
+}
+
+@media (prefers-contrast: more) {
+  .artist-hero-shade {
+    background-image: linear-gradient(to bottom, alpha(black, 0.35), alpha(black, 0.9));
+  }
+
+  .artist-sticky {
+    box-shadow: 0 1px currentColor;
+  }
+}

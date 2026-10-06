@@ -546,6 +546,12 @@ pub fn parse_artist(browse_id: &str, response: &Value) -> Option<ArtistDetails> 
         subscribers_text: at!(header, "subscriptionButton", "subscribeButtonRenderer", "longSubscriberCountText")
             .text()
             .or_else(|| at!(header, "monthlyListenerCount").text()),
+        monthly_listeners_text: at!(header, "monthlyListenerCount").text(),
+        subscriber_count: at!(header, "subscriptionButton", "subscribeButtonRenderer", "subscriberCountText").text(),
+        views_text: sections
+            .items()
+            .iter()
+            .find_map(|s| at!(s, "musicDescriptionShelfRenderer", "subheader").text().filter(|t| !t.trim().is_empty())),
         is_channel: false,
         shelves,
         songs_playlist_id: songs_browse.and_then(|b| b.strip_prefix("VL")).map(str::to_owned),

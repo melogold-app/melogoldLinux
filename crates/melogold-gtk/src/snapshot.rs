@@ -126,6 +126,11 @@ pub fn maybe_start(window: &MainWindow) {
         ("07a-album", Box::new(|w| w.push(&crate::pages::catalog::album_page(w, "MPREb_OLmD8O5IYNS"))), 3500),
         ("07a3-album-description", Box::new(|w| click_button(w, crate::localization::tr("ResultsMore"))), 1500),
         ("07a4-album-description-closed", Box::new(close_dialog), 300),
+        // Страница исполнителя из сохранённого ответа YouTube Music — без сети (задание 0019).
+        ("07h-artist-hero", Box::new(|w| artist_from_fixture(w, "kino")), 5000),
+        ("07h2-artist-scrolled", Box::new(scroll_artist), 900),
+        ("07h3-artist-about", Box::new(open_artist_about), 900),
+        ("07h4-artist-about-closed", Box::new(close_dialog), 300),
         // Карточки лучшего результата поиска на образцовых данных — без сети (задание 0018).
         ("07g-top-result-sample", Box::new(top_result_sample), 900),
         // Окно описания на образцовых данных — без сети (задание 0023).
@@ -859,4 +864,78 @@ fn top_result_sample(window: &MainWindow) {
     toolbar.add_top_bar(&adw::HeaderBar::new());
     toolbar.set_content(Some(&scroller));
     window.push(&adw::NavigationPage::builder().title("Поиск").child(&toolbar).build());
+}
+
+/// Страница исполнителя из фикстуры `melogold-innertube/tests/fixtures/artist/<name>.json`.
+fn artist_from_fixture(window: &MainWindow, name: &str) {
+    let path = format!("{}/../melogold-innertube/tests/fixtures/artist/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    let Some(response) = std::fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()) else {
+        eprintln!("снимок: нет фикстуры {path}");
+        return;
+    };
+    let Some(artist) = melogold_innertube::music::parse_artist(&format!("UC{name}"), &response) else {
+        eprintln!("снимок: фикстура {name} не разобралась");
+        return;
+    };
+    window.push(&crate::pages::catalog::artist_page_from(window, artist));
+}
+
+/// Прокрутить открытую страницу исполнителя ниже шапки — показать полосу с именем.
+fn scroll_artist(window: &MainWindow) {
+    fn find(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
+        if let Some(scroller) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+            if scroller.is_mapped() && scroller.vadjustment().upper() > scroller.vadjustment().page_size() + 400.0 {
+                return Some(scroller.clone());
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            if let Some(found) = find(&current) {
+                return Some(found);
+            }
+            child = current.next_sibling();
+        }
+        None
+    }
+    if let Some(scroller) = find(window.window.upcast_ref()) {
+        scroller.vadjustment().set_value(500.0);
+    }
+}
+
+/// Открыть «Об исполнителе» кнопкой ⓘ шапки.
+fn open_artist_about(window: &MainWindow) {
+    scroll_to_top(window);
+    fn walk(widget: &gtk::Widget, tip: &str) -> Option<gtk::Button> {
+        if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+            if button.tooltip_text().as_deref() == Some(tip) && button.is_mapped() {
+                return Some(button.clone());
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            if let Some(found) = walk(&current, tip) {
+                return Some(found);
+            }
+            child = current.next_sibling();
+        }
+        None
+    }
+    match walk(window.window.upcast_ref(), crate::localization::tr("ArtistAbout")) {
+        Some(button) => button.emit_clicked(),
+        None => eprintln!("снимок: кнопки «Об исполнителе» нет"),
+    }
+}
+
+fn scroll_to_top(window: &MainWindow) {
+    fn reset(widget: &gtk::Widget) {
+        if let Some(scroller) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+            scroller.vadjustment().set_value(0.0);
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            reset(&current);
+            child = current.next_sibling();
+        }
+    }
+    reset(window.window.upcast_ref());
 }

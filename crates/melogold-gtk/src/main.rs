@@ -6,6 +6,7 @@
 
 mod account_view;
 mod app;
+mod artist_hero;
 mod backup_ui;
 mod catalog_widgets;
 mod desktop_integration;

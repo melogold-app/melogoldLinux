@@ -329,6 +329,18 @@ fn is_video_carousel(shelf: &Shelf) -> bool {
 
 /// Полка страницы: заголовок с «Все ›», внутри строки треков (до `max_rows`), ряд карточек или плитки.
 pub fn shelf_view(window: &MainWindow, shelf: &Shelf, max_rows: usize, context: TrackContext, more: Option<Rc<dyn Fn()>>) -> gtk::Box {
+    shelf_view_with(window, shelf, max_rows, context, more, false)
+}
+
+/// Полка; `grid` — треки сеткой в две-три колонки на широком окне (популярное исполнителя, задание 0019).
+pub fn shelf_view_with(
+    window: &MainWindow,
+    shelf: &Shelf,
+    max_rows: usize,
+    context: TrackContext,
+    more: Option<Rc<dyn Fn()>>,
+    grid: bool,
+) -> gtk::Box {
     let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(18).build();
     let header = gtk::Box::builder().spacing(6).build();
     if let Some(title) = shelf.title.as_deref().filter(|t| !t.is_empty()) {
@@ -360,7 +372,9 @@ pub fn shelf_view(window: &MainWindow, shelf: &Shelf, max_rows: usize, context: 
     if header.first_child().is_some() {
         root.append(&header);
     }
-    if all_tracks {
+    if all_tracks && grid {
+        root.append(&track_grid(window, &tracks, max_rows));
+    } else if all_tracks {
         root.append(&track_list(window, &tracks, max_rows, context));
     } else if shelf.items.iter().all(|i| matches!(i, MusicItem::Mood(_))) {
         root.append(&mood_grid(window, &shelf.items));
@@ -499,6 +513,18 @@ pub struct Toggle {
 }
 
 impl Toggle {
+    /// Переключатель из готовой кнопки (круглые кнопки шапки исполнителя): `changed` — только от нажатия.
+    pub fn new(button: gtk::ToggleButton, changed: impl Fn(bool) + 'static) -> Toggle {
+        let quiet = Rc::new(std::cell::Cell::new(false));
+        let flag = Rc::clone(&quiet);
+        button.connect_toggled(move |button| {
+            if !flag.get() {
+                changed(button.is_active());
+            }
+        });
+        Toggle { button, quiet }
+    }
+
     /// Состояние без вызова действия (прочитано из базы).
     pub fn set_quietly(&self, on: bool) {
         self.quiet.set(true);
@@ -556,6 +582,33 @@ pub fn description(window: &MainWindow, text: &str, owner: DescriptionOwner) -> 
     root
 }
 
+/// «Источник: Википедия · Лицензия: CC BY-SA 3.0» ссылками. Ссылка ставится, только если адрес — https на
+/// `*.wikipedia.org` и `creativecommons.org`: он пришёл из сети. `None` — показывать нечего.
+pub fn source_footer(source: Option<&melogold_core::description::DescriptionSource>) -> Option<gtk::Label> {
+    let source = source?;
+    let escape = |s: &str| glib::markup_escape_text(s).to_string();
+    let link = |url: &str, label: &str| format!("<a href=\"{}\">{}</a>", escape(url), escape(label));
+    let mut parts = Vec::new();
+    if melogold_core::description::is_wikipedia(&source.article_url) {
+        parts.push(format!("{} {}", escape(tr("DescriptionSource")), link(&source.article_url, tr("DescriptionWikipedia"))));
+    }
+    if let Some(license) = &source.license {
+        let name = short_license(license);
+        let shown = match &source.license_url {
+            Some(url) if melogold_core::description::is_license(url) => link(url, &name),
+            _ => escape(&name),
+        };
+        parts.push(format!("{} {shown}", escape(tr("DescriptionLicense"))));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let footer = gtk::Label::builder().label(parts.join(" · ")).use_markup(true).wrap(true).xalign(0.0).build();
+    footer.add_css_class("caption");
+    footer.add_css_class("dim-label");
+    Some(footer)
+}
+
 /// «CC-BY-SA 3.0» из длинного названия лицензии — короткая подпись ссылки, как у Windows.
 fn short_license(name: &str) -> String {
     let upper = name.to_uppercase();
@@ -607,27 +660,8 @@ pub(crate) fn description_dialog(
     column.append(&line);
     column.append(&text);
 
-    if let Some(source) = source {
-        let escape = |s: &str| glib::markup_escape_text(s).to_string();
-        let link = |url: &str, label: &str| format!("<a href=\"{}\">{}</a>", escape(url), escape(label));
-        let mut parts = Vec::new();
-        if melogold_core::description::is_wikipedia(&source.article_url) {
-            parts.push(format!("{} {}", escape(tr("DescriptionSource")), link(&source.article_url, tr("DescriptionWikipedia"))));
-        }
-        if let Some(license) = &source.license {
-            let name = short_license(license);
-            let shown = match &source.license_url {
-                Some(url) if melogold_core::description::is_license(url) => link(url, &name),
-                _ => escape(&name),
-            };
-            parts.push(format!("{} {shown}", escape(tr("DescriptionLicense"))));
-        }
-        if !parts.is_empty() {
-            let footer = gtk::Label::builder().label(parts.join(" · ")).use_markup(true).wrap(true).xalign(0.0).build();
-            footer.add_css_class("caption");
-            footer.add_css_class("dim-label");
-            column.append(&footer);
-        }
+    if let Some(footer) = source_footer(source) {
+        column.append(&footer);
     }
 
     let scroller = gtk::ScrolledWindow::builder()
@@ -641,4 +675,86 @@ pub(crate) fn description_dialog(
     // Высота — по содержимому (не выше окна): короткое описание не оставляет пустоты внизу.
     let dialog = adw::Dialog::builder().title(&owner.title).content_width(520).child(&toolbar).build();
     dialog.present(Some(&window.window));
+}
+
+/// Треки сеткой: на широком окне — в две колонки шире 640 и в три шире 1040, в узком — одной.
+/// Порядок — **по строкам** (1, 2, 3 / 4, 5, 6): так их обходят Tab и стрелки и так читает Orca; «вниз по
+/// колонке» диктор читал бы 1, 4, 2, 5, 3 (опыт Windows, аудит 2026-10-07). Двойной щелчок и Enter играют
+/// весь список с этого трека, как у строк треков; правый щелчок, клавиша меню, Shift+F10 и «…» — меню трека.
+pub fn track_grid(window: &MainWindow, tracks: &[Track], shown: usize) -> gtk::FlowBox {
+    let grid = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .homogeneous(true)
+        .min_children_per_line(1)
+        .max_children_per_line(3)
+        .column_spacing(12)
+        .row_spacing(2)
+        .activate_on_single_click(false)
+        .build();
+    grid.add_css_class("track-grid");
+    let tracks: Rc<Vec<Track>> = Rc::new(tracks.to_vec());
+    for original in tracks.iter().take(shown) {
+        let track = window.display(original);
+        let cover = Cover::new(40);
+        cover.set(&window.ctx.services.images, track.thumbnail_url.as_deref(), 120);
+        let title = gtk::Label::builder().label(&track.title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        let subtitle = gtk::Label::builder().label(track.subtitle()).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        subtitle.add_css_class("dim-label");
+        subtitle.add_css_class("caption");
+        let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).valign(gtk::Align::Center).build();
+        texts.append(&title);
+        texts.append(&subtitle);
+        let more =
+            gtk::Button::builder().icon_name("view-more-symbolic").tooltip_text(tr("MoreOptions")).valign(gtk::Align::Center).build();
+        more.add_css_class("flat");
+        more.add_css_class("circular");
+        let cell = gtk::Box::builder().spacing(12).margin_top(4).margin_bottom(4).margin_start(6).margin_end(6).width_request(300).build();
+        cell.append(&cover.root);
+        cell.append(&texts);
+        cell.append(&more);
+        let child = gtk::FlowBoxChild::builder().child(&cell).build();
+        child.update_property(&[gtk::accessible::Property::Label(&format!("{}, {}", track.title, track.subtitle()))]);
+
+        let menu_at = {
+            let (weak, original, anchor) = (window.downgrade(), original.clone(), child.downgrade());
+            move |at: Option<(f64, f64)>| {
+                let (Some(window), Some(anchor)) = (weak.upgrade(), anchor.upgrade()) else { return };
+                let target = crate::library_view::TrackTarget { track: original.clone(), context: RowContext::Plain, ..Default::default() };
+                crate::library_view::popup(anchor.upcast_ref(), &window.track_menu_for(&target), at);
+            }
+        };
+        let click = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
+        {
+            let menu_at = menu_at.clone();
+            click.connect_pressed(move |gesture, _, x, y| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                menu_at(Some((x, y)));
+            });
+        }
+        child.add_controller(click);
+        let keys = gtk::EventControllerKey::new();
+        {
+            let menu_at = menu_at.clone();
+            keys.connect_key_pressed(move |_, key, _, modifiers| {
+                let menu_key =
+                    key == gtk::gdk::Key::Menu || (key == gtk::gdk::Key::F10 && modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK));
+                if menu_key {
+                    menu_at(None);
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            });
+        }
+        child.add_controller(keys);
+        more.connect_clicked(move |_| menu_at(None));
+
+        grid.append(&child);
+    }
+    let (weak, tracks_for_keys) = (window.downgrade(), Rc::clone(&tracks));
+    grid.connect_child_activated(move |_, child| {
+        if let Some(window) = weak.upgrade() {
+            play_from(&window, &tracks_for_keys, child.index().max(0) as usize, TrackContext::List);
+        }
+    });
+    grid
 }
