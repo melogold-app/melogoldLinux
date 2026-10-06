@@ -232,6 +232,7 @@ pub fn album_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage {
                 });
             }
             crate::share::add_copy_link(window, &header, melogold_core::share_links::album_url(&album.album.browse_id));
+            add_collection_menu(window, &header, &MusicItem::Album(album.album.clone()));
             content.append(&header.root);
             if let Some(text) = album.description.as_deref().filter(|d| !d.trim().is_empty()) {
                 let owner = DescriptionOwner {
@@ -294,6 +295,7 @@ pub fn playlist_page(window: &MainWindow, playlist_id: &str) -> adw::NavigationP
             header.add_button(tr("PlayAll"), "media-playback-start-symbolic", true, move || play(false));
             header.add_button(tr("Shuffle"), "media-playlist-shuffle-symbolic", false, move || whole(true));
             crate::share::add_copy_link(window, &header, melogold_core::share_links::playlist_url(&playlist.playlist.playlist_id));
+            add_collection_menu(window, &header, &MusicItem::Playlist(playlist.playlist.clone()));
             content.append(&header.root);
             content.append(&spacer());
             let list = TrackList::new(window, &playlist.tracks, usize::MAX, TrackContext::List);
@@ -387,9 +389,9 @@ fn artist_page_with(window: &MainWindow, browse_id: &str, ready: Option<melogold
                     });
                 }
             };
-            let link = melogold_core::share_links::artist_url(&artist.browse_id, artist.is_channel);
             let id = artist.browse_id.clone();
             if artist.is_channel {
+                let link = melogold_core::share_links::artist_url(&artist.browse_id, artist.is_channel);
                 // Канал обычного YouTube — с прежней шапкой: широкого фото и слушателей у него нет.
                 let header = CollectionHeader::new(
                     window,
@@ -412,13 +414,7 @@ fn artist_page_with(window: &MainWindow, browse_id: &str, ready: Option<melogold
             } else {
                 // Шапка как в Apple Music — над колонкой страницы, во всю ширину (задание 0019).
                 let play = all_songs.clone().unwrap_or_else(|| Rc::new(|_| {}));
-                let weak = window.downgrade();
-                let copy = move || {
-                    if let Some(window) = weak.upgrade() {
-                        window.copy_link_text(&link, None);
-                    }
-                };
-                let hero = Rc::new(crate::artist_hero::build(window, &artist, play, save, copy));
+                let hero = Rc::new(crate::artist_hero::build(window, &artist, play, save));
                 bookmark_state(window, &hero.subscribe, move |library| library.is_artist_saved(&id).unwrap_or(false));
                 hero_slot.append(&hero.root);
                 sticky_slot.append(&hero.sticky);
@@ -644,6 +640,14 @@ fn bookmark_state(window: &MainWindow, toggle: &Toggle, read: impl FnOnce(&melog
 
 fn spacer() -> gtk::Box {
     gtk::Box::builder().height_request(12).build()
+}
+
+/// «…» в шапке коллекции; флажок «Сохранено» — из базы, до первого открытия.
+fn add_collection_menu(window: &MainWindow, header: &CollectionHeader, item: &MusicItem) {
+    let Some(menu) = crate::collection_menu::build(window, item) else { return };
+    header.add_menu(&menu);
+    let menu = Rc::new(menu);
+    crate::collection_menu::read_saved(window, item, move |on| menu.set_saved(on));
 }
 
 fn add_play_buttons(window: &MainWindow, header: &CollectionHeader, tracks: Vec<Track>) {

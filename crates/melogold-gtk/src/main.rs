@@ -9,6 +9,7 @@ mod app;
 mod artist_hero;
 mod backup_ui;
 mod catalog_widgets;
+mod collection_menu;
 mod desktop_integration;
 mod device_filter;
 mod images;

@@ -186,6 +186,8 @@ pub fn card(window: &MainWindow, item: &MusicItem) -> gtk::Button {
         MusicItem::Mood(m) => (m.title.clone(), String::new(), None, false, false),
     };
     let button = card_view(window, &title, &subtitle, thumbnail.as_deref(), round, wide);
+    // Правый щелчок, клавиша меню, Shift+F10 — меню коллекции, у трека — меню трека (задание 0024).
+    crate::collection_menu::install_on_card(window, &button, item);
     let (weak, item) = (window.downgrade(), item.clone());
     button.connect_clicked(move |_| {
         if let Some(window) = weak.upgrade() {
@@ -469,6 +471,17 @@ impl CollectionHeader {
             });
         });
         CollectionHeader { root, buttons }
+    }
+
+    /// «…» — меню коллекции (задание 0024): те же пункты, что у её карточки.
+    pub fn add_menu(&self, menu: &crate::collection_menu::CollectionMenu) -> gtk::MenuButton {
+        let button =
+            gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu.model).tooltip_text(tr("MoreOptions")).build();
+        button.add_css_class("circular");
+        button.update_property(&[gtk::accessible::Property::Label(tr("MoreOptions"))]);
+        menu.attach(&button);
+        self.buttons.append(&button);
+        button
     }
 
     pub fn add_button(&self, label: &str, icon: &str, accent: bool, action: impl Fn() + 'static) -> gtk::Button {

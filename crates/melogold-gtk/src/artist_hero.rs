@@ -12,7 +12,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::glib;
 use melogold_core::music::ArtistDetails;
 use melogold_core::thumbnails;
 
@@ -42,15 +42,8 @@ impl ArtistHero {
     }
 }
 
-/// `play(shuffle)` — «Слушать» и «Перемешать»; `subscribed(on)` — нажатие «Подписаться»;
-/// `copy_link` — «Копировать ссылку» из «…».
-pub fn build(
-    window: &MainWindow,
-    artist: &ArtistDetails,
-    play: Rc<dyn Fn(bool)>,
-    subscribed: impl Fn(bool) + 'static,
-    copy_link: impl Fn() + 'static,
-) -> ArtistHero {
+/// `play(shuffle)` — «Слушать»; `subscribed(on)` — нажатие «Подписаться».
+pub fn build(window: &MainWindow, artist: &ArtistDetails, play: Rc<dyn Fn(bool)>, subscribed: impl Fn(bool) + 'static) -> ArtistHero {
     let ratio = thumbnails::aspect(artist.thumbnail_url.as_deref()).unwrap_or(2.4);
 
     let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).can_shrink(true).hexpand(true).build();
@@ -100,28 +93,26 @@ pub fn build(
         button.update_property(&[gtk::accessible::Property::Label(label)]);
     });
 
-    // «…»: «Перемешать» кнопкой не поместилось — первым пунктом, как у Windows.
-    let actions = gio::SimpleActionGroup::new();
-    let shuffle = gio::SimpleAction::new("shuffle", None);
-    {
-        let play = Rc::clone(&play);
-        shuffle.connect_activate(move |_, _| play(true));
-    }
-    actions.add_action(&shuffle);
-    let copy = gio::SimpleAction::new("copy-link", None);
-    copy.connect_activate(move |_, _| copy_link());
-    actions.add_action(&copy);
-    let menu = gio::Menu::new();
-    menu.append(Some(tr("Shuffle")), Some("artist.shuffle"));
-    menu.append(Some(tr("LinuxCopyLink")), Some("artist.copy-link"));
+    // «…» — меню коллекции (задание 0024): «Перемешать» кнопкой не поместилось — оно здесь, как у
+    // Windows, вместе с «Играть следующим», «В конец очереди» и «Копировать ссылку».
+    let item = melogold_core::music::MusicItem::Artist(melogold_core::music::ArtistItem {
+        browse_id: artist.browse_id.clone(),
+        name: artist.name.clone(),
+        subtitle: None,
+        thumbnail_url: artist.thumbnail_url.clone(),
+        is_channel: artist.is_channel,
+    });
+    let collection = crate::collection_menu::build_with(window, &item, false).expect("у исполнителя есть меню");
     let more = gtk::MenuButton::builder()
         .icon_name("view-more-symbolic")
-        .menu_model(&menu)
+        .menu_model(&collection.model)
         .tooltip_text(tr("MoreOptions"))
         .valign(gtk::Align::Center)
         .build();
     more.add_css_class("osd");
     more.add_css_class("circular");
+    more.update_property(&[gtk::accessible::Property::Label(tr("MoreOptions"))]);
+    collection.attach(&more);
 
     let buttons = gtk::Box::builder().spacing(12).build();
     buttons.append(&about);
@@ -145,7 +136,6 @@ pub fn build(
     root.add_css_class("artist-hero");
     root.add_overlay(&shade);
     root.add_overlay(&info);
-    root.insert_action_group("artist", Some(&actions));
 
     // Высота — по ширине: щуп во всю шапку сообщает её размер, а высота фото ставится из пропорций.
     let height = Rc::new(Cell::new(0));
