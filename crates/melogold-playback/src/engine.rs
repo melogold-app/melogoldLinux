@@ -134,6 +134,8 @@ impl Default for Settings {
     }
 }
 
+/// Сколько раз трек открывается заново после обрыва потока посреди песни, прежде чем пропуск.
+const REOPENS_PER_TRACK: u32 = 2;
 /// Звука нет столько после «играть» — сторож загрузки смотрит, что случилось.
 const STALL_AFTER: Duration = Duration::from_secs(10);
 /// Этап загрузки дольше этого — в журнал, чтобы было видно, где стоит.
@@ -349,6 +351,8 @@ struct Engine {
     load_started: Option<Instant>,
     /// Трек, который сторож уже открыл заново: второй раз подряд — только запись в журнал.
     stall_retried: Option<String>,
+    /// Сколько раз трек открыт заново после обрыва потока посреди песни (задание 0021).
+    reopened: Option<(String, u32)>,
     listened: Duration,
     listening_since: Option<Instant>,
     listened_track: Option<Track>,
@@ -383,6 +387,7 @@ impl Engine {
             pending_start: Duration::ZERO,
             load_started: None,
             stall_retried: None,
+            reopened: None,
             listened: Duration::ZERO,
             listening_since: None,
             listened_track: None,
@@ -570,7 +575,10 @@ impl Engine {
             Command::FeedFailed { generation, error } => {
                 if generation == self.generation {
                     if let Some(track) = self.current_track() {
-                        self.skip_after_error(PlayerError::from(&error, &track));
+                        if !self.reopen_after_cut(&track, &error) {
+                            tracing::warn!("Skipped {}: {:?} {}", track.video_id, error.kind, error.message);
+                            self.skip_after_error(PlayerError::from(&error, &track));
+                        }
                     }
                 }
             }
@@ -1206,6 +1214,44 @@ impl Engine {
         let start = self.position().unwrap_or(self.pending_start);
         self.load_current(true, start);
         self.load_started = started;
+    }
+
+    /// Поток оборвался посреди трека не по причине в самом видео — открыть трек заново с того же
+    /// места со свежим адресом, до [`REOPENS_PER_TRACK`] раз на трек (задание 0021).
+    ///
+    /// Адрес googlevideo привязан к IP: после смены сети или сервера VPN чтение получает 403 и на
+    /// свежие адреса, пока сеть не устоится, и песня переходила к следующей на середине. Проверка
+    /// «вы не бот», страна, возраст и удалённое видео не переоткрываются: они не пройдут и так.
+    fn reopen_after_cut(&mut self, track: &Track, error: &StreamError) -> bool {
+        if StreamError::stops_queue(error.kind) || error.is_final() {
+            return false;
+        }
+        let count = match &self.reopened {
+            Some((id, count)) if *id == track.video_id => *count,
+            _ => 0,
+        };
+        if count >= REOPENS_PER_TRACK {
+            return false;
+        }
+        self.reopened = Some((track.video_id.clone(), count + 1));
+        let at = self.position().unwrap_or(self.pending_start);
+        let seconds = at.as_secs();
+        tracing::warn!(
+            "Reopening {} at {}:{:02} (attempt {}): {:?} {}",
+            track.video_id,
+            seconds / 60,
+            seconds % 60,
+            count + 1,
+            error.kind,
+            error.message
+        );
+        // Старый адрес не годится: резолвер спросит YouTube заново.
+        self.deps.resolver.invalidate(&track.video_id);
+        let play = self.play_when_ready || self.is_playing();
+        let started = self.load_started;
+        self.load_current(play, at);
+        self.load_started = started;
+        true
     }
 
     /// После перезапуска очередь и позиция восстанавливаются, без автостарта (docs/PROMPT.md §4).

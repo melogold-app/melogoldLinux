@@ -1,6 +1,6 @@
 # Плеер: песня не обрывается на середине при смене сети или сервера VPN
 
-Статус: открыто
+Статус: сделано — чтение: до четырёх свежих адресов с паузами 0 / 1,5 / 4 / 8 с и текстом «… after 4 fresh URLs at byte N of M (клиент)», тесты на подставном googlevideo; плеер: обрыв посреди трека — переоткрытие с той же позиции до двух раз (`Engine::reopen_after_cut`). Живой тест и проверка со сменой сервера VPN — не делались (нужна живая сеть и VPN)
 
 То же на Windows — сделано в 0.1.14 (`melogoldWindows`, коммит 9d15a68: `src/Melogold.Playback/HttpRangeReader.cs`,
 `PlayerEngine.RecoverOrSkip`, тесты `HttpRangeReaderTests`, `LiveStreamReadTests`).
