@@ -1,6 +1,7 @@
 //! Три столбика «играет» (docs/PROMPT.md §4, §5.3; Windows `PlayingBars.cs`): у играющего трека
 //! вместо обложки — низы, середина, верх под настоящий звук ([`melogold_playback::levels`]). На
-//! паузе столбики неподвижны. Все столбики окна обновляет один таймер, пока хоть один на экране.
+//! паузе и при выключенных анимациях столбики неподвижны. Все столбики окна обновляет один таймер,
+//! пока хоть один на экране.
 
 use std::cell::RefCell;
 
@@ -71,11 +72,16 @@ fn ensure_clock() {
                 CLOCK.with(|c| c.replace(None));
                 return glib::ControlFlow::Break;
             }
+            // Выключены анимации («Уменьшение движения» в GNOME) — столбики стоят и при игре:
+            // играющий трек и так отмечен ими, двигаться им незачем (доктрина §4.1).
+            let animate = gtk::Settings::default().is_some_and(|settings| settings.is_gtk_enable_animations());
             let values = SOURCE.with(|s| {
                 s.borrow().as_ref().map(|source| {
                     let ((low, mid, high), playing) = source();
-                    if playing {
+                    if playing && animate {
                         [low, mid, high]
+                    } else if playing {
+                        [0.55, 0.9, 0.7]
                     } else {
                         [0.3, 0.5, 0.35]
                     }

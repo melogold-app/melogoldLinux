@@ -1080,6 +1080,19 @@ impl MainWindow {
                 window.update_suggestions(entry.text().to_string());
             }
         });
+        // Esc в поле поиска (сигнал `stop-search`): подсказки открыты — их закрывает обработчик
+        // окна, иначе поле только отдаёт фокус. Назад со страницы Esc из поля не уводит
+        // (доктрина §4.6; на Windows это было ошибкой), набранное остаётся.
+        let weak = self.downgrade();
+        self.search.connect_stop_search(move |_| {
+            if let Some(window) = weak.upgrade() {
+                if window.suggestions.is_visible() {
+                    window.suggestions.popdown();
+                } else {
+                    gtk::prelude::GtkWindowExt::set_focus(&window.window, gtk::Widget::NONE);
+                }
+            }
+        });
         let weak = self.downgrade();
         self.suggestion_list.connect_row_activated(move |_, row| {
             if let Some(window) = weak.upgrade() {

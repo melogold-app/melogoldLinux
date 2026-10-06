@@ -1,6 +1,6 @@
 # Дизайн-доктрина: выжимка руководств платформы, реестр исключений, аудит всех экранов
 
-Статус: открыто
+Статус: сделано — выжимка, реестр и аудит 2026-10-07; расхождения — задания 0018–0024
 
 Те же задания: `melogoldiOSmacOS/tasks/0022-design-doctrine-audit.md`, `melogoldAndroid/tasks/0020-design-doctrine-audit.md`, `melogoldWindows/tasks/0022-design-doctrine-audit.md`.
 
