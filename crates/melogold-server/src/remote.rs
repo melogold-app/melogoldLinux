@@ -634,19 +634,31 @@ pub struct RemoteNow {
     pub rev: i64,
 }
 
+/// Длительность играющего: из состояния, а если устройство её не прислало — из самого трека
+/// (`durationMs`, иначе текст «3:45», «1:02:03»). Телефон присылает состояние без длительности, и
+/// пульт показывал «0:08 / 0:00» с ползунком в конце (задание 0022, Windows `Remote.DurationOf`).
+pub fn duration_of(state_duration_ms: Option<i64>, track: Option<&Track>) -> Option<i64> {
+    state_duration_ms
+        .filter(|d| *d > 0)
+        .or_else(|| track.and_then(|t| t.duration_ms).filter(|d| *d > 0))
+        .or_else(|| track.and_then(|t| melogold_core::text::parse_duration(t.duration_text.as_deref())))
+        .filter(|d| *d > 0)
+}
+
 impl RemoteNow {
     pub fn position_at(&self, now_server_ms: i64) -> i64 {
         extrapolate_position(self.position_ms, self.at_ms, self.playing, now_server_ms, self.duration_ms)
     }
 
     pub fn from_summary(summary: &PlaybackSummary, fallback_at_ms: i64) -> RemoteNow {
+        let track = summary.track.as_ref().map(|t| t.to_track());
         RemoteNow {
             device_id: summary.device_id.clone(),
-            track: summary.track.as_ref().map(|t| t.to_track()),
+            duration_ms: duration_of(summary.duration_ms, track.as_ref()),
+            track,
             index: summary.index,
             queue_length: summary.queue_length,
             position_ms: summary.position_ms,
-            duration_ms: summary.duration_ms,
             playing: summary.playing,
             at_ms: iso::parse(&summary.at).unwrap_or(fallback_at_ms),
             volume: summary.volume,
@@ -655,13 +667,14 @@ impl RemoteNow {
     }
 
     pub fn from_state(state: &PlaybackState, fallback_at_ms: i64) -> RemoteNow {
+        let track = usize::try_from(state.index).ok().and_then(|i| state.queue.get(i)).map(|t| t.to_track());
         RemoteNow {
             device_id: state.device_id.clone(),
-            track: usize::try_from(state.index).ok().and_then(|i| state.queue.get(i)).map(|t| t.to_track()),
+            duration_ms: duration_of(state.duration_ms, track.as_ref()),
+            track,
             index: state.index,
             queue_length: state.queue.len() as i64,
             position_ms: state.position_ms,
-            duration_ms: state.duration_ms,
             playing: state.playing,
             at_ms: iso::parse(&state.at).unwrap_or(fallback_at_ms),
             volume: state.volume,
@@ -1516,6 +1529,38 @@ mod tests {
                 format!("cmd-{n}")
             }),
         )
+    }
+
+    #[test]
+    fn a_state_without_duration_takes_it_from_the_track() {
+        let track = |ms: Option<i64>, text: Option<&str>| Track {
+            video_id: "v".into(),
+            duration_ms: ms,
+            duration_text: text.map(str::to_string),
+            ..Default::default()
+        };
+        assert_eq!(duration_of(Some(200_000), Some(&track(Some(1), None))), Some(200_000), "своя длительность состояния — первой");
+        assert_eq!(duration_of(None, Some(&track(Some(225_000), None))), Some(225_000));
+        assert_eq!(duration_of(Some(0), Some(&track(None, Some("3:45")))), Some(225_000));
+        assert_eq!(duration_of(None, Some(&track(None, Some("1:02:03")))), Some(3_723_000));
+        assert_eq!(duration_of(None, Some(&track(None, Some("live")))), None);
+        assert_eq!(duration_of(None, None), None);
+
+        // Телефон прислал состояние без длительности, трек — «3:45»: позиция не уходит за конец.
+        let summary = PlaybackSummary {
+            device_id: "phone".into(),
+            track: Some(crate::dto::TrackDto { video_id: "v".into(), duration_text: Some("3:45".into()), ..Default::default() }),
+            position_ms: 8_000,
+            duration_ms: None,
+            playing: true,
+            at: "2026-10-01T10:00:00.000Z".into(),
+            ..Default::default()
+        };
+        let at = iso::parse(&summary.at).unwrap();
+        let now = RemoteNow::from_summary(&summary, at);
+        assert_eq!(now.duration_ms, Some(225_000));
+        assert_eq!(now.position_at(at), 8_000);
+        assert!(now.position_at(at + 3_600_000) < 225_000, "позиция не дальше длительности трека");
     }
 
     #[tokio::test]

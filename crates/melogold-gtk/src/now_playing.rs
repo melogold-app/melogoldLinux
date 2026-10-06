@@ -493,8 +493,16 @@ impl NowPlaying {
                 if let Some(seed) = known {
                     self.set_seed(seed);
                 }
-                self.picture.set_paintable(gtk::gdk::Paintable::NONE);
-                self.placeholder.set_visible(true);
+                // Пока большая обложка грузится, на её месте — та, что уже есть: большая из кэша, а
+                // нет её — маленькая из панели плеера (тот же адрес на 120 px, она уже в памяти).
+                // Большая закроет её, когда загрузится. Раньше здесь было пусто, хотя обложка
+                // трека уже видна внизу окна (задание 0022, как на Windows).
+                let images = &window.ctx.services.images;
+                let small_fallback = thumbnails::for_video(&track.video_id, 120);
+                let small = thumbnails::sized(track.thumbnail_url.as_deref().or(Some(&small_fallback)), 120);
+                let ready = url.as_deref().and_then(|u| images.cached(u)).or_else(|| small.as_deref().and_then(|u| images.cached(u)));
+                self.picture.set_paintable(ready.as_ref());
+                self.placeholder.set_visible(ready.is_none());
                 if let Some(url) = url {
                     let (this, images) = (self.clone(), window.ctx.services.images.clone());
                     let cache = window.ctx.paths.cache().to_path_buf();

@@ -359,7 +359,7 @@ pub fn listen_here(window: &MainWindow) {
             melogold_core::iso::parse(&state.at).unwrap_or_else(|| hub.clock.now()),
             state.playing,
             hub.clock.now(),
-            state.duration_ms,
+            melogold_server::remote::duration_of(state.duration_ms, tracks.get(index)),
         );
         hub.control.disconnect();
         hub.reporter.take_over(melogold_server::dto::PlaybackHandoffInput {
