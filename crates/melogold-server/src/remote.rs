@@ -815,9 +815,15 @@ impl<P: RemotePort> RemoteControl<P> {
         }
     }
 
-    /// Другие устройства аккаунта: в сети ли, что играют.
+    /// Другие устройства аккаунта, на которых можно включить музыку: в сети ли, что играют.
+    ///
+    /// Часы сюда не входят (задание 0020, доктрина §4.8): звук на часах играет только
+    /// приложение, открытое на самих часах, и включать на них музыку отсюда бессмысленно.
+    /// Фильтр — здесь, где список приходит от сервера, а не в окне: так его не обойдёт ни
+    /// один показ. Фильтр истории по устройствам часы показывает по-прежнему — он не отсюда.
     pub async fn devices(&self) -> Result<Vec<RemoteDevice>, ApiError> {
-        Ok(self.0.port.devices().await?.devices)
+        let devices = self.0.port.devices().await?.devices;
+        Ok(devices.into_iter().filter(|device| can_play(&device.platform)).collect())
     }
 
     /// Плеер становится пультом устройства `device`.
@@ -995,6 +1001,12 @@ impl<P: RemotePort> RemoteControl<P> {
             }
         }
     }
+}
+
+/// Может ли устройство с платформой `platform` играть музыку по команде пульта: всё, кроме часов
+/// (`watchos`, без учёта регистра — как `melogold_core::devices::kind`).
+pub fn can_play(platform: &str) -> bool {
+    melogold_core::devices::kind(Some(platform)) != melogold_core::devices::DeviceKind::Watch
 }
 
 #[cfg(test)]
@@ -1434,6 +1446,7 @@ mod tests {
 
     #[derive(Default)]
     struct RemoteFake {
+        devices: Mutex<Vec<RemoteDevice>>,
         state: Mutex<Option<PlaybackState>>,
         sent: Mutex<Vec<RemoteCommand>>,
         errors: Mutex<VecDeque<ApiError>>,
@@ -1443,7 +1456,7 @@ mod tests {
 
     impl RemotePort for RemoteFakePort {
         async fn devices(&self) -> Result<RemoteDeviceList, ApiError> {
-            Ok(RemoteDeviceList::default())
+            Ok(RemoteDeviceList { devices: self.0.devices.lock().unwrap().clone(), ..Default::default() })
         }
 
         async fn playback_state(&self) -> Result<PlaybackStateResponse, ApiError> {
@@ -1503,6 +1516,18 @@ mod tests {
                 format!("cmd-{n}")
             }),
         )
+    }
+
+    #[tokio::test]
+    async fn a_watch_is_not_a_place_to_send_music() {
+        let fake = Arc::new(RemoteFake::default());
+        *fake.devices.lock().unwrap() = vec![
+            RemoteDevice { device_id: "mac".into(), name: "MacBook Air".into(), platform: "macos".into(), ..Default::default() },
+            RemoteDevice { device_id: "watch".into(), name: "Apple Watch".into(), platform: "watchOS".into(), ..Default::default() },
+        ];
+        let names: Vec<String> = control(&fake).devices().await.unwrap().into_iter().map(|d| d.name).collect();
+        assert_eq!(names, ["MacBook Air"]);
+        assert!(can_play("android") && can_play("linux") && can_play("") && !can_play("watchos"));
     }
 
     #[tokio::test(start_paused = true)]
