@@ -193,6 +193,7 @@ fn load(inner: &Rc<Inner>) {
     let inner = Rc::clone(inner);
     match inner.scope.get() {
         Scope::All => {
+            let typed = query.clone();
             let summary = window.ctx.services.run({
                 let (music, query) = (music.clone(), query.clone());
                 async move { music.search_summary(&query).await }
@@ -208,13 +209,12 @@ fn load(inner: &Rc<Inner>) {
                     fail(&inner, None);
                     return;
                 }
+                // Лучший результат — крупной карточкой над выдачей, строкой ниже не повторяется
+                // (задание 0018, доктрина §4.6).
+                let top = summary.as_ref().and_then(|summary| melogold_core::search_top::pick(summary, &typed));
                 let mut ytm: Vec<MusicItem> = Vec::new();
                 if let Some(summary) = &summary {
-                    if let Some(top) = &summary.top {
-                        ytm.push(top.clone());
-                    }
-                    let top_key = summary.top.as_ref().map(MusicItem::key);
-                    ytm.extend(summary.items.iter().filter(|i| Some(i.key()) != top_key).cloned());
+                    ytm.extend(summary.items.iter().filter(|i| !melogold_core::search_top::same(i, top.as_ref())).cloned());
                 }
                 ytm.truncate(8);
                 let known: HashSet<String> = ytm.iter().map(MusicItem::key).collect();
@@ -225,14 +225,18 @@ fn load(inner: &Rc<Inner>) {
                     .filter(|i| matches!(i, MusicItem::Track(_)) && !known.contains(&i.key()))
                     .take(6)
                     .collect();
-                if ytm.is_empty() && videos.is_empty() {
+                if top.is_none() && ytm.is_empty() && videos.is_empty() {
                     inner.state.empty("system-search-symbolic", tr("ResultsNothing"), "");
                     return;
+                }
+                if let (Some(top), Some(window)) = (&top, inner.window.upgrade()) {
+                    inner.list.append(&section_title(tr("ResultsTopResult")));
+                    inner.list.append(&top_result_card(&window, top));
                 }
                 if !ytm.is_empty() {
                     inner.list.append(&section_title("YouTube Music"));
                     append(&inner, ytm, true);
-                } else {
+                } else if top.is_none() {
                     let note = gtk::Label::builder().label(tr("ResultsNothingInCatalog")).wrap(true).xalign(0.0).build();
                     note.add_css_class("dim-label");
                     inner.list.append(&note);
@@ -376,4 +380,151 @@ fn append(inner: &Rc<Inner>, items: Vec<MusicItem>, new_group: bool) {
         list.append(&row);
         items_of_list.borrow_mut().push(item);
     }
+}
+
+/// Карточка лучшего результата: обложка (у исполнителя — круглое фото), название, что это, и
+/// «Слушать» с «Открыть» (задание 0018; Windows `TopResultCard`). Строка системного списка: нажатие по
+/// ней открывает страницу, а у трека — играет; кнопки внутри — отдельные цели фокуса.
+pub(crate) fn top_result_card(window: &MainWindow, item: &MusicItem) -> gtk::ListBox {
+    let join = |parts: &[Option<&str>]| parts.iter().flatten().filter(|p| !p.trim().is_empty()).copied().collect::<Vec<_>>().join(" · ");
+    let (title, kind, cover_url, round) = match item {
+        MusicItem::Artist(artist) => (
+            artist.name.clone(),
+            join(&[Some(tr(if artist.is_channel { "TypeChannel" } else { "TypeArtist" })), artist.subtitle.as_deref()]),
+            artist.thumbnail_url.clone(),
+            true,
+        ),
+        MusicItem::Album(album) => (
+            album.title.clone(),
+            join(&[Some(album.type_text.as_deref().unwrap_or(tr("TypeAlbum"))), album.artists_text.as_deref(), album.year.as_deref()]),
+            album.thumbnail_url.clone(),
+            false,
+        ),
+        MusicItem::Track(track) => (
+            track.title.clone(),
+            join(&[
+                Some(tr(if track.is_video() { "TypeVideo" } else { "TypeSong" })),
+                track.artists_text.as_deref(),
+                track.album_title.as_deref(),
+            ]),
+            track.thumbnail_url.clone(),
+            false,
+        ),
+        MusicItem::Playlist(playlist) => (
+            playlist.title.clone(),
+            join(&[Some(tr("ResultsPlaylists")), playlist.subtitle.as_deref()]),
+            playlist.thumbnail_url.clone(),
+            false,
+        ),
+        MusicItem::Mood(mood) => (mood.title.clone(), String::new(), None, false),
+    };
+
+    let cover = crate::widgets::Cover::new(96);
+    cover.root.add_css_class("card-cover");
+    if round {
+        cover.root.add_css_class("round");
+    }
+    cover.root.set_valign(gtk::Align::Center);
+    // Фото исполнителя в выдаче приходит на 120 px — берём крупнее, как у обложек.
+    cover.set(&window.ctx.services.images, cover_url.as_deref(), 240);
+
+    let name = gtk::Label::builder().label(&title).xalign(0.0).wrap(true).build();
+    name.add_css_class("title-2");
+    let what = gtk::Label::builder().label(&kind).xalign(0.0).wrap(true).build();
+    what.add_css_class("dim-label");
+
+    // Кнопки переносятся строкой ниже, когда не помещаются: узкое окно — 360 px (`docs/PROMPT.md` §5.2).
+    let buttons = adw::WrapBox::builder().child_spacing(8).line_spacing(8).margin_top(6).build();
+    let listen = gtk::Button::builder().label(tr("PlayAll")).build();
+    listen.add_css_class("pill");
+    listen.add_css_class("suggested-action");
+    buttons.append(&listen);
+    let opens = !matches!(item, MusicItem::Track(_) | MusicItem::Mood(_));
+    if opens {
+        let open = gtk::Button::builder().label(tr("ResultsOpen")).build();
+        open.add_css_class("pill");
+        let (weak, item) = (window.downgrade(), item.clone());
+        open.connect_clicked(move |_| {
+            if let Some(window) = weak.upgrade() {
+                window.activate_item(&item);
+            }
+        });
+        buttons.append(&open);
+    }
+    {
+        let (weak, item) = (window.downgrade(), item.clone());
+        listen.connect_clicked(move |button| {
+            if let Some(window) = weak.upgrade() {
+                listen_to(&window, &item, button);
+            }
+        });
+    }
+
+    let texts = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).hexpand(true).build();
+    texts.append(&name);
+    texts.append(&what);
+    texts.append(&buttons);
+    let content = gtk::Box::builder().spacing(14).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
+    content.append(&cover.root);
+    content.append(&texts);
+
+    let row = gtk::ListBoxRow::builder().activatable(true).child(&content).build();
+    row.update_property(&[gtk::accessible::Property::Label(&format!("{}: {title}, {kind}", tr("ResultsTopResult")))]);
+    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).margin_bottom(6).build();
+    list.add_css_class("boxed-list");
+    list.append(&row);
+    let (weak, item) = (window.downgrade(), item.clone());
+    list.connect_row_activated(move |_, _| {
+        if let Some(window) = weak.upgrade() {
+            window.activate_item(&item);
+        }
+    });
+    list
+}
+
+/// «Слушать» лучшего результата: у исполнителя — все его песни (плейлист «Песни» со страницы
+/// исполнителя), не вышло — популярные треки; у альбома и плейлиста — их треки; трек — сам. Пока
+/// грузится — кнопка выключена; ошибка сети — всплывающее сообщение.
+fn listen_to(window: &MainWindow, item: &MusicItem, button: &gtk::Button) {
+    use melogold_playback::engine::Command;
+    if let MusicItem::Track(_) = item {
+        window.activate_item(item);
+        return;
+    }
+    let music = window.ctx.services.music.clone();
+    let item = item.clone();
+    let task = window.ctx.services.run(async move {
+        match item {
+            MusicItem::Artist(artist) => {
+                let details = music.artist(&artist.browse_id).await?;
+                if let Some(songs) = &details.songs_playlist_id {
+                    if let Ok(tracks) = music.playlist_tracks(songs, 500).await {
+                        if !tracks.is_empty() {
+                            return Ok(tracks);
+                        }
+                    }
+                }
+                Ok(details.shelves.first().map(|shelf| shelf.tracks().cloned().collect()).unwrap_or_default())
+            }
+            MusicItem::Album(album) => Ok(music.album(&album.browse_id).await?.tracks),
+            MusicItem::Playlist(playlist) => music.playlist_tracks(&playlist.playlist_id, 500).await,
+            _ => Ok(Vec::new()),
+        }
+    });
+    button.set_sensitive(false);
+    let (weak, button) = (window.downgrade(), button.downgrade());
+    glib::spawn_future_local(async move {
+        let result: Option<Result<Vec<melogold_core::music::Track>, YouTubeError>> = task.await;
+        if let Some(button) = button.upgrade() {
+            button.set_sensitive(true);
+        }
+        let Some(window) = weak.upgrade() else { return };
+        match result {
+            Some(Ok(tracks)) if !tracks.is_empty() => {
+                window.ctx.services.player.send(Command::PlayList { tracks, start: 0, shuffle: false })
+            }
+            Some(Err(error)) if error.kind == melogold_innertube::ErrorKind::Blocked => window.toast(tr("ErrorBlocked")),
+            _ => window.toast(tr("ErrorOffline")),
+        }
+    });
 }

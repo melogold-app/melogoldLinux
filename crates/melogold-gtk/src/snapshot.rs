@@ -126,6 +126,8 @@ pub fn maybe_start(window: &MainWindow) {
         ("07a-album", Box::new(|w| w.push(&crate::pages::catalog::album_page(w, "MPREb_OLmD8O5IYNS"))), 3500),
         ("07a3-album-description", Box::new(|w| click_button(w, crate::localization::tr("ResultsMore"))), 1500),
         ("07a4-album-description-closed", Box::new(close_dialog), 300),
+        // Карточки лучшего результата поиска на образцовых данных — без сети (задание 0018).
+        ("07g-top-result-sample", Box::new(top_result_sample), 900),
         // Окно описания на образцовых данных — без сети (задание 0023).
         ("07a5-description-sample", Box::new(description_sample), 900),
         ("07a6-description-sample-closed", Box::new(close_dialog), 300),
@@ -815,4 +817,46 @@ fn description_sample(window: &MainWindow) {
         round: false,
     };
     crate::catalog_widgets::description_dialog(window, &owner, &body, source.as_ref());
+}
+
+/// Страница с карточками лучшего результата: исполнитель, альбом и трек, как их разбирает выдача.
+fn top_result_sample(window: &MainWindow) {
+    use melogold_core::music::{AlbumItem, ArtistItem, MusicItem, Track};
+    let items = [
+        MusicItem::Artist(ArtistItem {
+            browse_id: "UCkino".into(),
+            name: "Кино".into(),
+            subtitle: Some("1,2 млн слушателей в месяц".into()),
+            ..Default::default()
+        }),
+        MusicItem::Album(AlbumItem {
+            browse_id: "MPREok".into(),
+            title: "OK Computer".into(),
+            type_text: Some("Альбом".into()),
+            artists_text: Some("Radiohead".into()),
+            year: Some("1997".into()),
+            ..Default::default()
+        }),
+        MusicItem::Track(Track {
+            video_id: "fJ9rUzIMcZQ".into(),
+            title: "Bohemian Rhapsody".into(),
+            artists_text: Some("Queen".into()),
+            album_title: Some("A Night at the Opera".into()),
+            ..Default::default()
+        }),
+    ];
+    let column =
+        gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_start(18).margin_end(18).build();
+    for item in &items {
+        column.append(&crate::widgets::section_title(crate::localization::tr("ResultsTopResult")));
+        column.append(&crate::pages::search::top_result_card(window, item));
+    }
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .child(&adw::Clamp::builder().maximum_size(900).child(&column).build())
+        .build();
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&scroller));
+    window.push(&adw::NavigationPage::builder().title("Поиск").child(&toolbar).build());
 }

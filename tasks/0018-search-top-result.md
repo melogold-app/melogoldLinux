@@ -1,6 +1,6 @@
 # Поиск: лучший результат первым, крупной карточкой
 
-Статус: открыто
+Статус: сделано — правило `melogold_core::search_top` (карточка YouTube Music, иначе исполнитель с именем запроса), тесты на ответах Windows `tests/fixtures/search/`, карточка `pages/search.rs::top_result_card`. Живые «Кино», «Michael Jackson» в окне не сняты — YouTube с этой машины не открывался; вид — шаг съёмки `07g-top-result-sample`
 
 Те же задания: `melogoldiOSmacOS/tasks/0023-search-top-result.md`, `melogoldAndroid/tasks/0021-search-top-result.md`, `melogoldWindows/tasks/0023-search-top-result.md`.
 

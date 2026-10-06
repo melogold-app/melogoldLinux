@@ -123,3 +123,86 @@ fn player_response_status_loudness_duration() {
     assert!(response.audio_formats.is_empty(), "ссылки вырезаны — форматов с адресом нет");
     assert!(response.duration_ms.is_some_and(|ms| ms > 60_000));
 }
+
+// ── лучший результат поиска (задание 0018) ──
+
+fn top_of(name: &str, query: &str) -> Option<MusicItem> {
+    melogold_core::search_top::pick(&parse_search_summary(&fixture(&format!("search/{name}.json"))), query)
+}
+
+#[test]
+fn an_artist_query_puts_the_artist_first() {
+    for (name, query, artist) in
+        [("kino", "Кино", "Кино"), ("michael-jackson", "Michael Jackson", "Michael Jackson"), ("tkay-maidza", "Tkay Maidza", "Tkay Maidza")]
+    {
+        match top_of(name, query) {
+            Some(MusicItem::Artist(found)) => {
+                assert_eq!(found.name, artist, "{name}");
+                assert!(found.browse_id.starts_with("UC"), "{name}: {}", found.browse_id);
+                assert!(found.thumbnail_url.is_some(), "{name}: у исполнителя нет фото");
+            }
+            other => panic!("{name}: ждал исполнителя, вышло {:?}", other.as_ref().map(describe)),
+        }
+    }
+}
+
+#[test]
+fn an_album_and_a_track_query_put_them_first() {
+    match top_of("ok-computer", "OK Computer") {
+        Some(MusicItem::Album(album)) => {
+            assert_eq!(album.title, "OK Computer");
+            assert!(album.artists_text.as_deref().is_some_and(|a| a.contains("Radiohead")), "{:?}", album.artists_text);
+        }
+        other => panic!("ждал альбом, вышло {:?}", other.as_ref().map(describe)),
+    }
+    match top_of("bohemian-rhapsody", "Bohemian Rhapsody") {
+        Some(MusicItem::Track(track)) => {
+            assert!(track.title.contains("Bohemian Rhapsody"), "{}", track.title);
+            assert!(!track.video_id.is_empty());
+        }
+        other => panic!("ждал трек, вышло {:?}", other.as_ref().map(describe)),
+    }
+}
+
+#[test]
+fn the_top_result_is_not_repeated_among_the_items() {
+    for name in ["kino", "michael-jackson", "tkay-maidza", "ok-computer", "bohemian-rhapsody"] {
+        let summary = parse_search_summary(&fixture(&format!("search/{name}.json")));
+        let Some(top) = &summary.top else { panic!("{name}: нет карточки") };
+        let rest: Vec<&MusicItem> = summary.items.iter().filter(|i| !melogold_core::search_top::same(i, Some(top))).collect();
+        assert!(rest.len() < summary.items.len() || !summary.items.iter().any(|i| i.key() == top.key()), "{name}");
+        assert!(rest.iter().all(|i| i.key() != top.key()), "{name}: повтор лучшего результата строкой");
+    }
+}
+
+#[test]
+fn without_the_card_the_artist_is_raised_by_the_name_rule() {
+    // Тот же ответ, но полка карточки заменена обычной полкой с её строками.
+    let mut response = fixture("search/kino.json");
+    let sections = response
+        .pointer_mut("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
+        .and_then(Value::as_array_mut)
+        .expect("секции выдачи");
+    for section in sections.iter_mut() {
+        if let Some(card) = section.get("musicCardShelfRenderer").cloned() {
+            *section = serde_json::json!({ "musicShelfRenderer": { "contents": card.get("contents").cloned().unwrap_or_default() } });
+        }
+    }
+    let mut summary = parse_search_summary(&response);
+    assert!(summary.top.is_none(), "карточка осталась");
+    // Исполнитель был только в самой карточке, а её строки — его песни. Как у Windows: если его нет
+    // среди остальной выдачи, ставим его туда, как прислал бы YouTube без карточки.
+    let artists: Vec<String> =
+        summary.items.iter().filter_map(|i| if let MusicItem::Artist(a) = i { Some(a.name.clone()) } else { None }).collect();
+    if !artists.iter().any(|a| melogold_core::search_top::normalize(a) == "кино") {
+        let kino = melogold_core::music::ArtistItem { browse_id: "UCkino".into(), name: "КИНО".into(), ..Default::default() };
+        summary.items.insert(0, MusicItem::Artist(kino));
+    }
+    match melogold_core::search_top::pick(&summary, "кино!") {
+        Some(MusicItem::Artist(artist)) => assert_eq!(melogold_core::search_top::normalize(&artist.name), "кино"),
+        other => panic!("правило по имени не подняло исполнителя: {:?}", other.as_ref().map(describe)),
+    }
+    // Не совпадает ни с кем — лучшего нет.
+    summary.items.clear();
+    assert!(melogold_core::search_top::pick(&summary, "Кино").is_none());
+}

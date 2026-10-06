@@ -23,6 +23,7 @@ pub mod playlist_diff;
 pub mod plurals;
 pub mod pow;
 pub mod queue;
+pub mod search_top;
 pub mod server_address;
 pub mod settings;
 pub mod share_links;
