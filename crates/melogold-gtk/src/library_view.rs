@@ -478,8 +478,10 @@ impl MainWindow {
         ]);
     }
 
-    /// «Сведения о треке» (задание 0005): свои название, исполнитель и альбом. В пустом поле серым —
-    /// как на YouTube; «Как на YouTube» снимает правку целиком.
+    /// «Сведения о треке» (задание 0005): свои название, исполнитель и альбом. Поля заполнены тем, что
+    /// видно сейчас, — текст YouTube правится на месте (вырезать исполнителя из названия и вставить в
+    /// своё поле), а не набирается заново. Поле как на YouTube или пустое — без правки; в пустом серым
+    /// видно, что вернётся. «Как на YouTube» снимает правку целиком.
     pub fn edit_details(&self, track: &Track) {
         let library = std::sync::Arc::clone(&self.ctx.services.library);
         let current = library.track_override(&track.video_id).unwrap_or_default();
@@ -489,7 +491,7 @@ impl MainWindow {
             let caption = gtk::Label::builder().label(label).xalign(0.0).build();
             caption.add_css_class("caption-heading");
             let entry = gtk::Entry::builder()
-                .text(value.unwrap_or_default())
+                .text(value.or(youtube).unwrap_or_default())
                 .placeholder_text(youtube.unwrap_or_default())
                 .activates_default(true)
                 .build();
@@ -503,6 +505,21 @@ impl MainWindow {
         let title = field(tr("LinuxTrackDetailsName"), current.title.as_deref(), Some(&track.title));
         let artist = field(tr("LinuxTrackDetailsArtist"), current.artists_text.as_deref(), track.artists_text.as_deref());
         let album = field(tr("LinuxTrackDetailsAlbum"), current.album_title.as_deref(), track.album_title.as_deref());
+        // Фокус в поле выделяет весь текст, и первая же буква его стирала: курсор — в конец, без выделения.
+        // Фокус получает не само поле, а его `GtkText` внутри — поэтому контроллер, а не `has-focus`.
+        for entry in [&title, &artist, &album] {
+            let focus = gtk::EventControllerFocus::new();
+            let weak = entry.downgrade();
+            focus.connect_enter(move |_| {
+                let weak = weak.clone();
+                glib::idle_add_local_once(move || {
+                    if let Some(entry) = weak.upgrade() {
+                        entry.set_position(-1);
+                    }
+                });
+            });
+            entry.add_controller(focus);
+        }
         dialog.set_extra_child(Some(&fields));
         dialog.add_response("reset", tr("LinuxTrackDetailsReset"));
         dialog.add_response("cancel", tr("Cancel"));
@@ -512,18 +529,18 @@ impl MainWindow {
         dialog.set_default_response(Some("save"));
         dialog.set_close_response("cancel");
         let video_id = track.video_id.clone();
+        let youtube = [track.title.clone(), track.artists_text.clone().unwrap_or_default(), track.album_title.clone().unwrap_or_default()];
         dialog.connect_response(None, move |_, response| {
             let texts = match response {
                 "save" => [title.text().to_string(), artist.text().to_string(), album.text().to_string()],
                 "reset" => Default::default(),
                 _ => return,
             };
+            let [t, a, al] = edited_fields(texts, &youtube);
             let (library, video_id) = (std::sync::Arc::clone(&library), video_id.clone());
             // Запись — не в главном потоке; экраны обновит событие библиотеки.
             std::thread::spawn(move || {
-                let field = |text: &str| Some(text.to_owned()).filter(|t| !t.trim().is_empty());
-                let [t, a, al] = texts;
-                if let Err(error) = library.set_override(&video_id, field(&t).as_deref(), field(&a).as_deref(), field(&al).as_deref()) {
+                if let Err(error) = library.set_override(&video_id, t.as_deref(), a.as_deref(), al.as_deref()) {
                     tracing::warn!(%error, "правка трека не записалась");
                 }
             });
@@ -896,6 +913,15 @@ pub fn suggested_playlist_name(tracks: &[Track]) -> String {
     }
 }
 
+/// Поля «Сведений о треке» в правку: пустое или как на YouTube (без учёта пробелов по краям) — без правки.
+pub fn edited_fields(texts: [String; 3], youtube: &[String; 3]) -> [Option<String>; 3] {
+    let mut fields = texts.into_iter().zip(youtube).map(|(text, youtube)| {
+        let text = text.trim();
+        (!text.is_empty() && text != youtube.trim()).then(|| text.to_owned())
+    });
+    [fields.next().flatten(), fields.next().flatten(), fields.next().flatten()]
+}
+
 /// Ключи убираемого: страницы прячут его, пока идёт «Отменить».
 pub fn removal_key_playlist(id: i64) -> String {
     format!("playlist-{id}")
@@ -976,5 +1002,16 @@ mod tests {
         assert_eq!(suggested_playlist_name(&[track(Some("Альбом")), track(None)]), "Альбом");
         assert_eq!(suggested_playlist_name(&[track(None), track(Some(""))]), "");
         assert_eq!(suggested_playlist_name(&[]), "");
+    }
+
+    #[test]
+    fn only_changed_details_become_an_edit() {
+        let youtube = ["Кино — Группа крови (1988)".to_owned(), "Kino Official".to_owned(), String::new()];
+        // Исполнителя вырезали из названия и вписали в своё поле; альбом добавили.
+        let edited = edited_fields(["Группа крови".into(), "Кино".into(), "Группа крови".into()], &youtube);
+        assert_eq!(edited, [Some("Группа крови".into()), Some("Кино".into()), Some("Группа крови".into())]);
+        // Нетронутые поля (они заполнены текстом YouTube) и очищенные — без правки.
+        let untouched = edited_fields(["Кино — Группа крови (1988) ".into(), String::new(), "  ".into()], &youtube);
+        assert_eq!(untouched, [None, None, None]);
     }
 }

@@ -51,6 +51,7 @@ pub fn run(args: Vec<String>) -> glib::ExitCode {
                 eprintln!("папки данных не создались: {error}");
             }
             logging::init(&paths.logs());
+            crate::memory::trim_periodically();
             let lang = localization::lang();
             tracing::info!(
                 "Melogold {VERSION} · {} · GTK {}.{}.{} · libadwaita {}.{}.{} · язык {lang:?}",

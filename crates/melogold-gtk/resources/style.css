@@ -171,6 +171,20 @@ button.mood-tile:active {
   color: var(--accent-color);
 }
 
+/* ♡ играющего трека крупнее соседних значков: контур в 16 px терялся рядом с названием (исключение
+   «Крупное ♡» в docs/design/EXCEPTIONS.md). Строки списков — в обычном размере. */
+.player-bar button.heart {
+  min-width: 40px;
+  min-height: 40px;
+  -gtk-icon-size: 22px;
+}
+
+button.now-playing-heart {
+  min-width: 48px;
+  min-height: 48px;
+  -gtk-icon-size: 28px;
+}
+
 /* ── плитки коллекций Библиотеки: карточка со значком в цветной плитке, как в Настройках GNOME ── */
 
 button.library-tile {

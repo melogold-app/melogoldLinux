@@ -311,8 +311,7 @@ pub fn artist_page(window: &MainWindow, browse_id: &str) -> adw::NavigationPage 
     artist_page_with(window, browse_id, None)
 }
 
-/// Страница исполнителя из готового ответа — снимки окна без сети (отладочная сборка).
-#[cfg(debug_assertions)]
+/// Страница исполнителя из готового ответа — снимки окна без сети.
 pub fn artist_page_from(window: &MainWindow, details: melogold_core::music::ArtistDetails) -> adw::NavigationPage {
     let id = details.browse_id.clone();
     artist_page_with(window, &id, Some(details))

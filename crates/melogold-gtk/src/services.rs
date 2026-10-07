@@ -62,6 +62,9 @@ impl Services {
     pub fn start(paths: &AppPaths, settings: &SettingsStore) -> Services {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(3)
+            // По потоку на обложку пул разрастался до сотни потоков, и у каждого — своя арена malloc
+            // (`memory.rs`). Восьми хватает: разбор картинок и файлы — короткие задачи.
+            .max_blocking_threads(8)
             .thread_name("melogold-worker")
             .enable_all()
             .build()

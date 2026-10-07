@@ -20,6 +20,7 @@ mod lyrics_dialogs;
 mod lyrics_editor;
 mod lyrics_service;
 mod lyrics_view;
+mod memory;
 mod mpris;
 mod now_playing;
 mod pages;
@@ -51,6 +52,7 @@ mod wrapped;
 use gtk::{gio, glib};
 
 fn main() -> glib::ExitCode {
+    memory::limit_arenas();
     let args: Vec<String> = std::env::args().collect();
     if args.iter().skip(1).any(|arg| arg == "--version" || arg == "-V") {
         println!("melogold {}", melogold_core::app_info::VERSION);

@@ -164,6 +164,10 @@ impl RangeReader {
                                 if !wait.is_zero() {
                                     tokio::time::sleep(wait).await;
                                 }
+                                // Свежий адрес — сразу в новом сеансе YouTube: в «помеченном» сеансе
+                                // свежие адреса тоже не пускают дальше первого мегабайта
+                                // (`Resolver::renew_visitor`). Истёкшему адресу новый сеанс не мешает.
+                                self.resolver.renew_visitor();
                                 self.refresh(generation).await?;
                             }
                             continue;
@@ -326,6 +330,14 @@ mod tests {
         assert_eq!(reader.read(4, 8).await.unwrap(), &BODY[4..12]);
         assert_eq!(api.player_calls(), 3, "свежих адресов — три");
         assert_eq!(requests.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn a_forbidden_answer_renews_the_youtube_session() {
+        let (reader, _, _) = start(|index| index >= 1);
+        reader.resolver.client().set_visitor_data(Some("старый сеанс".into()));
+        assert_eq!(reader.read(0, 4).await.unwrap(), &BODY[0..4]);
+        assert_eq!(reader.resolver.client().visitor_data(), None, "свежий адрес взят в старом сеансе YouTube");
     }
 
     #[tokio::test]

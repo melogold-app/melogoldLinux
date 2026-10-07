@@ -1,5 +1,6 @@
 //! Обложки (грабли §9 п. 6): до 320 px — `mqdefault`, а не 1280×720; грузятся параллельно и
-//! кэшируются на диск (`$XDG_CACHE_HOME/melogold/images`) и в памяти (последние 300). У кадра видео
+//! кэшируются на диск (`$XDG_CACHE_HOME/melogold/images`) и в памяти (последние 300, но не больше 48 МБ
+//! расшифрованных пикселей: крупные кадры 1280×720 — по 3,7 МБ). У кадра видео
 //! чёрные поля срезаются при разборе (задание Windows 0007): обложка сингла из видео-«статики»
 //! становится квадратом, превью 4:3 — кадром без полос. Разбор — не в главном потоке.
 
@@ -15,6 +16,9 @@ use sha2::{Digest, Sha256};
 
 const MEMORY: usize = 300;
 
+/// Предел расшифрованных обложек в памяти, байт (RGBA): картинку на экране держит и сам виджет.
+const MEMORY_BYTES: usize = 48 * 1024 * 1024;
+
 /// Кэш обложек сам освобождается каждые столько записанных картинок.
 const TRIM_EVERY: u32 = 64;
 
@@ -23,7 +27,7 @@ pub struct Images {
     dir: PathBuf,
     http: reqwest::Client,
     runtime: tokio::runtime::Handle,
-    memory: Rc<RefCell<(HashMap<String, gdk::Texture>, VecDeque<String>)>>,
+    memory: Rc<RefCell<Memory>>,
     /// Предел кэша на диске, байт; 0 — без ограничения.
     max_bytes: Arc<AtomicI64>,
     written: Arc<AtomicU32>,
@@ -69,20 +73,11 @@ impl Images {
     }
 
     fn remember(&self, url: &str, texture: &gdk::Texture) {
-        let mut memory = self.memory.borrow_mut();
-        let (map, order) = &mut *memory;
-        if map.insert(url.to_owned(), texture.clone()).is_none() {
-            order.push_back(url.to_owned());
-            while order.len() > MEMORY {
-                if let Some(old) = order.pop_front() {
-                    map.remove(&old);
-                }
-            }
-        }
+        self.memory.borrow_mut().insert(url, texture);
     }
 
     pub fn cached(&self, url: &str) -> Option<gdk::Texture> {
-        self.memory.borrow().0.get(url).cloned()
+        self.memory.borrow().map.get(url).cloned()
     }
 
     /// Картинка по адресу: из памяти, с диска или из сети. `None` — не удалось.
@@ -135,6 +130,36 @@ impl Images {
     }
 }
 
+/// Последние расшифрованные картинки: не больше [`MEMORY`] штук и [`MEMORY_BYTES`] байт.
+#[derive(Default)]
+struct Memory {
+    map: HashMap<String, gdk::Texture>,
+    order: VecDeque<String>,
+    bytes: usize,
+}
+
+impl Memory {
+    fn insert(&mut self, url: &str, texture: &gdk::Texture) {
+        if self.map.insert(url.to_owned(), texture.clone()).is_some() {
+            return;
+        }
+        self.order.push_back(url.to_owned());
+        self.bytes += pixels(texture);
+        // Последнюю — оставить, даже если она одна больше предела.
+        while self.order.len() > 1 && (self.order.len() > MEMORY || self.bytes > MEMORY_BYTES) {
+            let Some(old) = self.order.pop_front() else { break };
+            if let Some(texture) = self.map.remove(&old) {
+                self.bytes = self.bytes.saturating_sub(pixels(&texture));
+            }
+        }
+    }
+}
+
+fn pixels(texture: &gdk::Texture) -> usize {
+    use gtk::prelude::*;
+    texture.width().max(0) as usize * texture.height().max(0) as usize * 4
+}
+
 /// Картинка из байтов: без обводки скана, у кадра видео — ещё и без полей любого цвета (задание 0014).
 fn decode(bytes: Vec<u8>, frame: bool) -> Option<gdk::Texture> {
     use gtk::prelude::*;
@@ -182,5 +207,38 @@ fn trim_dir(dir: &Path, max: u64) {
         if std::fs::remove_file(&path).is_ok() {
             total = total.saturating_sub(size);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gtk::prelude::*;
+
+    fn texture(side: i32) -> gdk::Texture {
+        let bytes = glib::Bytes::from_owned(vec![0u8; (side * side * 4) as usize]);
+        gdk::MemoryTexture::new(side, side, gdk::MemoryFormat::R8g8b8a8, &bytes, side as usize * 4).upcast()
+    }
+
+    #[test]
+    fn decoded_covers_stay_within_the_byte_budget() {
+        let mut memory = Memory::default();
+        // Кадр 1280×720 — около 3,5 МБ; 1024×1024 — ровно 4 МБ: в 48 МБ помещается 12.
+        for index in 0..20 {
+            memory.insert(&format!("big-{index}"), &texture(1024));
+        }
+        assert_eq!(memory.map.len(), 12);
+        assert!(memory.bytes <= MEMORY_BYTES);
+        assert!(memory.map.contains_key("big-19") && !memory.map.contains_key("big-7"), "уходят старые");
+        // Маленьких по-прежнему не больше 300.
+        for index in 0..400 {
+            memory.insert(&format!("small-{index}"), &texture(16));
+        }
+        assert_eq!(memory.map.len(), MEMORY);
+        assert_eq!(memory.order.len(), MEMORY);
+        // Повторная вставка не считается дважды.
+        let before = memory.bytes;
+        memory.insert("small-399", &texture(16));
+        assert_eq!(memory.bytes, before);
     }
 }
