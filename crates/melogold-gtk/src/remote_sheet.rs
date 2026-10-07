@@ -249,9 +249,18 @@ fn device_row(window: &MainWindow, dialog: &adw::Dialog, device: &RemoteDevice, 
     let (weak, weak_dialog, device) = (window.downgrade(), dialog.downgrade(), device.clone());
     row.connect_activated(move |_| {
         if let Some(window) = weak.upgrade() {
+            let player = &window.ctx.services.player;
+            let control = &window.ctx.services.remote.control;
+            // Здесь играет — очередь переезжает туда с той же секунды, как AirPlay (задание 0027); здесь ничего
+            // не играет — просто управлять выбранным устройством.
+            let handoff = if player.state().playing { window.handoff_queue() } else { None };
+            let position = player.position().map(|p| p.as_millis() as i64);
             // Свой плеер не играет вместе с чужим: пока устройство выбрано, здесь пауза.
-            window.ctx.services.player.send_local(melogold_playback::engine::Command::Pause);
-            window.ctx.services.remote.control.connect(&device);
+            player.send_local(melogold_playback::engine::Command::Pause);
+            control.connect(&device);
+            if let Some((tracks, index)) = handoff {
+                control.play_queue_at(&tracks, index, position);
+            }
         }
         if let Some(dialog) = weak_dialog.upgrade() {
             dialog.close();
