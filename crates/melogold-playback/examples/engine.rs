@@ -27,6 +27,7 @@ async fn main() {
         http: reqwest::Client::new(),
         settings: Default::default(),
         queue_path: None,
+        network_wait: Default::default(),
     };
     let player = engine::start(&tokio::runtime::Handle::current(), deps);
     let events = player.subscribe();

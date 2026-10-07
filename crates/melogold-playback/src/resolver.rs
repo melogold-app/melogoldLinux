@@ -136,6 +136,12 @@ impl StreamError {
         kind == StreamErrorKind::BotCheck
     }
 
+    /// Причина — сеть (нет связи, DNS, обрыв соединения, таймаут), а не YouTube и не видео: трек ждёт
+    /// сеть вместо пропуска (задание 0026).
+    pub fn is_network(&self) -> bool {
+        matches!(self.kind, StreamErrorKind::Network | StreamErrorKind::Timeout)
+    }
+
     /// Пропуск без повторов: причина в самом видео.
     pub fn is_final(&self) -> bool {
         matches!(self.kind, StreamErrorKind::Geo | StreamErrorKind::Unavailable | StreamErrorKind::Age)

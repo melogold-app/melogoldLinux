@@ -136,6 +136,32 @@ impl Default for Settings {
 
 /// Сколько раз трек открывается заново после обрыва потока посреди песни, прежде чем пропуск.
 const REOPENS_PER_TRACK: u32 = 2;
+
+/// Паузы между повторами трека, который ждёт сеть (задание 0026); последняя — дальше без роста.
+pub const NETWORK_WAIT_DELAYS: [Duration; 5] =
+    [Duration::from_secs(2), Duration::from_secs(4), Duration::from_secs(8), Duration::from_secs(15), Duration::from_secs(30)];
+/// Сколько трек ждёт сеть, прежде чем плеер остановится с ошибкой (очередь при этом не двигается).
+pub const NETWORK_WAIT_LIMIT: Duration = Duration::from_secs(10 * 60);
+
+/// Как трек ждёт сеть (задание 0026): паузы между повторами и предел. Тесты ставят секунды.
+#[derive(Clone, Debug)]
+pub struct NetworkWaitPolicy {
+    pub delays: Vec<Duration>,
+    pub limit: Duration,
+}
+
+impl Default for NetworkWaitPolicy {
+    fn default() -> Self {
+        NetworkWaitPolicy { delays: NETWORK_WAIT_DELAYS.to_vec(), limit: NETWORK_WAIT_LIMIT }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct NetworkWait {
+    video_id: String,
+    since: Instant,
+    attempt: u32,
+}
 /// Звука нет столько после «играть» — сторож загрузки смотрит, что случилось.
 const STALL_AFTER: Duration = Duration::from_secs(10);
 /// Этап загрузки дольше этого — в журнал, чтобы было видно, где стоит.
@@ -182,6 +208,8 @@ pub enum Command {
     SetShuffle(bool),
     Settings(Settings),
     Retry,
+    /// Система сообщила о сети (GTK: `gio::NetworkMonitor`): появилась — трек, ждущий сеть, пробуется сразу.
+    NetworkChanged(bool),
     /// «Отменить» после замены очереди: прежняя очередь, трек и позиция.
     RestoreQueue(Box<QueueSnapshot>),
     /// Таймер сна (docs/PROMPT.md §4): пауза через столько.
@@ -206,6 +234,10 @@ pub enum Command {
     },
     /// Сторож загрузки: через [`STALL_AFTER`] после «играть» звука всё ещё нет.
     StallCheck {
+        generation: u64,
+    },
+    /// Очередной повтор трека, который ждёт сеть ([`NETWORK_WAIT_DELAYS`]).
+    NetworkRetry {
         generation: u64,
     },
     Bus {
@@ -305,6 +337,8 @@ pub struct Deps {
     pub settings: Settings,
     /// Куда сохранять очередь для восстановления после перезапуска.
     pub queue_path: Option<PathBuf>,
+    /// Ожидание сети вместо пропуска трека (задание 0026).
+    pub network_wait: NetworkWaitPolicy,
 }
 
 /// Запустить движок на рантайме tokio.
@@ -353,6 +387,10 @@ struct Engine {
     stall_retried: Option<String>,
     /// Сколько раз трек открыт заново после обрыва потока посреди песни (задание 0021).
     reopened: Option<(String, u32)>,
+    /// Трек ждёт сеть вместо пропуска (задание 0026): с какого момента и какой по счёту повтор.
+    waiting_network: Option<NetworkWait>,
+    /// Следующий `load_current` — повтор ожидания сети, а не действие пользователя: ожидание не сбрасывать.
+    network_retry: bool,
     listened: Duration,
     listening_since: Option<Instant>,
     listened_track: Option<Track>,
@@ -388,6 +426,8 @@ impl Engine {
             load_started: None,
             stall_retried: None,
             reopened: None,
+            waiting_network: None,
+            network_retry: false,
             listened: Duration::ZERO,
             listening_since: None,
             listened_track: None,
@@ -517,6 +557,17 @@ impl Engine {
                 let position = self.position().unwrap_or(self.pending_start);
                 self.load_current(true, position);
             }
+            Command::NetworkChanged(available) => {
+                if available && self.waiting_network.is_some() {
+                    tracing::info!("сеть появилась — трек, ждавший её, пробуется сразу");
+                    self.retry_after_network();
+                }
+            }
+            Command::NetworkRetry { generation } => {
+                if generation == self.generation && self.waiting_network.is_some() {
+                    self.retry_after_network();
+                }
+            }
             Command::RestoreQueue(snapshot) => {
                 self.finish_listening();
                 let position = Duration::from_millis(snapshot.position_ms.max(0) as u64);
@@ -575,7 +626,10 @@ impl Engine {
             Command::FeedFailed { generation, error } => {
                 if generation == self.generation {
                     if let Some(track) = self.current_track() {
-                        if !self.reopen_after_cut(&track, &error) {
+                        if error.is_network() {
+                            let at = self.position().unwrap_or(self.pending_start);
+                            self.wait_for_network(&track, &error, at);
+                        } else if !self.reopen_after_cut(&track, &error) {
                             tracing::warn!("Skipped {}: {:?} {}", track.video_id, error.kind, error.message);
                             self.skip_after_error(PlayerError::from(&error, &track));
                         }
@@ -799,6 +853,9 @@ impl Engine {
             self.set_status(Status::Idle);
             return;
         };
+        if !std::mem::take(&mut self.network_retry) {
+            self.waiting_network = None;
+        }
         let start = if start.is_zero() { std::mem::take(&mut self.pending_start) } else { start };
         self.pending_start = start;
         self.set_pending(start);
@@ -856,6 +913,11 @@ impl Engine {
         let Some(track) = self.current_track() else { return };
         let stream = match result {
             Ok(stream) => stream,
+            Err(error) if error.is_network() => {
+                let at = self.pending_start;
+                self.wait_for_network(&track, &error, at);
+                return;
+            }
             Err(error) => {
                 self.skip_after_error(PlayerError::from(&error, &track));
                 return;
@@ -932,6 +994,7 @@ impl Engine {
                 if status == Status::Playing {
                     self.error = None;
                     self.stall_retried = None;
+                    self.waiting_network = None;
                     if let Some(started) = self.load_started.take() {
                         let track = self.current_track().map(|t| t.video_id).unwrap_or_default();
                         tracing::info!(трек = %track, мс = started.elapsed().as_millis() as u64, "от нажатия до звука");
@@ -1216,6 +1279,49 @@ impl Engine {
         self.load_started = started;
     }
 
+    /// Нет сети (задание 0026): трек не пропускается, а ждёт её на той же позиции. Повтор — сразу, как
+    /// система сообщила о сети ([`Command::NetworkChanged`]), иначе через [`NETWORK_WAIT_DELAYS`]. Через
+    /// [`NETWORK_WAIT_LIMIT`] — остановка с ошибкой «нет соединения» и «Повторить», очередь стоит.
+    ///
+    /// 07.10.2026 на Android: туннель VPN 30 с не пропускал трафик — обрыв TLS, затем «нет сети», и плеер
+    /// пропустил трек, хотя через секунду сеть вернулась.
+    fn wait_for_network(&mut self, track: &Track, error: &StreamError, at: Duration) {
+        let now = Instant::now();
+        let wait = match self.waiting_network.take() {
+            Some(wait) if wait.video_id == track.video_id => wait,
+            _ => NetworkWait { video_id: track.video_id.clone(), since: now, attempt: 0 },
+        };
+        self.release_output();
+        self.stream = None;
+        self.pending_start = at;
+        self.set_pending(at);
+        let policy = self.deps.network_wait.clone();
+        if now.duration_since(wait.since) >= policy.limit {
+            tracing::warn!(трек = %track.video_id, "сети нет {} с — останавливаюсь: {}", policy.limit.as_secs(), error.message);
+            self.play_when_ready = false;
+            self.error = Some(PlayerError::from(error, track));
+            self.set_status(Status::Error);
+            return;
+        }
+        let delay = policy.delays[(wait.attempt as usize).min(policy.delays.len().saturating_sub(1))];
+        tracing::info!(трек = %track.video_id, повтор_через_с = delay.as_secs(), позиция_с = at.as_secs(), "нет сети — трек ждёт её: {}", error.message);
+        self.waiting_network = Some(NetworkWait { attempt: wait.attempt + 1, ..wait });
+        self.set_status(Status::Buffering);
+        let (tx, generation) = (self.tx.clone(), self.generation);
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let _ = tx.send(Command::NetworkRetry { generation });
+        });
+    }
+
+    /// Повтор трека, ждущего сеть, с той же позиции; ожидание (и счёт времени) сохраняется.
+    fn retry_after_network(&mut self) {
+        let at = self.pending_start;
+        let play = self.play_when_ready;
+        self.network_retry = true;
+        self.load_current(play, at);
+    }
+
     /// Поток оборвался посреди трека не по причине в самом видео — открыть трек заново с того же
     /// места со свежим адресом, до [`REOPENS_PER_TRACK`] раз на трек (задание 0021).
     ///
@@ -1346,6 +1452,7 @@ mod tests {
             http: reqwest::Client::new(),
             settings: Settings::default(),
             queue_path: None,
+            network_wait: NetworkWaitPolicy::default(),
         };
         let player = start(&tokio::runtime::Handle::current(), deps);
         let events = player.subscribe();
@@ -1364,6 +1471,64 @@ mod tests {
         assert!(!skipped);
         assert_eq!(state.track.as_ref().map(|t| t.video_id.as_str()), Some("a"));
         assert_eq!(api.player_calls(), 2, "«Повторить» — ровно один запрос");
+        player.send(Command::Shutdown);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    async fn until(events: &async_channel::Receiver<Event>, wanted: Status, skipped: &mut bool) -> State {
+        loop {
+            match tokio::time::timeout(Duration::from_secs(30), events.recv()).await.expect("плеер отвечает").expect("канал открыт")
+            {
+                Event::Skipped(_) => *skipped = true,
+                Event::State(state) if state.status == wanted => return *state,
+                _ => {}
+            }
+        }
+    }
+
+    /// Нет сети (задание 0026): трек не пропускается, а ждёт её в буферизации; «сеть появилась» — повтор
+    /// сразу, не дожидаясь таймера; предел ожидания вышел — ошибка «нет сети», очередь на месте.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn without_network_the_track_waits_instead_of_skipping() {
+        let dir = std::env::temp_dir().join(format!("melogold-engine-net-{}", std::process::id()));
+        let api = FakeApi::new(|_, _| fake::http_500());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        let policy = NetworkWaitPolicy { delays: vec![Duration::from_secs(2)], limit: Duration::from_secs(3) };
+        let deps = Deps {
+            resolver: Arc::clone(&resolver),
+            music: YouTubeMusic::new(resolver.client().clone()),
+            songs: SongCache::new(dir.join("songs"), 0),
+            downloads: None,
+            library: None,
+            http: reqwest::Client::new(),
+            settings: Settings::default(),
+            queue_path: None,
+            network_wait: policy,
+        };
+        let player = start(&tokio::runtime::Handle::current(), deps);
+        let events = player.subscribe();
+        player.send(Command::PlayList { tracks: vec![track("a"), track("b"), track("c")], start: 0, shuffle: false });
+
+        let mut skipped = false;
+        // Отказ после быстрых повторов — буферизация на том же треке, не пропуск.
+        let state = until(&events, Status::Buffering, &mut skipped).await;
+        assert_eq!(state.track.as_ref().map(|t| t.video_id.as_str()), Some("a"));
+
+        // Сеть появилась — повтор сразу, раньше таймера (2 с).
+        let calls = api.player_calls();
+        let asked = Instant::now();
+        player.send(Command::NetworkChanged(true));
+        until(&events, Status::Resolving, &mut skipped).await;
+        assert!(asked.elapsed() < Duration::from_secs(1), "повтор не ждал таймера: {:?}", asked.elapsed());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(api.player_calls() > calls, "по сигналу сети YouTube спрошен снова");
+
+        // Предел ожидания — ошибка «нет сети», трек и очередь на месте, ничего не пропущено.
+        let state = until(&events, Status::Error, &mut skipped).await;
+        assert_eq!(state.track.as_ref().map(|t| t.video_id.as_str()), Some("a"));
+        assert_eq!(state.error.as_ref().map(|e| e.kind), Some(StreamErrorKind::Network));
+        assert!(!state.playing);
+        assert!(!skipped, "за всё ожидание ни одного пропуска");
         player.send(Command::Shutdown);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1399,6 +1564,7 @@ mod tests {
             http: reqwest::Client::new(),
             settings: Settings { muted: true, volume: 0.0, ..Settings::default() },
             queue_path: None,
+            network_wait: NetworkWaitPolicy::default(),
         };
         let player = start(&tokio::runtime::Handle::current(), deps);
         let events = player.subscribe();

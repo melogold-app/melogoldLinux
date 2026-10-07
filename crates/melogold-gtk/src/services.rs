@@ -132,6 +132,7 @@ impl Services {
                 http: http.clone(),
                 settings: playback_settings(settings),
                 queue_path: Some(paths.data().join("queue.json")),
+                network_wait: engine::NetworkWaitPolicy::default(),
             },
         );
         let image_mb = settings.get(&keys::IMAGE_CACHE_MB);
