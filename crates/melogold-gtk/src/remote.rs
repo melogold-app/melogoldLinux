@@ -245,7 +245,14 @@ pub fn engine_commands(incoming: &Incoming) -> Vec<Command> {
         Incoming::Previous => vec![Command::Previous],
         Incoming::Seek(ms) => vec![Command::Seek(Duration::from_millis((*ms).max(0) as u64))],
         Incoming::Volume(_) => vec![],
-        Incoming::PlayQueue { tracks, index } => vec![Command::PlayList { tracks: tracks.clone(), start: *index, shuffle: false }],
+        Incoming::PlayQueue { tracks, index, position_ms } => {
+            let mut commands = vec![Command::PlayList { tracks: tracks.clone(), start: *index, shuffle: false }];
+            // Перенос с другого устройства: перемотка до того, как трек открылся, — он начнётся с этой секунды.
+            if let Some(ms) = position_ms.filter(|ms| *ms > 0) {
+                commands.push(Command::Seek(Duration::from_millis(ms as u64)));
+            }
+            commands
+        }
     }
 }
 
@@ -405,7 +412,9 @@ mod tests {
         assert!(matches!(engine_commands(&Incoming::Previous)[0], Command::Previous));
         assert!(matches!(engine_commands(&Incoming::Seek(83_000))[0], Command::Seek(d) if d == Duration::from_secs(83)));
         assert!(engine_commands(&Incoming::Volume(30)).is_empty(), "громкость применяет окно");
-        match &engine_commands(&Incoming::PlayQueue { tracks: (0..5).map(track).collect(), index: 3 })[0] {
+        let handoff = engine_commands(&Incoming::PlayQueue { tracks: (0..5).map(track).collect(), index: 3, position_ms: Some(83_000) });
+        assert!(matches!(handoff.get(1), Some(Command::Seek(d)) if *d == Duration::from_secs(83)), "перенос — с той же секунды");
+        match &engine_commands(&Incoming::PlayQueue { tracks: (0..5).map(track).collect(), index: 3, position_ms: None })[0] {
             Command::PlayList { tracks, start, shuffle } => assert_eq!((tracks.len(), *start, *shuffle), (5, 3, false)),
             other => panic!("{other:?}"),
         }

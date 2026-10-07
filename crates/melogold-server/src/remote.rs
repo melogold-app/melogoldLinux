@@ -162,6 +162,8 @@ pub enum Incoming {
     PlayQueue {
         tracks: Vec<Track>,
         index: usize,
+        /// С какой секунды начать трек `index`: перенос воспроизведения «как AirPlay» (задание 0027).
+        position_ms: Option<i64>,
     },
 }
 
@@ -180,7 +182,11 @@ pub fn incoming_of(command: &PlaybackCommandPayload) -> Option<Incoming> {
         action::PLAY_QUEUE => {
             let queue = command.queue.as_ref().filter(|q| !q.is_empty())?;
             let index = usize::try_from(command.index?).ok().filter(|i| *i < queue.len())?;
-            Incoming::PlayQueue { tracks: queue.iter().map(|t| t.to_track()).collect(), index }
+            Incoming::PlayQueue {
+                tracks: queue.iter().map(|t| t.to_track()).collect(),
+                index,
+                position_ms: command.position_ms.filter(|p| *p > 0),
+            }
         }
         _ => return None,
     })
@@ -936,6 +942,12 @@ impl<P: RemotePort> RemoteControl<P> {
     /// Нажатие по треку в списке, пока пульт включён: очередь — окно из 200 треков вокруг него, файлы этого
     /// устройства не берутся. `false` — устройство не выбрано и плеер играет здесь; `true` — команда принята.
     pub fn play_queue(&self, tracks: &[Track], index: usize) -> bool {
+        self.play_queue_at(tracks, index, None)
+    }
+
+    /// То же, но трек `index` начинается с `position_ms`: здесь играла очередь, и её перенесли на выбранное
+    /// устройство с той же секунды — как AirPlay (задание 0027).
+    pub fn play_queue_at(&self, tracks: &[Track], index: usize, position_ms: Option<i64>) -> bool {
         let Some(target) = self.view().target else { return false };
         if index >= tracks.len() {
             return true;
@@ -951,6 +963,7 @@ impl<P: RemotePort> RemoteControl<P> {
             action: action::PLAY_QUEUE.into(),
             queue: Some(kept.iter().map(|i| TrackInput::from_track(&tracks[*i])).collect()),
             index: Some(at as i64),
+            position_ms: position_ms.filter(|p| *p > 0),
             ..Default::default()
         });
         true
@@ -1146,10 +1159,16 @@ mod tests {
         let dto = |i: usize| TrackDto { video_id: id(i), title: format!("Трек {i}"), ..Default::default() };
         let queue = PlaybackCommandPayload { queue: Some(vec![dto(1), dto(2), dto(3)]), index: Some(1), ..payload("play_queue") };
         match incoming_of(&queue) {
-            Some(Incoming::PlayQueue { tracks, index }) => {
-                assert_eq!((tracks.len(), index), (3, 1));
+            Some(Incoming::PlayQueue { tracks, index, position_ms }) => {
+                assert_eq!((tracks.len(), index, position_ms), (3, 1, None));
                 assert_eq!(tracks[1].title, "Трек 2");
             }
+            other => panic!("{other:?}"),
+        }
+        // Перенос «как AirPlay»: очередь приходит с секундой, на которой играла (задание 0027).
+        let handoff = PlaybackCommandPayload { position_ms: Some(83_000), ..queue.clone() };
+        match incoming_of(&handoff) {
+            Some(Incoming::PlayQueue { index, position_ms, .. }) => assert_eq!((index, position_ms), (1, Some(83_000))),
             other => panic!("{other:?}"),
         }
     }

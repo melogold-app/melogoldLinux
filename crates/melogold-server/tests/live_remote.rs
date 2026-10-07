@@ -136,7 +136,7 @@ async fn phone_controls_the_computer_and_back() {
     let event = next_event(&mut computer_events, "playback.command").await;
     let payload: PlaybackCommandPayload = serde_json::from_value(event.payload).unwrap();
     match incoming_of(&payload) {
-        Some(Incoming::PlayQueue { tracks, index }) => {
+        Some(Incoming::PlayQueue { tracks, index, .. }) => {
             assert_eq!((tracks.len(), index, tracks[index].title.as_str()), (3, 2, "Photosynthesis"))
         }
         other => panic!("{other:?}"),

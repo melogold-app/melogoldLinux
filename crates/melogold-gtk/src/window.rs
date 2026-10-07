@@ -319,6 +319,14 @@ impl MainWindow {
         self.ctx.services.library.display(track)
     }
 
+    /// Очередь этого устройства для переноса на другое (задание 0027): треки и индекс играющего.
+    pub fn handoff_queue(&self) -> Option<(Vec<Track>, usize)> {
+        let view = self.last_queue.borrow().clone()?;
+        let index = view.current?;
+        let tracks: Vec<Track> = view.items.into_iter().map(|item| item.track).collect();
+        (index < tracks.len()).then_some((tracks, index))
+    }
+
     /// Правки названий изменились: строки, панель плеера, «Сейчас играет» и очередь — заново.
     pub fn refresh_display(&self) {
         for row in self.library_view.live_rows() {
