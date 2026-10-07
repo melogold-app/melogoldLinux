@@ -725,6 +725,10 @@ impl Engine {
     /// Очередь сменилась и сразу грузится другой трек: состояние скажет загрузка («Получаем поток»),
     /// а не «играет» новый трек со старой позицией.
     fn queue_changed_then_load(&mut self, start: Duration) {
+        // Новый трек начинается ровно с `start` (обычно с нуля). Запомненная позиция прежнего — восстановленной
+        // при запуске очереди или перемотки без звука — ему не достаётся: иначе трек, включённый нажатием в
+        // списке, начинался с её секунды (07.10.2026: God's Plan с 11-й секунды после перезапуска).
+        self.pending_start = start;
         self.emit_queue();
         self.save_queue();
         self.load_current(true, start);
@@ -1484,6 +1488,40 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    /// Запомненная позиция (восстановленная очередь, перемотка без звука) не достаётся треку, включённому заново:
+    /// он начинается с нуля (07.10.2026: God's Plan с 11-й секунды после перезапуска).
+    #[tokio::test]
+    async fn a_track_started_anew_does_not_take_the_remembered_position() {
+        let dir = std::env::temp_dir().join(format!("melogold-engine-start-{}", std::process::id()));
+        let api = FakeApi::new(|_, _| fake::bot_check());
+        let resolver = fake::resolver(&api, fake::two_clients());
+        let deps = Deps {
+            resolver: Arc::clone(&resolver),
+            music: YouTubeMusic::new(resolver.client().clone()),
+            songs: SongCache::new(dir.join("songs"), 0),
+            downloads: None,
+            library: None,
+            http: reqwest::Client::new(),
+            settings: Settings::default(),
+            queue_path: None,
+            network_wait: NetworkWaitPolicy::default(),
+        };
+        let player = start(&tokio::runtime::Handle::current(), deps);
+        let events = player.subscribe();
+        let mut skipped = false;
+        player.send(Command::PlayList { tracks: vec![track("a")], start: 0, shuffle: false });
+        until(&events, Status::Error, &mut skipped).await;
+
+        // Без звука перемотка только запоминается — как позиция очереди, восстановленной при запуске.
+        player.send(Command::Seek(Duration::from_secs(11)));
+        player.send(Command::PlayList { tracks: vec![track("b")], start: 0, shuffle: false });
+        let state = until(&events, Status::Error, &mut skipped).await;
+        assert_eq!(state.track.as_ref().map(|t| t.video_id.as_str()), Some("b"));
+        assert_eq!(player.position(), Some(Duration::ZERO), "новый трек — с начала");
+        player.send(Command::Shutdown);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Нет сети (задание 0026): трек не пропускается, а ждёт её в буферизации; «сеть появилась» — повтор
