@@ -1064,6 +1064,19 @@ impl MainWindow {
             glib::Propagation::Stop
         });
         self.window.add_controller(controller);
+        // Щелчок мышью в окне снимает фокус с прежнего места и прячет рамку фокуса: иначе синяя
+        // рамка остаётся у названия трека (ссылка на странице плеера), а щелчок мимо её не снимает.
+        // Фокус, который виджет берёт сам при щелчке (поле ввода), приходит позже — на всплытии.
+        let pointer = gtk::GestureClick::builder().button(0).propagation_phase(gtk::PropagationPhase::Capture).build();
+        let weak = self.downgrade();
+        pointer.connect_pressed(move |gesture, _, _, _| {
+            gesture.set_state(gtk::EventSequenceState::None);
+            if let Some(window) = weak.upgrade() {
+                gtk::prelude::GtkWindowExt::set_focus_visible(&window.window, false);
+                gtk::prelude::GtkWindowExt::set_focus(&window.window, gtk::Widget::NONE);
+            }
+        });
+        self.window.add_controller(pointer);
     }
 
     // ── поиск и подсказки ──
