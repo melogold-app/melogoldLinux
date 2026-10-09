@@ -327,6 +327,9 @@ impl Entry {
 
     /// Трек больше не играет: его можно вытеснять.
     pub fn release(&self) {
+        // Rust 1.99 объявил `fetch_update` устаревшим в пользу `try_update`, которого нет в старых
+        // компиляторах (пакеты собираются в контейнере): поэтому так, работает в обоих.
+        #[allow(deprecated)]
         let _ = self.pins.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(1)));
     }
 
