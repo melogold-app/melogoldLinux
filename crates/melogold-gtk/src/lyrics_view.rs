@@ -332,10 +332,11 @@ impl RowView {
             state.borrow_mut().scale = scale;
             area.set_content_width(((3.0 * 10.0 + 2.0 * 6.0 + 2.0 * DOTS_PAD) * scale).ceil() as i32);
             area.set_content_height((40.0 * scale - 2.0 * f64::from(y)).max(1.0) as i32);
-            // Запас внутри области: ряд стоит там же, где стоял.
+            // Запас внутри области уменьшает поле строки на столько же: крайняя точка стоит
+            // ровно в колонке текста (раньше её сдвигало второе поле в 16 px).
             let side = ((16.0 - DOTS_PAD) * scale) as i32;
-            area.set_margin_start(side);
-            area.set_margin_end(side);
+            self.root.set_margin_start(side);
+            self.root.set_margin_end(side);
         }
     }
 
