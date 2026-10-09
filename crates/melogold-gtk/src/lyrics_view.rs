@@ -26,6 +26,8 @@ use crate::lyrics_service::{source_text, LyricsService, LyricsState};
 const LEAD_MS: i64 = 60;
 /// Размер строки при обычном окне; всё остальное в строке считается от него.
 const BASE_FONT: f64 = 28.0;
+/// Запас по бокам области точек, px при масштабе 1: раздутая группа (до 1,25) выходит за ряд.
+const DOTS_PAD: f64 = 8.0;
 /// Затухание верхнего края: над текущей строкой видна только его кромка.
 const FADE_TOP: f64 = 24.0;
 const RESUME_FOLLOW: Duration = Duration::from_secs(3);
@@ -282,6 +284,9 @@ impl RowView {
             }
             let (dot, gap) = (10.0 * s.scale, 6.0 * s.scale);
             let total = 3.0 * dot + 2.0 * gap;
+            // Запас по бокам: раздутая группа и «отскок» точки выходят за ряд, а область рисует
+            // только внутри себя.
+            cr.translate(DOTS_PAD * s.scale, 0.0);
             let (cx, cy) = (total / 2.0, f64::from(height) / 2.0);
             cr.translate(cx, cy);
             cr.scale(group, group);
@@ -325,10 +330,12 @@ impl RowView {
         self.root.set_margin_bottom(y);
         if let Some((area, state)) = &self.dots {
             state.borrow_mut().scale = scale;
-            area.set_content_width((46.0 * scale) as i32);
+            area.set_content_width(((3.0 * 10.0 + 2.0 * 6.0 + 2.0 * DOTS_PAD) * scale).ceil() as i32);
             area.set_content_height((40.0 * scale - 2.0 * f64::from(y)).max(1.0) as i32);
-            area.set_margin_start((16.0 * scale) as i32);
-            area.set_margin_end((16.0 * scale) as i32);
+            // Запас внутри области: ряд стоит там же, где стоял.
+            let side = ((16.0 - DOTS_PAD) * scale) as i32;
+            area.set_margin_start(side);
+            area.set_margin_end(side);
         }
     }
 
