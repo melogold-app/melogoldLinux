@@ -160,9 +160,22 @@ impl YouTubeMusic {
 
     /// Альбом — с песнями, а не с клипами (см. [`prefer_album_audio`]).
     pub async fn album(&self, browse_id: &str) -> Result<AlbumDetails, YouTubeError> {
+        Ok(self.album_with_rows(browse_id).await?.0)
+    }
+
+    /// Клипы списка альбома и песни, которыми они заменены: `(id клипа, песня)`. Для починки
+    /// медиатеки — треков, сохранённых клипами до задания 0029 (задание 0030).
+    pub async fn album_twins(&self, browse_id: &str) -> Result<Vec<(String, Track)>, YouTubeError> {
+        let (details, rows) = self.album_with_rows(browse_id).await?;
+        Ok(rows.into_iter().zip(details.tracks).filter(|(row, song)| *row != song.video_id).collect())
+    }
+
+    /// Альбом с песнями вместо клипов и id строк, какими их дал YouTube, — в том же порядке.
+    async fn album_with_rows(&self, browse_id: &str) -> Result<(AlbumDetails, Vec<String>), YouTubeError> {
         let response = self.music("browse", json!({"browseId": browse_id})).await?;
         let mut details = parse_album(browse_id, &response)
             .ok_or_else(|| YouTubeError::new(ErrorKind::Parser, format!("album {browse_id} has no header")))?;
+        let rows: Vec<String> = details.tracks.iter().map(|t| t.video_id.clone()).collect();
         // Второй запрос — только когда в списке есть клипы: у большинства альбомов их нет.
         if details.tracks.iter().any(|t| t.video_type.as_deref() == Some("video")) {
             if let Some(playlist_id) = details.album.playlist_id.clone() {
@@ -176,7 +189,7 @@ impl YouTubeMusic {
                 }
             }
         }
-        Ok(details)
+        Ok((details, rows))
     }
 
     pub async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetails, YouTubeError> {

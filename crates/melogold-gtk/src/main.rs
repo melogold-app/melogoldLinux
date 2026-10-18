@@ -5,6 +5,7 @@
 #![allow(clippy::type_complexity)]
 
 mod account_view;
+mod album_clips_repair;
 mod app;
 mod artist_hero;
 mod backup_ui;

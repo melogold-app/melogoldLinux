@@ -34,6 +34,14 @@ impl Change {
     }
 }
 
+/// Что перешло с клипа на песню ([`Library::replace_clip_with_song`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClipReplaced {
+    pub liked: bool,
+    pub playlists: usize,
+    pub moved_override: bool,
+}
+
 /// Свой плейлист: `sync_id` — UUID сервера, если плейлист синхронизирован.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalPlaylist {
@@ -286,6 +294,85 @@ impl Library {
         })?;
         self.notify(Change::LIKES);
         Ok(())
+    }
+
+    // ── клипы из альбомов (задание 0030) ──
+
+    /// Клипы из альбомов, которые человек сохранил: в «Нравится» или в плейлисте. До задания 0029
+    /// список альбома давал клипы вместо песен, и они остались в медиатеке.
+    pub fn saved_album_clips(&self) -> Result<Vec<Track>, DbError> {
+        self.db.read(|c| {
+            tracks(
+                c,
+                &format!(
+                    "SELECT {TRACK_COLUMNS} FROM tracks WHERE video_type = 'video' AND album_id LIKE 'MPREb%'
+                     AND (liked_at IS NOT NULL OR video_id IN (SELECT video_id FROM playlist_items))"
+                ),
+                [],
+            )
+        })
+    }
+
+    /// Сохранённый клип → его песня: ♡ (с прежней датой), места в плейлистах, своё название и
+    /// закреплённый текст переходят на песню. Синхронизация увидит это разницей с сервером — как
+    /// снятый ♡ у клипа и поставленный у песни, замену трека в плейлисте.
+    ///
+    /// Загрузки и история остаются за клипом: файл загрузки — звук клипа, а история — то, что
+    /// действительно звучало.
+    pub fn replace_clip_with_song(&self, clip_id: &str, song: &Track) -> Result<ClipReplaced, DbError> {
+        if clip_id == song.video_id {
+            return Ok(ClipReplaced::default());
+        }
+        let replaced = self.db.write(|t| {
+            upsert_track(t, song, false)?;
+            let liked: bool =
+                t.query_row("SELECT liked_at IS NOT NULL FROM tracks WHERE video_id = ?1", [clip_id], |r| r.get(0)).unwrap_or(false);
+            if liked {
+                t.execute(
+                    "UPDATE tracks SET liked_at = COALESCE(liked_at, (SELECT liked_at FROM tracks WHERE video_id = ?1)) WHERE video_id = ?2",
+                    params![clip_id, song.video_id],
+                )?;
+                t.execute("UPDATE tracks SET liked_at = NULL WHERE video_id = ?1", [clip_id])?;
+            }
+
+            let playlists: Vec<i64> = {
+                let mut statement = t.prepare("SELECT playlist_id FROM playlist_items WHERE video_id = ?1")?;
+                let ids = statement.query_map([clip_id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+                ids
+            };
+            for playlist_id in &playlists {
+                let has_song: bool = t.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM playlist_items WHERE playlist_id = ?1 AND video_id = ?2)",
+                    params![playlist_id, song.video_id],
+                    |r| r.get(0),
+                )?;
+                if has_song {
+                    // Песня там уже есть: трек встречается в плейлисте не больше одного раза.
+                    t.execute("DELETE FROM playlist_items WHERE playlist_id = ?1 AND video_id = ?2", params![playlist_id, clip_id])?;
+                    renumber(t, *playlist_id)?;
+                } else {
+                    t.execute(
+                        "UPDATE playlist_items SET video_id = ?3 WHERE playlist_id = ?1 AND video_id = ?2",
+                        params![playlist_id, clip_id, song.video_id],
+                    )?;
+                }
+            }
+
+            let mut moved_override = false;
+            for table in ["track_overrides", "lyrics_pins"] {
+                let moved = t.execute(
+                    &format!("UPDATE {table} SET video_id = ?2 WHERE video_id = ?1 AND NOT EXISTS (SELECT 1 FROM {table} WHERE video_id = ?2)"),
+                    params![clip_id, song.video_id],
+                )?;
+                moved_override |= table == "track_overrides" && moved > 0;
+            }
+            Ok(ClipReplaced { liked, playlists: playlists.len(), moved_override })
+        })?;
+        if replaced.moved_override {
+            self.reload_overrides();
+        }
+        self.notify(Change(Change::LIKES.0 | Change::PLAYLISTS.0 | Change::OVERRIDES.0 | Change::LYRICS.0));
+        Ok(replaced)
     }
 
     // ── альбомы и исполнители ──
@@ -996,6 +1083,42 @@ mod tests {
 
     fn track(id: &str) -> Track {
         Track { video_id: id.into(), title: format!("Трек {id}"), artists_text: Some("Кино".into()), ..Default::default() }
+    }
+
+    /// Задание 0030: ♡ и места в плейлистах переходят с клипа на песню; там, где песня уже есть,
+    /// клип просто убирается; свои названия — тоже на песню.
+    #[test]
+    fn a_saved_clip_becomes_its_song() {
+        let lib = library();
+        let clip = Track {
+            video_id: "clip".into(),
+            title: "LEMONHEAD (feat. 42 Dugg)".into(),
+            album_id: Some("MPREb_rMqWqQe5N3L".into()),
+            video_type: Some("video".into()),
+            ..Default::default()
+        };
+        let song = Track { video_id: "song".into(), video_type: Some("song".into()), ..clip.clone() };
+        lib.set_liked(std::slice::from_ref(&clip), true).unwrap();
+        let liked_at: i64 =
+            lib.database().read(|c| c.query_row("SELECT liked_at FROM tracks WHERE video_id = 'clip'", [], |r| r.get(0))).unwrap();
+        let mixed = lib.create_playlist("Смесь", &[track("a"), clip.clone(), track("b")]).unwrap();
+        let both = lib.create_playlist("Обе", &[song.clone(), clip.clone()]).unwrap();
+        lib.set_override("clip", Some("Лимонная голова"), None, None).unwrap();
+        lib.set_liked(&[track("x")], true).unwrap();
+
+        assert_eq!(lib.saved_album_clips().unwrap().iter().map(|t| t.video_id.as_str()).collect::<Vec<_>>(), ["clip"]);
+        let replaced = lib.replace_clip_with_song("clip", &song).unwrap();
+        assert_eq!(replaced, ClipReplaced { liked: true, playlists: 2, moved_override: true });
+
+        assert!(!lib.is_liked("clip").unwrap() && lib.is_liked("song").unwrap());
+        let song_liked_at: i64 =
+            lib.database().read(|c| c.query_row("SELECT liked_at FROM tracks WHERE video_id = 'song'", [], |r| r.get(0))).unwrap();
+        assert_eq!(song_liked_at, liked_at, "дата ♡ прежняя — порядок «Нравится» не меняется");
+        let ids = |id| lib.playlist_tracks(id).unwrap().into_iter().map(|t| t.video_id).collect::<Vec<_>>();
+        assert_eq!(ids(mixed), ["a", "song", "b"], "на том же месте");
+        assert_eq!(ids(both), ["song"], "песня там уже была — клип убран");
+        assert_eq!(lib.display(&song).title, "Лимонная голова");
+        assert!(lib.saved_album_clips().unwrap().is_empty());
     }
 
     #[test]

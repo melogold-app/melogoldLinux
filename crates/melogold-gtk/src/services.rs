@@ -240,6 +240,8 @@ impl Services {
         // сессия запускает синхронизацию через подписку.
         let loading = Arc::clone(&account);
         runtime.spawn(async move { loading.load().await });
+        // Клипы из альбомов, сохранённые до задания 0029, — на песни (один раз, задание 0030).
+        runtime.spawn(crate::album_clips_repair::run(Arc::clone(&library), music.clone()));
         Services {
             runtime,
             music,
