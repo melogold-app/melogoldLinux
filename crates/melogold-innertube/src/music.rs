@@ -158,9 +158,25 @@ impl YouTubeMusic {
 
     // ── страницы ──
 
+    /// Альбом — с песнями, а не с клипами (см. [`prefer_album_audio`]).
     pub async fn album(&self, browse_id: &str) -> Result<AlbumDetails, YouTubeError> {
         let response = self.music("browse", json!({"browseId": browse_id})).await?;
-        parse_album(browse_id, &response).ok_or_else(|| YouTubeError::new(ErrorKind::Parser, format!("album {browse_id} has no header")))
+        let mut details = parse_album(browse_id, &response)
+            .ok_or_else(|| YouTubeError::new(ErrorKind::Parser, format!("album {browse_id} has no header")))?;
+        // Второй запрос — только когда в списке есть клипы: у большинства альбомов их нет.
+        if details.tracks.iter().any(|t| t.video_type.as_deref() == Some("video")) {
+            if let Some(playlist_id) = details.album.playlist_id.clone() {
+                match self.playlist_tracks(&playlist_id, details.tracks.len() + 50).await {
+                    Ok(audio) => {
+                        let swapped = prefer_album_audio(&mut details.tracks, &audio);
+                        tracing::info!(альбом = browse_id, заменено = swapped, "клипы альбома заменены песнями");
+                    }
+                    // Без плейлиста альбом всё равно открывается — с клипами, как раньше.
+                    Err(error) => tracing::warn!(альбом = browse_id, %error, "плейлист альбома не загрузился, остаются клипы"),
+                }
+            }
+        }
+        Ok(details)
     }
 
     pub async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetails, YouTubeError> {
@@ -357,6 +373,50 @@ pub fn parse_browse_shelves(response: &Value) -> Option<Vec<Shelf>> {
 
 fn year_of(text: &str) -> bool {
     text.len() == 4 && text.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Клипы в списке альбома — на песни из плейлиста альбома. Возвращает, сколько заменено.
+///
+/// YouTube Music отдаёт в списке альбома клип (`MUSIC_VIDEO_TYPE_OMV`) везде, где у песни есть
+/// официальное видео или визуализатор, а длительность в строке — песни. 18.10.2026 так у Tyler, The
+/// Creator в «CALL ME IF YOU GET LOST» все 16 строк оказались клипами: LEMONHEAD показывал 2:11, а
+/// играл клип на 1:25 с другим сведением, и синхронный текст песни расходился со звуком. Плейлист
+/// альбома (`OLAK5uy_…`) несёт сами песни (`MUSIC_VIDEO_TYPE_ATV`) — оттуда же берёт треки альбома
+/// Android-клиент.
+///
+/// Сопоставление — по месту в списке и названию; если место не сошлось (в плейлисте лишний или
+/// недостающий трек), то по первому свободному треку с тем же названием. Песни альбома и строки
+/// без пары не трогаются.
+pub fn prefer_album_audio(tracks: &mut [Track], audio: &[Track]) -> usize {
+    fn key(title: &str) -> String {
+        title.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    }
+    let is_song = |track: &Track| track.video_type.as_deref() == Some("song");
+    let mut used = vec![false; audio.len()];
+    let mut swapped = 0;
+    for (index, track) in tracks.iter_mut().enumerate() {
+        if track.video_type.as_deref() != Some("video") {
+            continue;
+        }
+        let wanted = key(&track.title);
+        let fits = |i: usize, candidate: &Track| !used[i] && is_song(candidate) && key(&candidate.title) == wanted;
+        let found = audio
+            .get(index)
+            .filter(|candidate| fits(index, candidate))
+            .map(|_| index)
+            .or_else(|| audio.iter().enumerate().find(|(i, candidate)| fits(*i, candidate)).map(|(i, _)| i));
+        let Some(found) = found else { continue };
+        used[found] = true;
+        let song = &audio[found];
+        track.video_id = song.video_id.clone();
+        track.video_type = Some("song".into());
+        if track.duration_ms.is_none() {
+            track.duration_ms = song.duration_ms;
+            track.duration_text = song.duration_text.clone();
+        }
+        swapped += 1;
+    }
+    swapped
 }
 
 pub fn parse_album(browse_id: &str, response: &Value) -> Option<AlbumDetails> {

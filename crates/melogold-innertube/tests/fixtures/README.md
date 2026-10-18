@@ -12,3 +12,9 @@
 
 `artist/` — страницы исполнителей «Кино» и «Michael Jackson» для шапки и «Об исполнителе» (задание 0019).
 Копии из `melogoldWindows/tests/Melogold.Tests/Fixtures/artist`, коммит `b87dc07`, обезличены там же.
+
+`album-clips/` — альбом Tyler, The Creator «CALL ME IF YOU GET LOST» (`MPREb_rMqWqQe5N3L`) и его плейлист
+(`VLOLAK5uy_np90iV2eD-YiScFePYgA7-i3c9kOYXMpc`): записаны 18.10.2026, WEB_REMIX `hl=en gl=US`, без входа. В
+списке альбома все 16 строк — клипы (`MUSIC_VIDEO_TYPE_OMV`), в плейлисте — песни (`MUSIC_VIDEO_TYPE_ATV`):
+LEMONHEAD в альбоме — клип `a5JCltuobqQ` на 1:25, в плейлисте — песня `QjckqsLmb1o` на 2:11. Обезличены
+так же: без `responseContext` и полей отслеживания.
