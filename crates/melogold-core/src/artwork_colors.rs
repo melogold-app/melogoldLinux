@@ -223,6 +223,72 @@ pub fn dark_backdrop(color: Rgb) -> Rgb {
     from_lab([target, a * keep, b * keep])
 }
 
+/// Сторона уменьшенной размытой обложки фона «Сейчас играет» (задание 0031).
+pub const PREVIEW_SIDE: usize = 24;
+
+/// Обложка для фона «Сейчас играет» (задание 0031): 24 × 24 после трёх проходов размытия
+/// «коробкой» 5 × 5, средняя яркость до размытия и цвет подложки. Растянутая на окно, она и есть
+/// «размытая обложка» — без размытия всего окна на каждом кадре.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BackdropPreview {
+    /// RGBA, `PREVIEW_SIDE` × `PREVIEW_SIDE`, строки подряд.
+    pub rgba: Vec<u8>,
+    /// Средняя яркость 0..1 (Rec. 709): светлую обложку под белым текстом приглушают сильнее.
+    pub luma: f64,
+    /// Подложка — `dark_backdrop` преобладающего цвета.
+    pub base: Rgb,
+}
+
+pub fn backdrop_preview(rgba: &[u8], width: usize, height: usize, stride: usize) -> Option<BackdropPreview> {
+    if width == 0 || height == 0 || stride < width * 4 || rgba.len() < stride * (height - 1) + width * 4 {
+        return None;
+    }
+    const SIDE: usize = PREVIEW_SIDE;
+    let mut cells = vec![[0f64; 3]; SIDE * SIDE];
+    let mut luma = 0.0;
+    for (index, cell) in cells.iter_mut().enumerate() {
+        let (cx, cy) = (index % SIDE, index / SIDE);
+        let (x0, y0) = (cx * width / SIDE, cy * height / SIDE);
+        let (x1, y1) = (((cx + 1) * width / SIDE).max(x0 + 1).min(width), ((cy + 1) * height / SIDE).max(y0 + 1).min(height));
+        let mut n = 0.0;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let i = y * stride + x * 4;
+                for (c, sum) in cell.iter_mut().enumerate() {
+                    *sum += f64::from(rgba[i + c]);
+                }
+                n += 1.0;
+            }
+        }
+        for sum in cell.iter_mut() {
+            *sum /= f64::max(n, 1.0);
+        }
+        luma += (0.2126 * cell[0] + 0.7152 * cell[1] + 0.0722 * cell[2]) / 255.0;
+    }
+    luma /= (SIDE * SIDE) as f64;
+    for _ in 0..3 {
+        let copy = cells.clone();
+        for y in 0..SIDE {
+            for x in 0..SIDE {
+                let mut sum = [0f64; 3];
+                for dy in -2i32..=2 {
+                    for dx in -2i32..=2 {
+                        let sx = (x as i32 + dx).clamp(0, SIDE as i32 - 1) as usize;
+                        let sy = (y as i32 + dy).clamp(0, SIDE as i32 - 1) as usize;
+                        for (c, total) in sum.iter_mut().enumerate() {
+                            *total += copy[sy * SIDE + sx][c];
+                        }
+                    }
+                }
+                cells[y * SIDE + x] = sum.map(|v| v / 25.0);
+            }
+        }
+    }
+    let base = dark_backdrop(shares(rgba, width, height, stride).first().map_or(0x101010, |c| c.rgb));
+    let pixels = cells.iter().flat_map(|p| [p[0].round() as u8, p[1].round() as u8, p[2].round() as u8, 255]).collect();
+    Some(BackdropPreview { rgba: pixels, luma, base })
+}
+
 fn to_lab(color: Rgb) -> [f64; 3] {
     let channel = |shift: u32| {
         let c = f64::from((color >> shift) & 0xFF) / 255.0;
@@ -376,5 +442,17 @@ mod tests {
                 assert!(a.abs_diff(b) <= 1, "{color:06x} → {back:06x}");
             }
         }
+    }
+
+    #[test]
+    fn a_flat_cover_gives_a_flat_preview() {
+        let (width, height) = (100usize, 60usize);
+        let rgba: Vec<u8> = (0..width * height).flat_map(|_| [200u8, 40, 40, 255]).collect();
+        let preview = backdrop_preview(&rgba, width, height, width * 4).expect("превью");
+        assert_eq!(preview.rgba.len(), PREVIEW_SIDE * PREVIEW_SIDE * 4);
+        assert!(preview.rgba.chunks(4).all(|p| p == [200, 40, 40, 255]), "однотонная остаётся однотонной");
+        let expected = (0.2126 * 200.0 + 0.7152 * 40.0 + 0.0722 * 40.0) / 255.0;
+        assert!((preview.luma - expected).abs() < 1e-9, "{}", preview.luma);
+        assert_eq!(preview.base, dark_backdrop(0xC82828));
     }
 }

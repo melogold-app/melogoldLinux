@@ -8,6 +8,7 @@ mod account_view;
 mod album_clips_repair;
 mod app;
 mod artist_hero;
+mod backdrop;
 mod backup_ui;
 mod catalog_widgets;
 mod collection_menu;

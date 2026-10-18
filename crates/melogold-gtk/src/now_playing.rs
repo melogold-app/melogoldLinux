@@ -10,12 +10,14 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
-use melogold_core::artwork_colors;
+use melogold_core::artwork_colors::{self, BackdropPreview};
 use melogold_core::queue::RepeatMode;
+use melogold_core::settings::keys;
 use melogold_core::text::format_duration;
 use melogold_core::thumbnails;
 use melogold_playback::engine::{Command, State, Status};
 
+use crate::backdrop::Backdrop;
 use crate::localization::tr;
 use crate::lyrics_view::{LyricsPanel, SyncedView};
 use crate::texts;
@@ -59,6 +61,12 @@ pub struct Inner {
     tint: gtk::CssProvider,
     seed: Cell<Option<artwork_colors::Rgb>>,
     seeds: RefCell<HashMap<String, Option<artwork_colors::Rgb>>>,
+    /// Фон страницы — размытая обложка (задание 0031) — и её заготовки для недавних обложек.
+    backdrop: Backdrop,
+    previews: RefCell<HashMap<String, Rc<BackdropPreview>>>,
+    /// Колонка обложки: в широком окне её ширина — от высоты страницы (задание 0031).
+    clamp: adw::Clamp,
+    playing: Cell<bool>,
     seeking: Cell<bool>,
     seek_token: Cell<u64>,
     updating: Cell<bool>,
@@ -201,7 +209,6 @@ impl NowPlaying {
 
         // Обложка или (узкое окно, «Текст») текст — сверху колонки, над названием и кнопками.
         let slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).vexpand(true).build();
-        slot.add_css_class("now-playing-glow");
         slot.append(&frame);
         let column = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -224,6 +231,7 @@ impl NowPlaying {
         halves.append(&right);
         let bin = adw::BreakpointBin::builder().width_request(360).height_request(200).child(&halves).build();
 
+        let backdrop = Backdrop::default();
         let (player, weak_window) = (window.ctx.services.player.clone(), window.downgrade());
         let seek_player = player.clone();
         let synced = SyncedView::new(
@@ -243,6 +251,9 @@ impl NowPlaying {
             let bounds = cover.compute_bounds(scroller)?;
             Some(f64::from(bounds.y()) + f64::from(bounds.height()) / 2.0)
         }));
+        // Размер строки — от высоты всей страницы (задание 0031); её знает фон: он во всю страницу.
+        let page_height = backdrop.downgrade();
+        synced.set_page_height(Box::new(move || page_height.upgrade().map(|backdrop| backdrop.height())));
         let lyrics = LyricsPanel::new(synced);
 
         let switcher = adw::ToggleGroup::builder().valign(gtk::Align::Center).visible(false).build();
@@ -269,7 +280,11 @@ impl NowPlaying {
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&bin));
-        let page = adw::NavigationPage::builder().title(tr("NowPlaying")).tag("now-playing").child(&toolbar).build();
+        // Фон — под всей страницей, включая заголовок.
+        let stage = gtk::Overlay::new();
+        stage.set_child(Some(&backdrop));
+        stage.add_overlay(&toolbar);
+        let page = adw::NavigationPage::builder().title(tr("NowPlaying")).tag("now-playing").child(&stage).build();
 
         let now_playing = NowPlaying(Rc::new(Inner {
             page,
@@ -300,6 +315,10 @@ impl NowPlaying {
             tint: gtk::CssProvider::new(),
             seed: Cell::new(None),
             seeds: RefCell::default(),
+            backdrop,
+            previews: RefCell::default(),
+            clamp,
+            playing: Cell::new(false),
             seeking: Cell::new(false),
             seek_token: Cell::new(0),
             updating: Cell::new(false),
@@ -378,8 +397,40 @@ impl NowPlaying {
                 NowPlaying(inner).apply_tint();
             }
         });
+        // Широкое окно: сторона обложки — min(0,50 · H, 0,38 · W) (задание 0031). Ширину колонки
+        // меняем после раскладки: внутри неё размер не трогают.
+        let weak = Rc::downgrade(&now_playing.0);
+        now_playing.backdrop.connect_resized(move |width, height| {
+            let weak = weak.clone();
+            glib::idle_add_local_once(move || {
+                let Some(inner) = weak.upgrade() else { return };
+                let side = (f64::from(height) * 0.50).min(f64::from(width) * 0.38);
+                let maximum = if inner.wide.get() { (side as i32 + 56).max(216) } else { 560 };
+                if inner.clamp.maximum_size() != maximum {
+                    inner.clamp.set_maximum_size(maximum);
+                    inner.clamp.set_tightening_threshold(maximum);
+                }
+            });
+        });
+        // Анимации системы выключили — фон встаёт (задание 0031, §2).
+        if let Some(settings) = gtk::Settings::default() {
+            let (weak, weak_window) = (Rc::downgrade(&now_playing.0), window.downgrade());
+            settings.connect_gtk_enable_animations_notify(move |_| {
+                if let (Some(inner), Some(window)) = (weak.upgrade(), weak_window.upgrade()) {
+                    NowPlaying(inner).update_motion(&window);
+                }
+            });
+        }
         now_playing.place(window);
         now_playing
+    }
+
+    /// Двигаться ли фону: играет, страница открыта, «Живой фон» включён, анимации системы не
+    /// выключены (задание 0031, §2). Иначе — тот же кадр, неподвижный.
+    pub fn update_motion(&self, window: &MainWindow) {
+        let animations = gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations());
+        let moving = self.playing.get() && window.now_playing_open() && animations && window.ctx.settings.get(&keys::LIVE_BACKGROUND);
+        self.backdrop.set_moving(moving);
     }
 
     /// Текст на экране: страница открыта, и текст виден (широкое окно или «Текст» в узком).
@@ -421,6 +472,7 @@ impl NowPlaying {
         let open = window.now_playing_open();
         window.lyrics.set_active(open && (wide || lyrics_narrow));
         window.update_lyrics_button();
+        self.update_motion(window);
     }
 
     /// Зерно обложки — в фоне: пиксели уменьшенной копии, квантование и Score (миллисекунды,
@@ -432,16 +484,30 @@ impl NowPlaying {
         let (width, height) = (texture.width().max(0) as usize, texture.height().max(0) as usize);
         let (this, url) = (self.clone(), url.to_owned());
         glib::spawn_future_local(async move {
-            let seed = gtk::gio::spawn_blocking(move || artwork_colors::seed(&bytes, width, height, stride)).await.ok().flatten();
+            let computed = gtk::gio::spawn_blocking(move || {
+                (artwork_colors::seed(&bytes, width, height, stride), artwork_colors::backdrop_preview(&bytes, width, height, stride))
+            })
+            .await
+            .ok();
+            let Some((seed, preview)) = computed else { return };
+            let preview = preview.map(Rc::new);
             {
                 let mut seeds = this.seeds.borrow_mut();
+                let mut previews = this.previews.borrow_mut();
                 if seeds.len() > 32 {
                     seeds.clear();
+                    previews.clear();
                 }
                 seeds.insert(url.clone(), seed);
+                if let Some(preview) = &preview {
+                    previews.insert(url.clone(), Rc::clone(preview));
+                }
             }
             if this.requested.borrow().as_deref() == Some(url.as_str()) {
                 this.set_seed(seed);
+                if let Some(preview) = preview {
+                    this.backdrop.set_cover(&preview);
+                }
             }
         });
     }
@@ -455,16 +521,24 @@ impl NowPlaying {
     /// темы: при смене светлой и тёмной вызывается заново. Цвет обложки получают и панель
     /// плеера (отсвет слева и кнопка «Играть»), и тень обложки — поставщик общий на всё окно.
     /// В высоком контрасте цвета не меняются: палитру там выбирает человек.
+    ///
+    /// Страница всегда в тёмной схеме обложки, какая бы ни была тема: под ней размытая обложка, и
+    /// текст на ней — светлый (задание 0031). Серая обложка — нейтральная тёмная схема. Панель
+    /// плеера — в теме приложения, как раньше.
     fn apply_tint(&self) {
         let manager = adw::StyleManager::default();
-        let Some(seed) = self.seed.get().filter(|_| !manager.is_high_contrast()) else {
+        if manager.is_high_contrast() {
             self.page.remove_css_class("now-playing-tinted");
             self.tint.load_from_string("");
             self.lyrics.set_pill_color(None);
+            self.backdrop.set_visible(false);
             return;
-        };
-        let palette = artwork_colors::palette(seed, manager.is_dark());
-        self.tint.load_from_string(&tint_css(&palette));
+        }
+        self.backdrop.set_visible(true);
+        let seed = self.seed.get();
+        let palette = artwork_colors::palette(seed.unwrap_or(NEUTRAL_SEED), true);
+        let bar = seed.map(|seed| artwork_colors::palette(seed, manager.is_dark()));
+        self.tint.load_from_string(&tint_css(&palette, bar.as_ref()));
         self.page.add_css_class("now-playing-tinted");
         let pill = palette.pill;
         let channel = |shift: u32| ((pill >> shift) & 0xFF) as f32 / 255.0;
@@ -492,6 +566,10 @@ impl NowPlaying {
                 let known = url.as_ref().and_then(|u| self.seeds.borrow().get(u).copied());
                 if let Some(seed) = known {
                     self.set_seed(seed);
+                }
+                let preview = url.as_ref().and_then(|u| self.previews.borrow().get(u).cloned());
+                if let Some(preview) = preview {
+                    self.backdrop.set_cover(&preview);
                 }
                 // Пока большая обложка грузится, на её месте — та, что уже есть: большая из кэша, а
                 // нет её — маленькая из панели плеера (тот же адрес на 120 px, она уже в памяти).
@@ -536,6 +614,9 @@ impl NowPlaying {
             }
         }
         self.play_icon.set_icon_name(Some(if state.playing { "media-playback-pause-symbolic" } else { "media-playback-start-symbolic" }));
+        if self.playing.replace(state.playing) != state.playing {
+            self.update_motion(window);
+        }
         self.play.set_tooltip_text(Some(&format!("{} (Space)", tr(if state.playing { "Pause" } else { "Play" }))));
         self.next.set_sensitive(state.has_next);
         self.previous.set_sensitive(state.has_previous);
@@ -565,28 +646,35 @@ impl NowPlaying {
     }
 }
 
-/// Стили в цветах обложки: страница «Сейчас играет», тень обложки и панель плеера.
-fn tint_css(palette: &artwork_colors::ArtworkPalette) -> String {
+/// Зерно серой обложки: нейтральная тёмная схема страницы.
+const NEUTRAL_SEED: artwork_colors::Rgb = 0x8A8A8A;
+
+/// Стили в цветах обложки: страница «Сейчас играет» (тёмная схема), тень обложки и панель плеера
+/// (схема темы; у серой обложки панель без цвета).
+fn tint_css(palette: &artwork_colors::ArtworkPalette, bar: Option<&artwork_colors::ArtworkPalette>) -> String {
     let hex = |rgb: artwork_colors::Rgb| format!("#{rgb:06x}");
     let (background, text, secondary) = (hex(palette.background), hex(palette.text), hex(palette.secondary_text));
-    let (accent, on_accent, glow) = (hex(palette.accent), hex(palette.on_accent), hex(palette.glow));
+    let (accent, on_accent) = (hex(palette.accent), hex(palette.on_accent));
+    let bar_css = bar.map_or_else(String::new, |bar| {
+        let (accent, on_accent) = (hex(bar.accent), hex(bar.on_accent));
+        format!(
+            ".player-bar {{ background-image: linear-gradient(to right, alpha({accent}, 0.14), alpha({accent}, 0.0) 40%); }}
+             .player-bar .play-button {{ background-color: {accent}; color: {on_accent}; }}
+             .player-bar .play-button:hover {{ background-color: mix({accent}, {on_accent}, 0.12); }}
+             .player-bar scale > trough > highlight {{ background-color: {accent}; }}"
+        )
+    });
     format!(
         ".now-playing-tinted {{ background-color: {background}; color: {text}; }}
          .now-playing-tinted headerbar {{ background: none; box-shadow: none; color: {text}; }}
          .now-playing-tinted .dim-label {{ color: {secondary}; opacity: 1; }}
-         .now-playing-tinted .lyrics-fade-top {{ background: linear-gradient(to bottom, {background}, alpha({background}, 0)); }}
-         .now-playing-tinted .lyrics-fade-bottom {{ background: linear-gradient(to top, {background}, alpha({background}, 0)); }}
          .now-playing-tinted .now-playing-play {{ background-color: {accent}; color: {on_accent}; }}
          .now-playing-tinted .now-playing-play:hover {{ background-color: mix({accent}, {on_accent}, 0.12); }}
          .now-playing-tinted scale > trough > highlight {{ background-color: {accent}; }}
          .now-playing-tinted scale > trough {{ background-color: alpha({text}, 0.14); }}
          .now-playing-tinted .now-playing-controls button:checked {{ color: {accent}; }}
          .now-playing-tinted .heart.liked {{ color: {accent}; }}
-         .now-playing-tinted .now-playing-cover {{ box-shadow: 0 24px 56px -12px alpha({accent}, 0.55), 0 6px 18px -6px alpha(black, 0.3); }}
-         .now-playing-tinted .now-playing-glow {{ background-image: radial-gradient(closest-side, alpha({glow}, 0.55), alpha({glow}, 0)); }}
-         .player-bar {{ background-image: linear-gradient(to right, alpha({accent}, 0.14), alpha({accent}, 0.0) 40%); }}
-         .player-bar .play-button {{ background-color: {accent}; color: {on_accent}; }}
-         .player-bar .play-button:hover {{ background-color: mix({accent}, {on_accent}, 0.12); }}
-         .player-bar scale > trough > highlight {{ background-color: {accent}; }}"
+         .now-playing-tinted .now-playing-cover {{ box-shadow: 0 24px 56px -12px alpha(black, 0.55), 0 6px 18px -6px alpha(black, 0.3); }}
+         {bar_css}"
     )
 }

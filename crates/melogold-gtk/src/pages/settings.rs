@@ -141,6 +141,22 @@ fn appearance_group(window: &MainWindow) -> adw::PreferencesGroup {
     });
     group.add(&theme);
 
+    // «Живой фон» (задание 0031): выключен — размытая обложка стоит на месте.
+    let live = adw::SwitchRow::builder()
+        .title(tr("LinuxLiveBackground"))
+        .subtitle(tr("LinuxLiveBackgroundText"))
+        .active(window.ctx.settings.get(&keys::LIVE_BACKGROUND))
+        .build();
+    let weak = window.downgrade();
+    live.connect_active_notify(move |row| {
+        let Some(window) = weak.upgrade() else { return };
+        window.ctx.settings.set(&keys::LIVE_BACKGROUND, row.is_active());
+        if let Some(now_playing) = window.now_playing.get() {
+            now_playing.update_motion(&window);
+        }
+    });
+    group.add(&live);
+
     // Названия языков — на своём языке (GLOSSARY: «Как в системе · Русский · English»).
     let locales = ["system", "ru", "en"];
     let names = gtk::StringList::new(&[tr("ThemeSystem.Content"), "Русский", "English"]);

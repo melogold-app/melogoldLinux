@@ -34,8 +34,92 @@ const RESUME_FOLLOW: Duration = Duration::from_secs(3);
 const UNSUNG_ALPHA: f64 = 0.4;
 
 /// Размер текста по области: растёт с окном, в маленьком окне не меньше 24, больше 56 не бывает.
+/// Запасной путь — когда высота всей страницы неизвестна.
 pub fn font_size_for(width: f64, height: f64) -> f64 {
     (width * 0.058).min(height * 0.06).clamp(24.0, 56.0).round()
+}
+
+/// Размер строки по высоте всей области «Сейчас играет» (задание 0031): в окне любой ширины видно
+/// одно и то же число строк, переносы не прыгают при смене раскладки. Раньше размер шёл от колонки
+/// текста, а она меняется с раскладкой — «пропорции плавали».
+pub fn font_size_for_page(height: f64) -> f64 {
+    (height * 0.042).clamp(18.0, 64.0).round()
+}
+
+// ── затухание краёв: маска прозрачности, а не полосы цвета фона ──
+
+/// Высота затухания снизу, px.
+const FADE_BOTTOM: f64 = 72.0;
+
+mod fade {
+    use super::*;
+
+    /// Строки уходят в прозрачность у краёв. Раньше поверх лежали полосы цвета фона — на ровной
+    /// заливке их не видно, а на живом фоне «Сейчас играет» (задание 0031) они читались полосами.
+    #[derive(Default)]
+    pub struct FadeBin;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for FadeBin {
+        const NAME: &'static str = "MelogoldLyricsFade";
+        type Type = super::FadeBin;
+        type ParentType = gtk::Widget;
+
+        fn class_init(klass: &mut Self::Class) {
+            klass.set_layout_manager_type::<gtk::BinLayout>();
+        }
+    }
+
+    impl ObjectImpl for FadeBin {
+        fn dispose(&self) {
+            while let Some(child) = self.obj().first_child() {
+                child.unparent();
+            }
+        }
+    }
+
+    impl WidgetImpl for FadeBin {
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let widget = self.obj();
+            let Some(child) = widget.first_child() else { return };
+            let (w, h) = (widget.width() as f32, widget.height() as f32);
+            if h <= 0.0 {
+                return;
+            }
+            let (top, bottom) = ((FADE_TOP as f32 / h).min(0.4), (FADE_BOTTOM as f32 / h).min(0.4));
+            let opaque = gdk::RGBA::new(0.0, 0.0, 0.0, 1.0);
+            let clear = gdk::RGBA::new(0.0, 0.0, 0.0, 0.0);
+            snapshot.push_mask(gsk::MaskMode::Alpha);
+            snapshot.append_linear_gradient(
+                &graphene::Rect::new(0.0, 0.0, w, h),
+                &graphene::Point::new(0.0, 0.0),
+                &graphene::Point::new(0.0, h),
+                &[
+                    gsk::ColorStop::new(0.0, clear),
+                    gsk::ColorStop::new(top, opaque),
+                    gsk::ColorStop::new(1.0 - bottom, opaque),
+                    gsk::ColorStop::new(1.0, clear),
+                ],
+            );
+            snapshot.pop();
+            widget.snapshot_child(&child, snapshot);
+            snapshot.pop();
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct FadeBin(ObjectSubclass<fade::FadeBin>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl FadeBin {
+    fn new(child: &impl IsA<gtk::Widget>) -> FadeBin {
+        let bin: FadeBin = glib::Object::new();
+        child.set_parent(&bin);
+        bin
+    }
 }
 
 // ── подложка: один рисунок под строками ──
@@ -452,6 +536,8 @@ pub struct SyncedView {
     resume: RefCell<Option<glib::SourceId>>,
     /// Где встаёт середина текущей строки, от верха области; `None` у функции — посередине.
     anchor: RefCell<Option<Anchor>>,
+    /// Высота всей области «Сейчас играет»: размер строки — от неё (задание 0031).
+    page_height: RefCell<Option<Box<dyn Fn() -> Option<i32>>>>,
     /// Точка, по которой сейчас стоят поля и прокрутка (`-1` — ещё не считалась).
     anchor_y: Cell<f64>,
     position: Box<dyn Fn() -> Option<Duration>>,
@@ -477,10 +563,6 @@ impl SyncedView {
             .hexpand(true)
             .build();
         scroller.add_css_class("lyrics-scroller");
-        let top = gtk::Box::builder().height_request(FADE_TOP as i32).valign(gtk::Align::Start).can_target(false).build();
-        top.add_css_class("lyrics-fade-top");
-        let bottom = gtk::Box::builder().height_request(72).valign(gtk::Align::End).can_target(false).build();
-        bottom.add_css_class("lyrics-fade-bottom");
         let jump = gtk::Button::builder()
             .label(tr("LyricsJumpToLine"))
             .halign(gtk::Align::Center)
@@ -490,9 +572,7 @@ impl SyncedView {
             .build();
         jump.add_css_class("pill");
         jump.add_css_class("osd");
-        let root = gtk::Overlay::builder().child(&scroller).build();
-        root.add_overlay(&top);
-        root.add_overlay(&bottom);
+        let root = gtk::Overlay::builder().child(&FadeBin::new(&scroller)).build();
         root.add_overlay(&jump);
 
         let view = Rc::new(SyncedView {
@@ -518,6 +598,7 @@ impl SyncedView {
             scroll_from: Cell::new(0.0),
             scroll_to: Cell::new(0.0),
             anchor: RefCell::default(),
+            page_height: RefCell::default(),
             anchor_y: Cell::new(-1.0),
             clock: RefCell::default(),
             resume: RefCell::default(),
@@ -645,6 +726,13 @@ impl SyncedView {
     /// Где встаёт середина текущей строки: функция получает область прокрутки и отвечает точкой от
     /// её верха; `None` — посередине области. «Сейчас играет» в широком окне ставит строку на
     /// уровень середины обложки (пользователь, 2026-09-27).
+    /// Откуда брать высоту всей страницы для размера строки.
+    pub fn set_page_height(&self, height: Box<dyn Fn() -> Option<i32>>) {
+        self.page_height.replace(Some(height));
+        self.size.set((0, 0));
+        self.apply_size();
+    }
+
     pub fn set_anchor(&self, anchor: Anchor) {
         self.anchor.replace(Some(anchor));
         self.update_anchor(true);
@@ -735,12 +823,16 @@ impl SyncedView {
 
     /// Размер текста по размеру области: строки, поля, точки и подложка — в том же масштабе.
     fn apply_size(&self) {
-        let size = (self.scroller.width(), self.scroller.height());
+        let page = self.page_height.borrow().as_ref().and_then(|height| height()).filter(|h| *h > 0);
+        let size = (self.scroller.width(), page.unwrap_or(self.scroller.height()));
         if size == self.size.get() || size.0 <= 0 {
             return;
         }
         self.size.set(size);
-        let font = font_size_for(f64::from(size.0), f64::from(size.1));
+        let font = match page {
+            Some(height) => font_size_for_page(f64::from(height)),
+            None => font_size_for(f64::from(size.0), f64::from(size.1)),
+        };
         if (font - self.font.get()).abs() >= 0.5 {
             self.font.set(font);
             let scale = self.scale();

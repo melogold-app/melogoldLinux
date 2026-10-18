@@ -229,6 +229,12 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxRemoteDisconnect", "Отключиться", "Disconnect"),
     ("LinuxRemoteVolume", "Громкость", "Volume"),
     ("LinuxRemoteAllow", "Управление с других устройств", "Control from other devices"),
+    ("LinuxLiveBackground", "Живой фон", "Live background"),
+    (
+        "LinuxLiveBackgroundText",
+        "Размытая обложка за «Сейчас играет» движется, пока играет музыка",
+        "The blurred cover behind Now Playing moves while music plays",
+    ),
     (
         "LinuxRemoteAllowText",
         "Другие устройства аккаунта смогут ставить музыку на паузу, перематывать и менять громкость",

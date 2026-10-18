@@ -162,6 +162,9 @@ pub mod keys {
     pub const LYRICS_VIEW: Key<String> = Key::new("lyrics.view", || "synced".into());
     pub const HISTORY_PAUSED: Key<bool> = Key::new("history.paused", || false);
     pub const HIDE_EXPLICIT: Key<bool> = Key::new("filter.hideExplicit", || false);
+    /// «Живой фон» «Сейчас играет» (задание 0031): размытая обложка движется, пока играет. Не
+    /// синхронизируется — у телефона и ноутбука разная батарея.
+    pub const LIVE_BACKGROUND: Key<bool> = Key::new("appearance.liveBackground", || true);
     /// Лимит кэша музыки в МБ; 0 — без ограничений (задание Windows 0003: 4 ГБ).
     pub const STREAM_CACHE_MB: Key<i64> = Key::new("cache.streamLimit", || 4096);
     pub const UPDATES_AUTO: Key<bool> = Key::new("updates.auto", || true);

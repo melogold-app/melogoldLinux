@@ -1,6 +1,10 @@
 # «Сейчас играет»: фон — размытая обложка, текст песни по высоте окна, «Живой фон»
 
-Статус: в работе
+Статус: сделано — Linux: `melogold-core` `artwork_colors::{shares, dark_backdrop, backdrop_preview}` и тесты,
+`melogold-gtk` `backdrop.rs` (фон), `lyrics_view.rs` (`FadeBin` — затухание маской вместо полос цвета фона,
+`font_size_for_page`), `now_playing.rs` (фон под всей страницей, тёмная схема, сторона обложки, `update_motion`),
+настройка `appearance.liveBackground` в «Внешнем виде»; Windows — задание 0034 (fa1b950, fcf95f1), Android — 0028
+(850edbe). Визуализатор — следующим заданием после третьего прогона лаборатории.
 
 Общее задание Linux, Windows и Android (Максим, 18.10.2026); iOS и macOS догоняют по нему позже. Клиенты ведут себя
 одинаково: числа ниже — не пример, а норма, по ним сверяются все платформы. Эталон — Linux: `melogold-core`
