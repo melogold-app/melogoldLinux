@@ -21,6 +21,8 @@ struct State {
 #[derive(Default)]
 pub struct AudioLevels {
     state: Mutex<State>,
+    /// Спектр для живого фона «Сейчас играет» (задание 0032) — из тех же сэмплов.
+    pub spectrum: crate::spectrum::Spectrum,
 }
 
 impl AudioLevels {

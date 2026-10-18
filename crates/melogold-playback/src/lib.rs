@@ -10,5 +10,6 @@ pub mod output;
 pub mod reader;
 pub mod resolver;
 pub mod song_cache;
+pub mod spectrum;
 pub mod stream;
 pub mod stream_clients;

@@ -14,6 +14,7 @@ mod catalog_widgets;
 mod collection_menu;
 mod desktop_integration;
 mod device_filter;
+mod fluid;
 mod images;
 mod library_view;
 mod localization;

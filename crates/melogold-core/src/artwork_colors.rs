@@ -289,6 +289,37 @@ pub fn backdrop_preview(rgba: &[u8], width: usize, height: usize, stride: usize)
     Some(BackdropPreview { rgba: pixels, luma, base })
 }
 
+/// Сторона текстуры обложки для живого фона (задание 0032).
+pub const SHADER_SIDE: usize = 256;
+
+/// Обложка 256 × 256 RGBA усреднением по клеткам — текстура шейдера живого фона (задание 0032, §1).
+pub fn shader_texture(rgba: &[u8], width: usize, height: usize, stride: usize) -> Option<Vec<u8>> {
+    if width == 0 || height == 0 || stride < width * 4 || rgba.len() < stride * (height - 1) + width * 4 {
+        return None;
+    }
+    const SIDE: usize = SHADER_SIDE;
+    let mut out = Vec::with_capacity(SIDE * SIDE * 4);
+    for y in 0..SIDE {
+        let (y0, y1) = (y * height / SIDE, ((y + 1) * height / SIDE).max(y * height / SIDE + 1).min(height));
+        for x in 0..SIDE {
+            let (x0, x1) = (x * width / SIDE, ((x + 1) * width / SIDE).max(x * width / SIDE + 1).min(width));
+            let (mut sum, mut n) = ([0u32; 3], 0u32);
+            for row in y0..y1 {
+                for column in x0..x1 {
+                    let i = row * stride + column * 4;
+                    for (c, total) in sum.iter_mut().enumerate() {
+                        *total += u32::from(rgba[i + c]);
+                    }
+                    n += 1;
+                }
+            }
+            out.extend(sum.map(|s| (s / n.max(1)) as u8));
+            out.push(255);
+        }
+    }
+    Some(out)
+}
+
 fn to_lab(color: Rgb) -> [f64; 3] {
     let channel = |shift: u32| {
         let c = f64::from((color >> shift) & 0xFF) / 255.0;

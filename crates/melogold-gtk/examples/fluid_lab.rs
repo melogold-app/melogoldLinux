@@ -171,7 +171,9 @@ fn load_cover(path: &std::path::Path) -> Option<Cover> {
     let preview = artwork_colors::backdrop_preview(&bytes, width, height, stride)?;
     let palette = artwork_colors::shares(&bytes, width, height, stride)
         .iter()
-        .map(|c| ([((c.rgb >> 16) & 0xFF) as f32 / 255.0, ((c.rgb >> 8) & 0xFF) as f32 / 255.0, (c.rgb & 0xFF) as f32 / 255.0], c.share as f32))
+        .map(|c| {
+            ([((c.rgb >> 16) & 0xFF) as f32 / 255.0, ((c.rgb >> 8) & 0xFF) as f32 / 255.0, (c.rgb & 0xFF) as f32 / 255.0], c.share as f32)
+        })
         .collect();
     let mut pixels = Vec::with_capacity(COVER_SIDE * COVER_SIDE * 4);
     for y in 0..COVER_SIDE {
@@ -458,8 +460,7 @@ fn render(area: &gtk::GLArea, shared: &Shared) {
 fn main() -> glib::ExitCode {
     let mut args = std::env::args().skip(1);
     let covers_dir = args.next().unwrap_or_else(|| ".".into());
-    let cache_dir =
-        args.next().unwrap_or_else(|| format!("{}/.local/share/melogold/cache", std::env::var("HOME").unwrap_or_default()));
+    let cache_dir = args.next().unwrap_or_else(|| format!("{}/.local/share/melogold/cache", std::env::var("HOME").unwrap_or_default()));
     gst::init().expect("GStreamer");
     // Функции GL — через eglGetProcAddress: GTK на Wayland работает через EGL, а Mesa отдаёт так и
     // функции ядра GLES (EGL_KHR_get_all_proc_addresses).
@@ -478,7 +479,11 @@ fn main() -> glib::ExitCode {
              .fluid-lyric { color: white; font-weight: 800; font-size: 26px; text-shadow: 0 1px 6px alpha(black, 0.35); }
              .fluid-cover { border-radius: 10px; box-shadow: 0 12px 32px alpha(black, 0.45); }",
         );
-        gtk::style_context_add_provider_for_display(&gdk::Display::default().expect("дисплей"), &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        gtk::style_context_add_provider_for_display(
+            &gdk::Display::default().expect("дисплей"),
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
 
         let files: Vec<std::path::PathBuf> = std::fs::read_dir(&covers_dir)
             .expect("папка с обложками")
@@ -566,11 +571,25 @@ fn main() -> glib::ExitCode {
         }
 
         // Подписи и обложка поверх каждой плитки.
-        let cells = gtk::Grid::builder().row_homogeneous(true).column_homogeneous(true).row_spacing(2).column_spacing(2).can_target(false).build();
+        let cells =
+            gtk::Grid::builder().row_homogeneous(true).column_homogeneous(true).row_spacing(2).column_spacing(2).can_target(false).build();
         let mut pictures = Vec::new();
         for (index, (title, _)) in VARIANTS.iter().enumerate() {
-            let label = gtk::Label::builder().label(*title).xalign(0.0).valign(gtk::Align::Start).margin_start(14).margin_top(10).css_classes(["fluid-label"]).build();
-            let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).width_request(150).height_request(150).css_classes(["fluid-cover"]).overflow(gtk::Overflow::Hidden).build();
+            let label = gtk::Label::builder()
+                .label(*title)
+                .xalign(0.0)
+                .valign(gtk::Align::Start)
+                .margin_start(14)
+                .margin_top(10)
+                .css_classes(["fluid-label"])
+                .build();
+            let picture = gtk::Picture::builder()
+                .content_fit(gtk::ContentFit::Cover)
+                .width_request(150)
+                .height_request(150)
+                .css_classes(["fluid-cover"])
+                .overflow(gtk::Overflow::Hidden)
+                .build();
             let lyric = gtk::Label::builder().label("Строка песни\nвот так читается").xalign(0.0).css_classes(["fluid-lyric"]).build();
             let middle = gtk::Box::builder().spacing(24).valign(gtk::Align::Center).halign(gtk::Align::Center).vexpand(true).build();
             middle.append(&picture);

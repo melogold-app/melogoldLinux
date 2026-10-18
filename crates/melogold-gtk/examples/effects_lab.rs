@@ -416,7 +416,8 @@ fn turn(snapshot: &gtk::Snapshot, texture: &gdk::Texture, cx: f32, cy: f32, side
 fn cover_layers(snapshot: &gtk::Snapshot, cover: &Cover, t: f32, w: f32, h: f32, swell: f32, sharp: f32, spin: f32) {
     let big = w.max(h) * (1.0 + swell);
     let (dx, dy) = ((t / 17.0).sin() * w * 0.18, (t / 23.0).cos() * h * 0.15);
-    let layers = [(w / 2.0, h / 2.0, big * 1.6, t * 2.4 * spin, 1.0f64), (w / 2.0 + dx, h / 2.0 + dy, big * 1.15, 90.0 - t * 3.6 * spin, 0.7)];
+    let layers =
+        [(w / 2.0, h / 2.0, big * 1.6, t * 2.4 * spin, 1.0f64), (w / 2.0 + dx, h / 2.0 + dy, big * 1.15, 90.0 - t * 3.6 * spin, 0.7)];
     for (cx, cy, side, degrees, opacity) in layers {
         turn(snapshot, &cover.levels[2], cx, cy, side, degrees, opacity);
         // Резче — поверх сильного размытия проступают среднее и мягкое.
@@ -458,9 +459,18 @@ fn draw_tile(snapshot: &gtk::Snapshot, widget: &Tile, index: usize, cover: &Cove
         for (n, (from, to, size, speed)) in groups.into_iter().enumerate() {
             let energy = a.bands[from..to].iter().sum::<f32>() / (to - from) as f32;
             let side = w.max(h) * size * (1.0 + 0.25 * energy);
-            let (cx, cy) = (w * (0.5 + 0.2 * (t * 0.07 * speed + n as f32).sin()), h * (0.5 + 0.2 * (t * 0.05 * speed + n as f32 * 1.3).cos()));
+            let (cx, cy) =
+                (w * (0.5 + 0.2 * (t * 0.07 * speed + n as f32).sin()), h * (0.5 + 0.2 * (t * 0.05 * speed + n as f32 * 1.3).cos()));
             let level = if n < 2 { 2 } else { 1 };
-            turn(snapshot, &cover.levels[level], cx, cy, side, t * 2.0 * speed * if n % 2 == 0 { 1.0 } else { -1.0 }, f64::from(0.45 + 0.55 * energy));
+            turn(
+                snapshot,
+                &cover.levels[level],
+                cx,
+                cy,
+                side,
+                t * 2.0 * speed * if n % 2 == 0 { 1.0 } else { -1.0 },
+                f64::from(0.45 + 0.55 * energy),
+            );
         }
     } else {
         cover_layers(snapshot, cover, t, w, h, swell, sharp, spin);
@@ -550,8 +560,7 @@ fn draw_tile(snapshot: &gtk::Snapshot, widget: &Tile, index: usize, cover: &Cove
 fn main() -> glib::ExitCode {
     let mut args = std::env::args().skip(1);
     let covers_dir = args.next().unwrap_or_else(|| ".".into());
-    let cache_dir =
-        args.next().unwrap_or_else(|| format!("{}/.local/share/melogold/cache", std::env::var("HOME").unwrap_or_default()));
+    let cache_dir = args.next().unwrap_or_else(|| format!("{}/.local/share/melogold/cache", std::env::var("HOME").unwrap_or_default()));
     gst::init().expect("GStreamer");
 
     let app = adw::Application::builder().application_id("app.melogold.EffectsLab").build();
@@ -589,7 +598,9 @@ fn main() -> glib::ExitCode {
             playing: Cell::new(false),
             track: Cell::new(0),
             covers,
-            tiles: RefCell::new((0..8).map(|i| TileState { seed: 0x9E37_79B9 ^ ((i as u32 + 1) * 0x85EB_CA6B), ..Default::default() }).collect()),
+            tiles: RefCell::new(
+                (0..8).map(|i| TileState { seed: 0x9E37_79B9 ^ ((i as u32 + 1) * 0x85EB_CA6B), ..Default::default() }).collect(),
+            ),
             last_frame: Cell::new(None),
             frames: RefCell::new(VecDeque::new()),
         });

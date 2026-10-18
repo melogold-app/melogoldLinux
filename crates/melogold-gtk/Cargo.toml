@@ -32,11 +32,9 @@ async-channel.workspace = true
 gtk.workspace = true
 url.workspace = true
 adw.workspace = true
+# Живой фон «Сейчас играет» (задание 0032): OpenGL ES в GtkGLArea, функции — через eglGetProcAddress.
+glow = "0.16"
+libloading = "0.8"
 
 [build-dependencies]
 glib-build-tools = "0.22"
-
-# Только для лабораторий визуализатора (examples/fluid_lab.rs): OpenGL в GtkGLArea.
-[dev-dependencies]
-glow = "0.16"
-libloading = "0.8"

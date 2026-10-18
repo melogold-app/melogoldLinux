@@ -18,6 +18,7 @@ use melogold_core::thumbnails;
 use melogold_playback::engine::{Command, State, Status};
 
 use crate::backdrop::Backdrop;
+use crate::fluid::{Fluid, FluidCover};
 use crate::localization::tr;
 use crate::lyrics_view::{LyricsPanel, SyncedView};
 use crate::texts;
@@ -64,6 +65,9 @@ pub struct Inner {
     /// Фон страницы — размытая обложка (задание 0031) — и её заготовки для недавних обложек.
     backdrop: Backdrop,
     previews: RefCell<HashMap<String, Rc<BackdropPreview>>>,
+    /// Живой фон под музыку (задание 0032) поверх фона из 0031; без шейдеров его нет.
+    fluid: Fluid,
+    fluid_covers: RefCell<HashMap<String, Rc<FluidCover>>>,
     /// Колонка обложки: в широком окне её ширина — от высоты страницы (задание 0031).
     clamp: adw::Clamp,
     playing: Cell<bool>,
@@ -232,6 +236,9 @@ impl NowPlaying {
         let bin = adw::BreakpointBin::builder().width_request(360).height_request(200).child(&halves).build();
 
         let backdrop = Backdrop::default();
+        let fluid = Fluid::new();
+        let audio = window.ctx.services.player.clone();
+        fluid.set_audio(Box::new(move || audio.position().and_then(|position| audio.spectrum_at(position))));
         let (player, weak_window) = (window.ctx.services.player.clone(), window.downgrade());
         let seek_player = player.clone();
         let synced = SyncedView::new(
@@ -283,6 +290,7 @@ impl NowPlaying {
         // Фон — под всей страницей, включая заголовок.
         let stage = gtk::Overlay::new();
         stage.set_child(Some(&backdrop));
+        stage.add_overlay(&fluid.area);
         stage.add_overlay(&toolbar);
         let page = adw::NavigationPage::builder().title(tr("NowPlaying")).tag("now-playing").child(&stage).build();
 
@@ -317,6 +325,8 @@ impl NowPlaying {
             seeds: RefCell::default(),
             backdrop,
             previews: RefCell::default(),
+            fluid,
+            fluid_covers: RefCell::default(),
             clamp,
             playing: Cell::new(false),
             seeking: Cell::new(false),
@@ -421,6 +431,23 @@ impl NowPlaying {
                 }
             });
         }
+        // Шейдер собрался — фон из 0031 под ним не рисуется (размер страницы он по-прежнему задаёт);
+        // не собрался — остаётся он.
+        let (weak, weak_window) = (Rc::downgrade(&now_playing.0), window.downgrade());
+        now_playing.fluid.connect_ready(move || {
+            if let (Some(inner), Some(window)) = (weak.upgrade(), weak_window.upgrade()) {
+                inner.backdrop.set_opacity(0.0);
+                NowPlaying(inner).update_motion(&window);
+            }
+        });
+        let (weak, weak_window) = (Rc::downgrade(&now_playing.0), window.downgrade());
+        now_playing.fluid.connect_failed(move || {
+            if let (Some(inner), Some(window)) = (weak.upgrade(), weak_window.upgrade()) {
+                inner.fluid.area.set_visible(false);
+                inner.backdrop.set_opacity(1.0);
+                NowPlaying(inner).update_motion(&window);
+            }
+        });
         now_playing.place(window);
         now_playing
     }
@@ -430,7 +457,9 @@ impl NowPlaying {
     pub fn update_motion(&self, window: &MainWindow) {
         let animations = gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations());
         let moving = self.playing.get() && window.now_playing_open() && animations && window.ctx.settings.get(&keys::LIVE_BACKGROUND);
-        self.backdrop.set_moving(moving);
+        // Живой фон (задание 0032) — кадр по часам монитора; фон из 0031 под ним стоит.
+        self.backdrop.set_moving(moving && !self.fluid.active());
+        self.fluid.set_state(moving, moving);
     }
 
     /// Текст на экране: страница открыта, и текст виден (широкое окно или «Текст» в узком).
@@ -485,28 +514,38 @@ impl NowPlaying {
         let (this, url) = (self.clone(), url.to_owned());
         glib::spawn_future_local(async move {
             let computed = gtk::gio::spawn_blocking(move || {
-                (artwork_colors::seed(&bytes, width, height, stride), artwork_colors::backdrop_preview(&bytes, width, height, stride))
+                let preview = artwork_colors::backdrop_preview(&bytes, width, height, stride);
+                let fluid = preview.as_ref().and_then(|p| FluidCover::from_pixels(&bytes, width, height, stride, p.luma));
+                (artwork_colors::seed(&bytes, width, height, stride), preview, fluid)
             })
             .await
             .ok();
-            let Some((seed, preview)) = computed else { return };
-            let preview = preview.map(Rc::new);
+            let Some((seed, preview, fluid)) = computed else { return };
+            let (preview, fluid) = (preview.map(Rc::new), fluid.map(Rc::new));
             {
                 let mut seeds = this.seeds.borrow_mut();
                 let mut previews = this.previews.borrow_mut();
+                let mut fluid_covers = this.fluid_covers.borrow_mut();
                 if seeds.len() > 32 {
                     seeds.clear();
                     previews.clear();
+                    fluid_covers.clear();
                 }
                 seeds.insert(url.clone(), seed);
                 if let Some(preview) = &preview {
                     previews.insert(url.clone(), Rc::clone(preview));
+                }
+                if let Some(fluid) = &fluid {
+                    fluid_covers.insert(url.clone(), Rc::clone(fluid));
                 }
             }
             if this.requested.borrow().as_deref() == Some(url.as_str()) {
                 this.set_seed(seed);
                 if let Some(preview) = preview {
                     this.backdrop.set_cover(&preview);
+                }
+                if let Some(fluid) = fluid {
+                    this.fluid.set_cover(fluid);
                 }
             }
         });
@@ -532,9 +571,11 @@ impl NowPlaying {
             self.tint.load_from_string("");
             self.lyrics.set_pill_color(None);
             self.backdrop.set_visible(false);
+            self.fluid.area.set_visible(false);
             return;
         }
         self.backdrop.set_visible(true);
+        self.fluid.area.set_visible(!self.fluid.failed());
         let seed = self.seed.get();
         let palette = artwork_colors::palette(seed.unwrap_or(NEUTRAL_SEED), true);
         let bar = seed.map(|seed| artwork_colors::palette(seed, manager.is_dark()));
@@ -570,6 +611,10 @@ impl NowPlaying {
                 let preview = url.as_ref().and_then(|u| self.previews.borrow().get(u).cloned());
                 if let Some(preview) = preview {
                     self.backdrop.set_cover(&preview);
+                }
+                let fluid = url.as_ref().and_then(|u| self.fluid_covers.borrow().get(u).cloned());
+                if let Some(fluid) = fluid {
+                    self.fluid.set_cover(fluid);
                 }
                 // Пока большая обложка грузится, на её месте — та, что уже есть: большая из кэша, а
                 // нет её — маленькая из панели плеера (тот же адрес на 120 px, она уже в памяти).

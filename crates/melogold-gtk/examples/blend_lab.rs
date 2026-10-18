@@ -56,14 +56,102 @@ struct Config {
 }
 
 const CONFIGS: [Config; 8] = [
-    Config { title: "1 · капли — бас, течение — верха", liquid: Source::High, liquid_gain: 1.0, lava: Source::Bass, lava_gain: 1.0, per_blob: false, pulse_gain: 0.25, lava_mix: 0.55, rise: 5.0, fall: 1.8 },
-    Config { title: "2 · течение — бас, капли — верха", liquid: Source::Bass, liquid_gain: 1.0, lava: Source::High, lava_gain: 1.0, per_blob: false, pulse_gain: 0.25, lava_mix: 0.55, rise: 5.0, fall: 1.8 },
-    Config { title: "3 · течение — середина, капли — бас", liquid: Source::Mid, liquid_gain: 1.1, lava: Source::Bass, lava_gain: 1.0, per_blob: false, pulse_gain: 0.25, lava_mix: 0.55, rise: 5.0, fall: 1.8 },
-    Config { title: "4 · как 1, живее", liquid: Source::High, liquid_gain: 1.6, lava: Source::Bass, lava_gain: 1.6, per_blob: false, pulse_gain: 0.35, lava_mix: 0.65, rise: 7.0, fall: 2.5 },
-    Config { title: "5 · как 1, тише", liquid: Source::High, liquid_gain: 0.6, lava: Source::Bass, lava_gain: 0.6, per_blob: false, pulse_gain: 0.15, lava_mix: 0.45, rise: 3.5, fall: 1.2 },
-    Config { title: "6 · каждая капля — своя полоса, течение — громкость", liquid: Source::Loud, liquid_gain: 1.1, lava: Source::Bass, lava_gain: 1.2, per_blob: true, pulse_gain: 0.2, lava_mix: 0.6, rise: 5.0, fall: 1.8 },
-    Config { title: "7 · каждая капля — своя полоса, течение — верха", liquid: Source::High, liquid_gain: 1.1, lava: Source::Bass, lava_gain: 1.2, per_blob: true, pulse_gain: 0.2, lava_mix: 0.6, rise: 5.0, fall: 1.8 },
-    Config { title: "8 · дыхание громкости", liquid: Source::Loud, liquid_gain: 1.3, lava: Source::Bass, lava_gain: 0.8, per_blob: false, pulse_gain: 0.1, lava_mix: 0.5, rise: 2.5, fall: 0.9 },
+    Config {
+        title: "1 · капли — бас, течение — верха",
+        liquid: Source::High,
+        liquid_gain: 1.0,
+        lava: Source::Bass,
+        lava_gain: 1.0,
+        per_blob: false,
+        pulse_gain: 0.25,
+        lava_mix: 0.55,
+        rise: 5.0,
+        fall: 1.8,
+    },
+    Config {
+        title: "2 · течение — бас, капли — верха",
+        liquid: Source::Bass,
+        liquid_gain: 1.0,
+        lava: Source::High,
+        lava_gain: 1.0,
+        per_blob: false,
+        pulse_gain: 0.25,
+        lava_mix: 0.55,
+        rise: 5.0,
+        fall: 1.8,
+    },
+    Config {
+        title: "3 · течение — середина, капли — бас",
+        liquid: Source::Mid,
+        liquid_gain: 1.1,
+        lava: Source::Bass,
+        lava_gain: 1.0,
+        per_blob: false,
+        pulse_gain: 0.25,
+        lava_mix: 0.55,
+        rise: 5.0,
+        fall: 1.8,
+    },
+    Config {
+        title: "4 · как 1, живее",
+        liquid: Source::High,
+        liquid_gain: 1.6,
+        lava: Source::Bass,
+        lava_gain: 1.6,
+        per_blob: false,
+        pulse_gain: 0.35,
+        lava_mix: 0.65,
+        rise: 7.0,
+        fall: 2.5,
+    },
+    Config {
+        title: "5 · как 1, тише",
+        liquid: Source::High,
+        liquid_gain: 0.6,
+        lava: Source::Bass,
+        lava_gain: 0.6,
+        per_blob: false,
+        pulse_gain: 0.15,
+        lava_mix: 0.45,
+        rise: 3.5,
+        fall: 1.2,
+    },
+    Config {
+        title: "6 · каждая капля — своя полоса, течение — громкость",
+        liquid: Source::Loud,
+        liquid_gain: 1.1,
+        lava: Source::Bass,
+        lava_gain: 1.2,
+        per_blob: true,
+        pulse_gain: 0.2,
+        lava_mix: 0.6,
+        rise: 5.0,
+        fall: 1.8,
+    },
+    Config {
+        title: "7 · каждая капля — своя полоса, течение — верха",
+        liquid: Source::High,
+        liquid_gain: 1.1,
+        lava: Source::Bass,
+        lava_gain: 1.2,
+        per_blob: true,
+        pulse_gain: 0.2,
+        lava_mix: 0.6,
+        rise: 5.0,
+        fall: 1.8,
+    },
+    Config {
+        title: "8 · дыхание громкости",
+        liquid: Source::Loud,
+        liquid_gain: 1.3,
+        lava: Source::Bass,
+        lava_gain: 0.8,
+        per_blob: false,
+        pulse_gain: 0.1,
+        lava_mix: 0.5,
+        rise: 2.5,
+        fall: 0.9,
+    },
 ];
 
 /// Живое одной плитки: сглаженные силы и своё время течения и капель.
@@ -169,7 +257,9 @@ fn load_cover(path: &std::path::Path) -> Option<Cover> {
     let preview = artwork_colors::backdrop_preview(&bytes, width, height, stride)?;
     let palette = artwork_colors::shares(&bytes, width, height, stride)
         .iter()
-        .map(|c| ([((c.rgb >> 16) & 0xFF) as f32 / 255.0, ((c.rgb >> 8) & 0xFF) as f32 / 255.0, (c.rgb & 0xFF) as f32 / 255.0], c.share as f32))
+        .map(|c| {
+            ([((c.rgb >> 16) & 0xFF) as f32 / 255.0, ((c.rgb >> 8) & 0xFF) as f32 / 255.0, (c.rgb & 0xFF) as f32 / 255.0], c.share as f32)
+        })
         .collect();
     let mut pixels = Vec::with_capacity(COVER_SIDE * COVER_SIDE * 4);
     for y in 0..COVER_SIDE {
@@ -440,8 +530,7 @@ fn render(area: &gtk::GLArea, shared: &Shared) {
 fn main() -> glib::ExitCode {
     let mut args = std::env::args().skip(1);
     let covers_dir = args.next().unwrap_or_else(|| ".".into());
-    let cache_dir =
-        args.next().unwrap_or_else(|| format!("{}/.local/share/melogold/cache", std::env::var("HOME").unwrap_or_default()));
+    let cache_dir = args.next().unwrap_or_else(|| format!("{}/.local/share/melogold/cache", std::env::var("HOME").unwrap_or_default()));
     gst::init().expect("GStreamer");
     // Функции GL — через eglGetProcAddress: GTK на Wayland работает через EGL, а Mesa отдаёт так и
     // функции ядра GLES (EGL_KHR_get_all_proc_addresses).
@@ -460,7 +549,11 @@ fn main() -> glib::ExitCode {
              .fluid-lyric { color: white; font-weight: 800; font-size: 26px; text-shadow: 0 1px 6px alpha(black, 0.35); }
              .fluid-cover { border-radius: 10px; box-shadow: 0 12px 32px alpha(black, 0.45); }",
         );
-        gtk::style_context_add_provider_for_display(&gdk::Display::default().expect("дисплей"), &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        gtk::style_context_add_provider_for_display(
+            &gdk::Display::default().expect("дисплей"),
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
 
         let files: Vec<std::path::PathBuf> = std::fs::read_dir(&covers_dir)
             .expect("папка с обложками")
@@ -544,11 +637,25 @@ fn main() -> glib::ExitCode {
         }
 
         // Подписи и обложка поверх каждой плитки.
-        let cells = gtk::Grid::builder().row_homogeneous(true).column_homogeneous(true).row_spacing(2).column_spacing(2).can_target(false).build();
+        let cells =
+            gtk::Grid::builder().row_homogeneous(true).column_homogeneous(true).row_spacing(2).column_spacing(2).can_target(false).build();
         let mut pictures = Vec::new();
         for (index, config) in CONFIGS.iter().enumerate() {
-            let label = gtk::Label::builder().label(config.title).xalign(0.0).valign(gtk::Align::Start).margin_start(14).margin_top(10).css_classes(["fluid-label"]).build();
-            let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).width_request(150).height_request(150).css_classes(["fluid-cover"]).overflow(gtk::Overflow::Hidden).build();
+            let label = gtk::Label::builder()
+                .label(config.title)
+                .xalign(0.0)
+                .valign(gtk::Align::Start)
+                .margin_start(14)
+                .margin_top(10)
+                .css_classes(["fluid-label"])
+                .build();
+            let picture = gtk::Picture::builder()
+                .content_fit(gtk::ContentFit::Cover)
+                .width_request(150)
+                .height_request(150)
+                .css_classes(["fluid-cover"])
+                .overflow(gtk::Overflow::Hidden)
+                .build();
             let lyric = gtk::Label::builder().label("Строка песни\nвот так читается").xalign(0.0).css_classes(["fluid-lyric"]).build();
             let middle = gtk::Box::builder().spacing(24).valign(gtk::Align::Center).halign(gtk::Align::Center).vexpand(true).build();
             middle.append(&picture);

@@ -306,6 +306,11 @@ impl PlayerHandle {
     }
 
     /// Уровни звука 0…1: низы, середина, верх (столбики «играет»).
+    /// 48 полос спектра, которые звучат на `position` (задание 0032).
+    pub fn spectrum_at(&self, position: Duration) -> Option<(i64, [f32; crate::spectrum::BANDS])> {
+        self.shared.levels.spectrum.at(position)
+    }
+
     pub fn levels(&self) -> (f32, f32, f32) {
         self.shared.levels.levels()
     }

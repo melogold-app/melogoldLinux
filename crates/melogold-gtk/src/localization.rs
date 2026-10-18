@@ -232,8 +232,8 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxLiveBackground", "Живой фон", "Live background"),
     (
         "LinuxLiveBackgroundText",
-        "Размытая обложка за «Сейчас играет» движется, пока играет музыка",
-        "The blurred cover behind Now Playing moves while music plays",
+        "Размытая обложка за «Сейчас играет» движется под музыку",
+        "The blurred cover behind Now Playing moves with the music",
     ),
     (
         "LinuxRemoteAllowText",

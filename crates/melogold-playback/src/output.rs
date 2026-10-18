@@ -154,6 +154,9 @@ impl Output {
                         let samples: Vec<f32> =
                             map.as_slice().chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
                         levels.feed(&samples, channels, rate);
+                        // Время буфера в треке: фон рисует измерение, которое сейчас звучит.
+                        let start = buffer.pts().map(|pts| pts.nseconds() as i64);
+                        levels.spectrum.feed(&samples, channels, rate, start);
                     }
                 }
                 gst::PadProbeReturn::Ok
