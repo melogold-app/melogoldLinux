@@ -351,8 +351,10 @@ impl Library {
                     t.execute("DELETE FROM playlist_items WHERE playlist_id = ?1 AND video_id = ?2", params![playlist_id, clip_id])?;
                     renumber(t, *playlist_id)?;
                 } else {
+                    // Ключ порядка сервера — клипа, а не песни: без сброса песня выглядела бы уже
+                    // побывавшей на сервере, и замена до него не дошла бы.
                     t.execute(
-                        "UPDATE playlist_items SET video_id = ?3 WHERE playlist_id = ?1 AND video_id = ?2",
+                        "UPDATE playlist_items SET video_id = ?3, sort_key = NULL WHERE playlist_id = ?1 AND video_id = ?2",
                         params![playlist_id, clip_id, song.video_id],
                     )?;
                 }

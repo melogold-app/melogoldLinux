@@ -165,17 +165,25 @@ impl YouTubeMusic {
 
     /// Клипы списка альбома и песни, которыми они заменены: `(id клипа, песня)`. Для починки
     /// медиатеки — треков, сохранённых клипами до задания 0029 (задание 0030).
+    ///
+    /// Плейлист альбома не загрузился — ошибка, а не «пар нет»: иначе починка решила бы, что менять
+    /// нечего, и больше к альбому не вернулась бы.
     pub async fn album_twins(&self, browse_id: &str) -> Result<Vec<(String, Track)>, YouTubeError> {
-        let (details, rows) = self.album_with_rows(browse_id).await?;
+        let (details, rows, failed) = self.album_with_rows(browse_id).await?;
+        if let Some(error) = failed {
+            return Err(error);
+        }
         Ok(rows.into_iter().zip(details.tracks).filter(|(row, song)| *row != song.video_id).collect())
     }
 
-    /// Альбом с песнями вместо клипов и id строк, какими их дал YouTube, — в том же порядке.
-    async fn album_with_rows(&self, browse_id: &str) -> Result<(AlbumDetails, Vec<String>), YouTubeError> {
+    /// Альбом с песнями вместо клипов, id строк, какими их дал YouTube (в том же порядке), и ошибка
+    /// плейлиста альбома, если он нужен был и не загрузился.
+    async fn album_with_rows(&self, browse_id: &str) -> Result<(AlbumDetails, Vec<String>, Option<YouTubeError>), YouTubeError> {
         let response = self.music("browse", json!({"browseId": browse_id})).await?;
         let mut details = parse_album(browse_id, &response)
             .ok_or_else(|| YouTubeError::new(ErrorKind::Parser, format!("album {browse_id} has no header")))?;
         let rows: Vec<String> = details.tracks.iter().map(|t| t.video_id.clone()).collect();
+        let mut failed = None;
         // Второй запрос — только когда в списке есть клипы: у большинства альбомов их нет.
         if details.tracks.iter().any(|t| t.video_type.as_deref() == Some("video")) {
             if let Some(playlist_id) = details.album.playlist_id.clone() {
@@ -185,11 +193,14 @@ impl YouTubeMusic {
                         tracing::info!(альбом = browse_id, заменено = swapped, "клипы альбома заменены песнями");
                     }
                     // Без плейлиста альбом всё равно открывается — с клипами, как раньше.
-                    Err(error) => tracing::warn!(альбом = browse_id, %error, "плейлист альбома не загрузился, остаются клипы"),
+                    Err(error) => {
+                        tracing::warn!(альбом = browse_id, %error, "плейлист альбома не загрузился, остаются клипы");
+                        failed = Some(error);
+                    }
                 }
             }
         }
-        Ok((details, rows))
+        Ok((details, rows, failed))
     }
 
     pub async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetails, YouTubeError> {
