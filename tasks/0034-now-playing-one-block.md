@@ -1,6 +1,6 @@
 # «Сейчас играет»: обложка и текст — одним блоком посередине окна
 
-Статус: сделано — `now_playing.rs`: `wide_layout`, `NowPlaying::size`; `lyrics_view::lyrics_column_width`; тесты
+Статус: сделано (выпущено в 0.1.13) — `now_playing.rs`: `wide_layout`, `NowPlaying::size`; `lyrics_view::lyrics_column_width`; тесты
 `now_playing::tests`
 
 Максим (Linux, 20.10.2026, снимок LEMONHEAD, окно 2000 × 1092): «криво расположены обложка и лирика, буквально криво».

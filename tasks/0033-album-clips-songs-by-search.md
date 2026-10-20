@@ -1,6 +1,6 @@
 # Альбом: песни для клипов ищет поиск, если плейлист альбома их не дал
 
-Статус: сделано — `melogold-innertube`: `YouTubeMusic::songs_for_clips`, `music::song_for_clip`; тесты
+Статус: сделано (выпущено в 0.1.13) — `melogold-innertube`: `YouTubeMusic::songs_for_clips`, `music::song_for_clip`; тесты
 `tests/album_clips.rs` (`estate_sale_clips_find_their_songs_by_search`, `a_song_from_search_must_match_title_artist_and_duration`)
 
 Продолжение 0029 и 0030. То же на Windows и Android — задания в `melogoldWindows` и `melogoldAndroid`; iOS и macOS — в
