@@ -2,7 +2,7 @@
 //! LrcLib — поле сверху, под ним треки с длительностью и видом текста; выбранный текст — свой
 //! (задание 0002). «Импорт из файла» — TTML, LRC или простой текст.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,11 +40,22 @@ impl MainWindow {
             adw::Spinner::builder().width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
         let empty = adw::StatusPage::builder().title(tr("NoLyricsFound")).icon_name("edit-find-symbolic").build();
         empty.add_css_class("compact");
+        // LrcLib не ответил — не «текстов нет»: сказать это и дать повторить.
+        let retry = gtk::Button::builder().label(tr("Retry")).halign(gtk::Align::Center).build();
+        retry.add_css_class("pill");
+        let failed = adw::StatusPage::builder()
+            .title(tr("LinuxLyricsSearchFailed"))
+            .description(tr("LinuxLyricsSearchFailedHint"))
+            .icon_name("network-offline-symbolic")
+            .child(&retry)
+            .build();
+        failed.add_css_class("compact");
         let results = gtk::Stack::builder().vexpand(true).build();
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&list).vexpand(true).build();
         results.add_named(&scroller, Some("list"));
         results.add_named(&spinner, Some("loading"));
         results.add_named(&empty, Some("empty"));
+        results.add_named(&failed, Some("failed"));
         let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_start(12).margin_end(12).build();
         content.append(&entry);
         content.append(&results);
@@ -60,12 +71,17 @@ impl MainWindow {
         let dialog = adw::Dialog::builder().title(tr("ChooseLyricTrack")).content_width(520).content_height(560).child(&toolbar).build();
 
         let token = Rc::new(Cell::new(0u64));
+        // Последний запрошенный текст: поле при открытии окна само шлёт «изменилось» с тем же
+        // текстом, и LrcLib спрашивался дважды.
+        let asked = Rc::new(RefCell::new(String::new()));
         let search = {
-            let (weak, list, results, token) = (self.downgrade(), list.clone(), results.clone(), Rc::clone(&token));
+            let (weak, list, results, token, asked) =
+                (self.downgrade(), list.clone(), results.clone(), Rc::clone(&token), Rc::clone(&asked));
             let dialog = dialog.downgrade();
             Rc::new(move |text: String, delay: Duration| {
                 let ticket = token.get() + 1;
                 token.set(ticket);
+                asked.replace(text.trim().to_owned());
                 results.set_visible_child_name("loading");
                 let (weak, list, results, token, dialog) = (weak.clone(), list.clone(), results.clone(), Rc::clone(&token), dialog.clone());
                 glib::spawn_future_local(async move {
@@ -77,16 +93,17 @@ impl MainWindow {
                     }
                     let query = text.trim().to_owned();
                     let fetcher = Arc::clone(&window.ctx.services.lyrics);
+                    // `None` — LrcLib не ответил.
                     let found = if query.is_empty() {
-                        Vec::new()
+                        Some(Vec::new())
                     } else {
                         match window.ctx.services.run(async move { fetcher.lrclib.search_query(&query).await }).await {
-                            Some(Ok(found)) => found,
+                            Some(Ok(found)) => Some(found),
                             Some(Err(error)) => {
                                 tracing::warn!(?error, "поиск LrcLib не прошёл");
-                                Vec::new()
+                                None
                             }
-                            None => Vec::new(),
+                            None => None,
                         }
                     };
                     if token.get() != ticket {
@@ -95,6 +112,10 @@ impl MainWindow {
                     while let Some(child) = list.first_child() {
                         list.remove(&child);
                     }
+                    let Some(found) = found else {
+                        results.set_visible_child_name("failed");
+                        return;
+                    };
                     for track in found.iter().take(50) {
                         list.append(&result_row(&window, track, &dialog));
                     }
@@ -103,9 +124,15 @@ impl MainWindow {
             })
         };
         let changed = Rc::clone(&search);
-        entry.connect_search_changed(move |entry| changed(entry.text().to_string(), Duration::from_millis(700)));
+        entry.connect_search_changed(move |entry| {
+            if entry.text().trim() != asked.borrow().as_str() {
+                changed(entry.text().to_string(), Duration::from_millis(700));
+            }
+        });
         let activated = Rc::clone(&search);
         entry.connect_activate(move |entry| activated(entry.text().to_string(), Duration::ZERO));
+        let (again, field) = (Rc::clone(&search), entry.clone());
+        retry.connect_clicked(move |_| again(field.text().to_string(), Duration::ZERO));
         search(entry.text().to_string(), Duration::ZERO);
 
         let (weak, closing) = (self.downgrade(), dialog.downgrade());

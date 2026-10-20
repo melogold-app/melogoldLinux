@@ -67,6 +67,13 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
         "Не удалось установить обновление. Попробуйте ещё раз или скачайте пакет со страницы релиза",
         "Couldn't install the update. Try again or download the package from the release page",
     ),
+    // «Найти другой текст…»: LrcLib не ответил (сеть или «сервер занят», 503) — это не «текстов нет».
+    ("LinuxLyricsSearchFailed", "LrcLib не отвечает", "LrcLib isn't responding"),
+    (
+        "LinuxLyricsSearchFailedHint",
+        "Сервис текстов перегружен или недоступен. Попробуйте ещё раз через минуту",
+        "The lyrics service is overloaded or unreachable. Try again in a minute",
+    ),
     ("LinuxAppLanguage", "Язык приложения", "App language"),
     ("LinuxLanguageRestart", "Язык сменится после перезапуска Melogold", "The language changes after Melogold restarts"),
     ("LinuxAbout", "О Melogold", "About Melogold"),
