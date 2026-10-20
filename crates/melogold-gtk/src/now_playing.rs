@@ -1,7 +1,7 @@
 //! «Сейчас играет» (docs/PROMPT.md §5.2): страница поверх окна, Esc и «Назад» закрывают — своей
 //! «Свернуть» нет. Обложка песни — квадратом, кадр видео 16:9 — целиком прямоугольником. В широком
-//! окне обложка слева, текст справа, по обе стороны от середины окна; в узком — переключатель
-//! «Обложка · Текст» в заголовке.
+//! окне колонка обложки и текст — одним блоком посередине окна ([`wide_layout`]); в узком —
+//! переключатель «Обложка · Текст» в заголовке.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -20,12 +20,48 @@ use melogold_playback::engine::{Command, State, Status};
 use crate::backdrop::Backdrop;
 use crate::fluid::{Fluid, FluidCover};
 use crate::localization::tr;
-use crate::lyrics_view::{LyricsPanel, SyncedView};
+use crate::lyrics_view::{font_size_for_page, lyrics_column_width, LyricsPanel, SyncedView};
 use crate::texts;
 use crate::window::MainWindow;
 
 /// От этой ширины страницы обложка и текст стоят рядом.
 const WIDE: &str = "min-width: 860sp";
+/// Поле от края окна до блока «обложка + текст» в широкой раскладке, не меньше.
+const WIDE_EDGE: f64 = 48.0;
+/// Промежуток между обложкой и текстом в широкой раскладке.
+const WIDE_GAP: f64 = 72.0;
+/// Поля колонки обложки по бокам.
+const COLUMN_MARGIN: i32 = 28;
+
+/// Широкая раскладка одним блоком посередине окна — как у Windows (`NowPlayingMetrics.WideLayout`),
+/// который пользователь принял 2026-10-19: «альбом и лирика не по середине окна — меньший отступ
+/// от краёв, чтобы были больше, и посередине»; 2026-10-20 то же про Linux: «криво расположены
+/// обложка и лирика». Раньше окно делилось пополам: обложка посередине левой половины, текст до
+/// правого края — слева поле 227, справа 43.
+///
+/// Обложка — `min(0,66 · h, h − below, 0,36 · W)`, где `h` — высота под заголовком, а `below` —
+/// название, ползунок и кнопки под обложкой (у Windows они в панели внизу, и там `h − 150`); текст —
+/// колонкой по ширине длинной строки ([`lyrics_column_width`]), но не шире оставшегося; узко для
+/// текста (меньше 240) — уступает обложка. Колонка обложки не уже `column_min` — ряда кнопок под
+/// ней. Поля по краям — не меньше [`WIDE_EDGE`].
+pub fn wide_layout(width: f64, height: f64, below: f64, column_min: f64, font: f64) -> WideLayout {
+    let room = (width - 2.0 * WIDE_EDGE - WIDE_GAP).max(0.0);
+    let mut cover = (0.66 * height).min(height - below).min(0.36 * width).max(120.0);
+    if room - cover.max(column_min) < 240.0 {
+        cover = (room - 240.0).max(120.0);
+    }
+    let column = cover.max(column_min);
+    let lyrics = lyrics_column_width(font).min(room - column).max(0.0);
+    WideLayout { cover: cover.round() as i32, column: column.round() as i32, lyrics: lyrics.round() as i32 }
+}
+
+/// Стороны широкой раскладки, px: обложка, колонка обложки (не уже кнопок под ней) и текст.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WideLayout {
+    pub cover: i32,
+    pub column: i32,
+    pub lyrics: i32,
+}
 
 #[derive(Clone)]
 pub struct NowPlaying(Rc<Inner>);
@@ -37,8 +73,14 @@ pub struct Inner {
     switcher: adw::ToggleGroup,
     header: adw::HeaderBar,
     slot: gtk::Box,
+    /// Колонка обложки: обложка, название, ползунок и кнопки.
+    column: gtk::Box,
+    halves: gtk::Box,
     right: gtk::Box,
+    toolbar: adw::ToolbarView,
     wide: Cell<bool>,
+    /// Размер страницы вместе с заголовком — по нему считается широкая раскладка.
+    page_size: Cell<(i32, i32)>,
     lyrics_refresh: RefCell<Option<Rc<dyn Fn()>>>,
     frame: gtk::AspectFrame,
     picture: gtk::Picture,
@@ -68,7 +110,7 @@ pub struct Inner {
     /// Живой фон под музыку (задание 0032) поверх фона из 0031; без шейдеров его нет.
     fluid: Fluid,
     fluid_covers: RefCell<HashMap<String, Rc<FluidCover>>>,
-    /// Колонка обложки: в широком окне её ширина — от высоты страницы (задание 0031).
+    /// Колонка обложки в узком окне — не шире 560; в широком её ширина — сторона обложки.
     clamp: adw::Clamp,
     playing: Cell<bool>,
     seeking: Cell<bool>,
@@ -219,8 +261,8 @@ impl NowPlaying {
             .spacing(14)
             .margin_top(12)
             .margin_bottom(28)
-            .margin_start(28)
-            .margin_end(28)
+            .margin_start(COLUMN_MARGIN)
+            .margin_end(COLUMN_MARGIN)
             .build();
         column.append(&slot);
         column.append(&heading);
@@ -230,7 +272,7 @@ impl NowPlaying {
         column.append(&controls);
         let clamp = adw::Clamp::builder().maximum_size(560).child(&column).hexpand(true).build();
         let right = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).visible(false).margin_end(12).build();
-        let halves = gtk::Box::builder().homogeneous(true).build();
+        let halves = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         halves.append(&clamp);
         halves.append(&right);
         let bin = adw::BreakpointBin::builder().width_request(360).height_request(200).child(&halves).build();
@@ -300,8 +342,12 @@ impl NowPlaying {
             switcher,
             header,
             slot,
+            column,
+            halves,
             right,
+            toolbar,
             wide: Cell::new(false),
+            page_size: Cell::new((0, 0)),
             lyrics_refresh: RefCell::default(),
             frame,
             picture,
@@ -407,19 +453,15 @@ impl NowPlaying {
                 NowPlaying(inner).apply_tint();
             }
         });
-        // Широкое окно: сторона обложки — min(0,50 · H, 0,38 · W) (задание 0031). Ширину колонки
-        // меняем после раскладки: внутри неё размер не трогают.
+        // Размеры широкой раскладки — от размера страницы ([`wide_layout`]). Меняем их после
+        // раскладки: внутри неё размер не трогают.
         let weak = Rc::downgrade(&now_playing.0);
         now_playing.backdrop.connect_resized(move |width, height| {
             let weak = weak.clone();
             glib::idle_add_local_once(move || {
                 let Some(inner) = weak.upgrade() else { return };
-                let side = (f64::from(height) * 0.50).min(f64::from(width) * 0.38);
-                let maximum = if inner.wide.get() { (side as i32 + 56).max(216) } else { 560 };
-                if inner.clamp.maximum_size() != maximum {
-                    inner.clamp.set_maximum_size(maximum);
-                    inner.clamp.set_tightening_threshold(maximum);
-                }
+                inner.page_size.set((width, height));
+                NowPlaying(inner).size();
             });
         });
         // Анимации системы выключили — фон встаёт (задание 0031, §2).
@@ -502,6 +544,70 @@ impl NowPlaying {
         window.lyrics.set_active(open && (wide || lyrics_narrow));
         window.update_lyrics_button();
         self.update_motion(window);
+        self.size();
+    }
+
+    /// Широкое окно: колонка обложки и текст — одним блоком посередине ([`wide_layout`]), колонка
+    /// посередине по высоте, без пустого места между обложкой и названием. Узкое: колонка не шире
+    /// 560 во всю высоту, обложка забирает свободное место.
+    fn size(&self) {
+        let wide = self.wide.get();
+        let (width, height) = self.page_size.get();
+        if wide && width > 0 && height > 0 {
+            let content = f64::from(height - self.toolbar.top_bar_height());
+            let font = font_size_for_page(f64::from(height));
+            // Под обложкой — сколько займут название, ползунок и кнопки при ширине обложки; длинное
+            // название переносится, и с меньшей обложкой — на строку больше: считаем дважды.
+            let (below_min, column_min) = self.below_cover(-1);
+            let mut layout = wide_layout(f64::from(width), content, f64::from(below_min), f64::from(column_min), font);
+            for _ in 0..2 {
+                let below = self.below_cover(layout.column).0;
+                layout = wide_layout(f64::from(width), content, f64::from(below), f64::from(column_min), font);
+            }
+            let WideLayout { cover, column, lyrics } = layout;
+            let ratio = self.frame.ratio().max(0.1);
+            set_if_changed(&self.frame, cover, (f64::from(cover) / f64::from(ratio)).round() as i32);
+            let maximum = column + 2 * COLUMN_MARGIN;
+            if self.clamp.maximum_size() != maximum {
+                self.clamp.set_maximum_size(maximum);
+                self.clamp.set_tightening_threshold(maximum);
+            }
+            // Блок — посередине полями слева и справа, текст забирает остаток: ширина по «естественной»
+            // ширине не годится — у строки с переносами она равна строке без переносов.
+            let edge = ((width - column - WIDE_GAP as i32 - lyrics) / 2).max(0);
+            self.halves.set_margin_start((edge - COLUMN_MARGIN).max(0));
+            self.halves.set_margin_end(edge);
+        } else {
+            set_if_changed(&self.frame, 160, 160);
+            if self.clamp.maximum_size() != 560 {
+                self.clamp.set_maximum_size(560);
+                self.clamp.set_tightening_threshold(560);
+            }
+            self.halves.set_margin_start(0);
+            self.halves.set_margin_end(0);
+        }
+        // Промежуток между обложкой и текстом — WIDE_GAP: поле колонки справа уже есть.
+        self.halves.set_spacing(if wide { WIDE_GAP as i32 - COLUMN_MARGIN } else { 0 });
+        self.right.set_margin_end(if wide { 0 } else { 12 });
+        self.clamp.set_hexpand(!wide);
+        self.column.set_valign(if wide { gtk::Align::Center } else { gtk::Align::Fill });
+        self.slot.set_vexpand(!wide);
+        self.frame.set_vexpand(!wide);
+    }
+
+    /// Колонка без обложки при ширине `width` (-1 — любой): высота названия, ошибки, ползунка и
+    /// кнопок с промежутками и полями колонки и самая узкая ширина, в которую они встают.
+    fn below_cover(&self, width: i32) -> (i32, i32) {
+        let (mut below, mut narrowest) = (self.column.margin_top() + self.column.margin_bottom(), 0);
+        let mut child = self.column.first_child();
+        while let Some(widget) = child {
+            if widget != *self.slot.upcast_ref::<gtk::Widget>() && widget.is_visible() {
+                below += widget.measure(gtk::Orientation::Vertical, width).1 + self.column.spacing();
+                narrowest = narrowest.max(widget.measure(gtk::Orientation::Horizontal, -1).0);
+            }
+            child = widget.next_sibling();
+        }
+        (below, narrowest)
     }
 
     /// Зерно обложки — в фоне: пиксели уменьшенной копии, квантование и Score (миллисекунды,
@@ -658,6 +764,8 @@ impl NowPlaying {
                 self.error_actions.set_visible(false);
             }
         }
+        // Другое название, ошибка или кадр видео вместо обложки — другая высота колонки.
+        self.size();
         self.play_icon.set_icon_name(Some(if state.playing { "media-playback-pause-symbolic" } else { "media-playback-start-symbolic" }));
         if self.playing.replace(state.playing) != state.playing {
             self.update_motion(window);
@@ -722,4 +830,40 @@ fn tint_css(palette: &artwork_colors::ArtworkPalette, bar: Option<&artwork_color
          .now-playing-tinted .now-playing-cover {{ box-shadow: 0 24px 56px -12px alpha(black, 0.55), 0 6px 18px -6px alpha(black, 0.3); }}
          {bar_css}"
     )
+}
+
+fn set_if_changed(widget: &impl IsA<gtk::Widget>, width: i32, height: i32) {
+    if widget.size_request() != (width, height) {
+        widget.set_size_request(width, height);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_wide_layout_is_one_block_in_the_middle() {
+        // Снимок пользователя 20.10.2026: страница 2000 × 1092, под заголовком 1045, под обложкой 250.
+        let font = font_size_for_page(1092.0);
+        let WideLayout { cover, column, lyrics } = wide_layout(2000.0, 1045.0, 250.0, 310.0, font);
+        assert_eq!((cover, column), (690, 690), "0,66 · h — крупнее прежних 546");
+        assert_eq!(lyrics, lyrics_column_width(font).round() as i32);
+        let edge = (2000 - column - WIDE_GAP as i32 - lyrics) / 2;
+        assert!((200..=300).contains(&edge), "поля по краям поровну: {edge}");
+    }
+
+    #[test]
+    fn the_cover_leaves_room_for_the_controls_and_the_lyrics() {
+        // Низкое окно: под обложкой остаются название и кнопки.
+        assert_eq!(wide_layout(1600.0, 500.0, 250.0, 310.0, 24.0).cover, 250);
+        // Узкое широкое окно: текст не уже 240, уступает обложка, поля не меньше 48.
+        let WideLayout { column, lyrics, .. } = wide_layout(900.0, 900.0, 250.0, 310.0, 40.0);
+        assert!(lyrics >= 240);
+        assert!(f64::from(column + lyrics) + WIDE_GAP <= 900.0 - 2.0 * WIDE_EDGE);
+        // Под обложкой ошибка с кнопками: обложка меньше, колонка — по кнопкам, текст рядом с ней.
+        let WideLayout { cover, column, lyrics } = wide_layout(960.0, 593.0, 420.0, 310.0, 27.0);
+        assert_eq!((cover, column), (173, 310));
+        assert!(f64::from(column + lyrics) + WIDE_GAP <= 960.0 - 2.0 * WIDE_EDGE);
+    }
 }
