@@ -1526,7 +1526,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-core"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "hex",
  "material-colors",
@@ -1545,7 +1545,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-data"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "melogold-core",
  "regex",
@@ -1557,7 +1557,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-gtk"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1587,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-innertube"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-playback"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "async-channel",
  "futures-util",
@@ -1625,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-server"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "async-channel",
  "futures-util",
@@ -1644,7 +1644,7 @@ dependencies = [
 
 [[package]]
 name = "melogold-update"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "hex",
  "libc",
