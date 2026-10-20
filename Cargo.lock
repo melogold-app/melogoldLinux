@@ -1590,6 +1590,7 @@ name = "melogold-innertube"
 version = "0.1.12"
 dependencies = [
  "base64 0.22.1",
+ "futures-util",
  "melogold-core",
  "reqwest",
  "serde",

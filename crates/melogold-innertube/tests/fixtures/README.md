@@ -18,3 +18,8 @@
 списке альбома все 16 строк — клипы (`MUSIC_VIDEO_TYPE_OMV`), в плейлисте — песни (`MUSIC_VIDEO_TYPE_ATV`):
 LEMONHEAD в альбоме — клип `a5JCltuobqQ` на 1:25, в плейлисте — песня `QjckqsLmb1o` на 2:11. Обезличены
 так же: без `responseContext` и полей отслеживания.
+
+`album-clips/estate-sale.*` — переиздание «CALL ME IF YOU GET LOST: The Estate Sale» (`MPREb_VpXYEs5HeNs`), его плейлист
+(`VLOLAK5uy_kSIbgi-WxAiBFs28kWN1cMy7bewO3-LCs`) и выдача поиска «Песни» по «Tyler, The Creator LEMONHEAD (feat. 42 Dugg)» и
+«Tyler, The Creator CORSO»: записаны 20.10.2026, WEB_REMIX `hl=en gl=US`, без входа (задание 0033). Первые 16 строк
+альбома — клипы, плейлист пуст (только `microformat`), песни есть только в поиске. Обезличены так же.

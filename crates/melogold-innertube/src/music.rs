@@ -1,6 +1,7 @@
 //! Каталог YouTube Music и обычного YouTube (Windows `YouTubeMusic.cs`). Ошибки — [`YouTubeError`]
 //! с классом для экрана.
 
+use futures_util::stream::{self, StreamExt};
 use melogold_core::music::{
     distinct, AlbumDetails, AlbumItem, ArtistDetails, ArtistRef, ChannelPage, ItemsPage, MusicItem, NextPage, PlaylistDetails,
     PlaylistItem, SearchSummary, Shelf, Track,
@@ -166,7 +167,7 @@ impl YouTubeMusic {
     /// Клипы списка альбома и песни, которыми они заменены: `(id клипа, песня)`. Для починки
     /// медиатеки — треков, сохранённых клипами до задания 0029 (задание 0030).
     ///
-    /// Плейлист альбома не загрузился — ошибка, а не «пар нет»: иначе починка решила бы, что менять
+    /// Поиск песни для клипа не прошёл — ошибка, а не «пар нет»: иначе починка решила бы, что менять
     /// нечего, и больше к альбому не вернулась бы.
     pub async fn album_twins(&self, browse_id: &str) -> Result<Vec<(String, Track)>, YouTubeError> {
         let (details, rows, failed) = self.album_with_rows(browse_id).await?;
@@ -177,7 +178,7 @@ impl YouTubeMusic {
     }
 
     /// Альбом с песнями вместо клипов, id строк, какими их дал YouTube (в том же порядке), и ошибка
-    /// плейлиста альбома, если он нужен был и не загрузился.
+    /// поиска песен, из-за которой клип остался без пары.
     async fn album_with_rows(&self, browse_id: &str) -> Result<(AlbumDetails, Vec<String>, Option<YouTubeError>), YouTubeError> {
         let response = self.music("browse", json!({"browseId": browse_id})).await?;
         let mut details = parse_album(browse_id, &response)
@@ -185,22 +186,74 @@ impl YouTubeMusic {
         let rows: Vec<String> = details.tracks.iter().map(|t| t.video_id.clone()).collect();
         let mut failed = None;
         // Второй запрос — только когда в списке есть клипы: у большинства альбомов их нет.
-        if details.tracks.iter().any(|t| t.video_type.as_deref() == Some("video")) {
+        if details.tracks.iter().any(is_clip) {
             if let Some(playlist_id) = details.album.playlist_id.clone() {
                 match self.playlist_tracks(&playlist_id, details.tracks.len() + 50).await {
                     Ok(audio) => {
                         let swapped = prefer_album_audio(&mut details.tracks, &audio);
                         tracing::info!(альбом = browse_id, заменено = swapped, "клипы альбома заменены песнями");
                     }
-                    // Без плейлиста альбом всё равно открывается — с клипами, как раньше.
                     Err(error) => {
-                        tracing::warn!(альбом = browse_id, %error, "плейлист альбома не загрузился, остаются клипы");
+                        tracing::warn!(альбом = browse_id, %error, "плейлист альбома не загрузился, песни ищутся поиском");
                         failed = Some(error);
                     }
                 }
             }
         }
+        // Плейлист пуст или сам из клипов (переиздание «The Estate Sale», 20.10.2026): песню для
+        // каждого оставшегося клипа ищет поиск. Ошибку плейлиста сменяет итог поиска.
+        if details.tracks.iter().any(is_clip) {
+            let (swapped, error) = self.songs_for_clips(&mut details.tracks).await;
+            tracing::info!(альбом = browse_id, заменено = swapped, "клипы альбома заменены песнями из поиска");
+            failed = error;
+        }
         Ok((details, rows, failed))
+    }
+
+    /// Песни для клипов, которым не нашлось пары в плейлисте альбома: поиск «Песни» по исполнителю
+    /// и названию, пара — по [`song_for_clip`]. Запросы идут по несколько сразу, чтобы альбом не
+    /// открывался секундами. Итог — сколько заменено и ошибка запроса, если из-за неё клип остался
+    /// клипом. Клип без пары остаётся клипом — лучше сыграть клип, чем чужую песню.
+    async fn songs_for_clips(&self, tracks: &mut [Track]) -> (usize, Option<YouTubeError>) {
+        let queries: Vec<(usize, String)> = tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, track)| is_clip(track))
+            .map(|(index, track)| {
+                (index, format!("{} {}", track.artists_text.as_deref().unwrap_or_default(), track.title).trim().to_owned())
+            })
+            .collect();
+        let results: Vec<(usize, Result<ItemsPage, YouTubeError>)> = stream::iter(queries)
+            .map(|(index, query)| async move { (index, self.search(&query, MusicFilter::Songs).await) })
+            .buffered(SONG_SEARCHES_AT_ONCE)
+            .collect()
+            .await;
+        let mut taken: std::collections::HashSet<String> = tracks.iter().map(|t| t.video_id.clone()).collect();
+        let (mut swapped, mut failed) = (0, None);
+        for (index, result) in results {
+            let page = match result {
+                Ok(page) => page,
+                Err(error) => {
+                    tracing::warn!(трек = %tracks[index].video_id, %error, "поиск песни для клипа не прошёл");
+                    failed = Some(error);
+                    continue;
+                }
+            };
+            let found: Vec<Track> = page
+                .items
+                .into_iter()
+                .filter_map(|item| match item {
+                    MusicItem::Track(track) if !taken.contains(&track.video_id) => Some(track),
+                    _ => None,
+                })
+                .collect();
+            if let Some(song) = song_for_clip(&tracks[index], &found) {
+                taken.insert(song.video_id.clone());
+                take_song(&mut tracks[index], song);
+                swapped += 1;
+            }
+        }
+        (swapped, failed)
     }
 
     pub async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetails, YouTubeError> {
@@ -412,18 +465,14 @@ fn year_of(text: &str) -> bool {
 /// недостающий трек), то по первому свободному треку с тем же названием. Песни альбома и строки
 /// без пары не трогаются.
 pub fn prefer_album_audio(tracks: &mut [Track], audio: &[Track]) -> usize {
-    fn key(title: &str) -> String {
-        title.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
-    }
-    let is_song = |track: &Track| track.video_type.as_deref() == Some("song");
     let mut used = vec![false; audio.len()];
     let mut swapped = 0;
     for (index, track) in tracks.iter_mut().enumerate() {
-        if track.video_type.as_deref() != Some("video") {
+        if !is_clip(track) {
             continue;
         }
-        let wanted = key(&track.title);
-        let fits = |i: usize, candidate: &Track| !used[i] && is_song(candidate) && key(&candidate.title) == wanted;
+        let wanted = title_key(&track.title);
+        let fits = |i: usize, candidate: &Track| !used[i] && is_song(candidate) && title_key(&candidate.title) == wanted;
         let found = audio
             .get(index)
             .filter(|candidate| fits(index, candidate))
@@ -431,16 +480,67 @@ pub fn prefer_album_audio(tracks: &mut [Track], audio: &[Track]) -> usize {
             .or_else(|| audio.iter().enumerate().find(|(i, candidate)| fits(*i, candidate)).map(|(i, _)| i));
         let Some(found) = found else { continue };
         used[found] = true;
-        let song = &audio[found];
-        track.video_id = song.video_id.clone();
-        track.video_type = Some("song".into());
-        if track.duration_ms.is_none() {
-            track.duration_ms = song.duration_ms;
-            track.duration_text = song.duration_text.clone();
-        }
+        take_song(track, &audio[found]);
         swapped += 1;
     }
     swapped
+}
+
+/// Сколько поисков песен для клипов альбома идёт сразу.
+const SONG_SEARCHES_AT_ONCE: usize = 8;
+/// Длительность песни из поиска может разойтись со строкой альбома на округление.
+const SONG_DURATION_SLACK_MS: i64 = 2_000;
+
+/// Песня для клипа из выдачи поиска «Песни», когда плейлист альбома её не дал: у переиздания Tyler,
+/// The Creator «CALL ME IF YOU GET LOST: The Estate Sale» (2023) плейлист альбома пуст, а очередь
+/// по нему — те же клипы (20.10.2026), и песни есть только у альбома 2021 года.
+///
+/// Пара — то же название (без учёта регистра и пробелов), хоть один общий исполнитель и длительность
+/// строки альбома ±2 с: в строке стоит длительность песни, а у клипа она своя (LEMONHEAD — 2:11 у
+/// песни и 1:26 у клипа, CORSO — 2:27 и 5:32). Без длительности строки пары нет.
+pub fn song_for_clip<'a>(clip: &Track, found: &'a [Track]) -> Option<&'a Track> {
+    let duration = clip.duration_ms?;
+    let wanted = title_key(&clip.title);
+    found.iter().find(|song| {
+        is_song(song)
+            && title_key(&song.title) == wanted
+            && song.duration_ms.is_some_and(|d| (d - duration).abs() <= SONG_DURATION_SLACK_MS)
+            && shares_artist(clip, song)
+    })
+}
+
+fn is_clip(track: &Track) -> bool {
+    track.video_type.as_deref() == Some("video")
+}
+
+fn is_song(track: &Track) -> bool {
+    track.video_type.as_deref() == Some("song")
+}
+
+fn title_key(title: &str) -> String {
+    title.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+fn shares_artist(a: &Track, b: &Track) -> bool {
+    let ids = |t: &Track| t.artists.iter().filter_map(|artist| artist.id.clone()).collect::<std::collections::HashSet<_>>();
+    let names = |t: &Track| {
+        t.artists
+            .iter()
+            .map(|artist| title_key(&artist.name))
+            .chain(t.artists_text.as_deref().map(title_key))
+            .collect::<std::collections::HashSet<_>>()
+    };
+    !ids(a).is_disjoint(&ids(b)) || !names(a).is_disjoint(&names(b))
+}
+
+/// Строка альбома играет песню: альбом, название и длительность строки остаются.
+fn take_song(track: &mut Track, song: &Track) {
+    track.video_id = song.video_id.clone();
+    track.video_type = Some("song".into());
+    if track.duration_ms.is_none() {
+        track.duration_ms = song.duration_ms;
+        track.duration_text = song.duration_text.clone();
+    }
 }
 
 pub fn parse_album(browse_id: &str, response: &Value) -> Option<AlbumDetails> {
