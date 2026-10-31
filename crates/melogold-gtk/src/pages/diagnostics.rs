@@ -159,7 +159,7 @@ fn save_log_row(window: &MainWindow) -> adw::ActionRow {
             if let Some(time) = now.as_ref().and_then(|t| t.format_iso8601().ok()) {
                 header.push_str(&format!("Время: {time}\n"));
             }
-            header.push_str(&format!("Хранить журнал: {} дн.\n", window.ctx.settings.get(&keys::LOG_RETENTION_DAYS)));
+            header.push_str(&format!("Журнал: хранить {} дн.\n", window.ctx.settings.get(&keys::LOG_RETENTION_DAYS)));
             let text = crate::logging::export(&window.ctx.paths.logs(), &header);
             match std::fs::write(&path, text) {
                 Ok(()) => {
