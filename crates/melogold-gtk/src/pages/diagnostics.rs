@@ -4,8 +4,10 @@
 use adw::prelude::*;
 use gtk::{gio, glib};
 use melogold_core::app_info::VERSION;
+use melogold_core::settings::keys;
 
 use crate::localization::tr;
+use crate::logging;
 
 /// Трек для проверки извлечения: стабильный, открыт во всех странах.
 const TEST_VIDEO: &str = "dQw4w9WgXcQ";
@@ -67,6 +69,25 @@ pub fn page(window: &MainWindow) -> adw::NavigationPage {
     page.add(&extraction);
 
     let logs = adw::PreferencesGroup::builder().title(tr("LinuxLogs")).build();
+    // «Журнал» и «Хранить» (задание 0037): выключили — запись встаёт, папка пустеет сразу.
+    let enabled = adw::SwitchRow::builder()
+        .title(tr("LinuxLogEnabled"))
+        .subtitle(tr("LinuxLogEnabledText"))
+        .active(window.ctx.settings.get(&keys::LOG_ENABLED))
+        .build();
+    logs.add(&enabled);
+    let names = gtk::StringList::new(&[tr("LinuxLogKeepDay"), tr("LinuxLogKeep3Days"), tr("LinuxLogKeepWeek"), tr("LinuxLogKeepMonth")]);
+    let keep = adw::ComboRow::builder().title(tr("LinuxLogKeep")).model(&names).build();
+    let days = window.ctx.settings.get(&keys::LOG_RETENTION_DAYS);
+    keep.set_selected(logging::RETENTION_DAYS.iter().position(|d| *d == days).unwrap_or(2) as u32);
+    let weak = window.downgrade();
+    keep.connect_selected_notify(move |row| {
+        let Some(window) = weak.upgrade() else { return };
+        let days = logging::RETENTION_DAYS.get(row.selected() as usize).copied().unwrap_or(7);
+        window.ctx.settings.set(&keys::LOG_RETENTION_DAYS, days);
+        logging::set_retention(days);
+    });
+    logs.add(&keep);
     let folder = window.ctx.paths.logs();
     let row =
         adw::ActionRow::builder().title(tr("LinuxLogsFolder")).subtitle(folder.display().to_string()).subtitle_selectable(true).build();
@@ -81,7 +102,22 @@ pub fn page(window: &MainWindow) -> adw::NavigationPage {
     });
     row.add_suffix(&open);
     logs.add(&row);
-    logs.add(&save_log_row(window));
+    let save = save_log_row(window);
+    logs.add(&save);
+    for dependent in [keep.upcast_ref::<gtk::Widget>(), row.upcast_ref(), save.upcast_ref()] {
+        enabled.bind_property("active", dependent, "sensitive").sync_create().build();
+    }
+    let weak = window.downgrade();
+    enabled.connect_active_notify(move |row| {
+        let Some(window) = weak.upgrade() else { return };
+        // Порядок важен: выключая, сначала пишем строку и только потом закрываем файл и чистим папку.
+        tracing::info!(включён = row.is_active(), "журнал");
+        logging::set_enabled(row.is_active());
+        window.ctx.settings.set(&keys::LOG_ENABLED, row.is_active());
+        if row.is_active() {
+            tracing::info!("журнал включён: Melogold {VERSION}");
+        }
+    });
     page.add(&logs);
 
     adw::NavigationPage::builder().title(tr("Diagnostics")).tag("diagnostics").child(&page).build()
@@ -123,6 +159,7 @@ fn save_log_row(window: &MainWindow) -> adw::ActionRow {
             if let Some(time) = now.as_ref().and_then(|t| t.format_iso8601().ok()) {
                 header.push_str(&format!("Время: {time}\n"));
             }
+            header.push_str(&format!("Хранить журнал: {} дн.\n", window.ctx.settings.get(&keys::LOG_RETENTION_DAYS)));
             let text = crate::logging::export(&window.ctx.paths.logs(), &header);
             match std::fs::write(&path, text) {
                 Ok(()) => {

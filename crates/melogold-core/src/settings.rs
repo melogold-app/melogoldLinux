@@ -168,6 +168,10 @@ pub mod keys {
     /// Лимит кэша музыки в МБ; 0 — без ограничений (задание Windows 0003: 4 ГБ).
     pub const STREAM_CACHE_MB: Key<i64> = Key::new("cache.streamLimit", || 4096);
     pub const UPDATES_AUTO: Key<bool> = Key::new("updates.auto", || true);
+    /// Журнал в файлах (задание 0037): выключен — не пишется и папка журналов пуста. Только это устройство.
+    pub const LOG_ENABLED: Key<bool> = Key::new("logs.enabled", || true);
+    /// Сколько дней хранить журнал: 1, 3, 7 или 30.
+    pub const LOG_RETENTION_DAYS: Key<i64> = Key::new("logs.retentionDays", || 7);
     /// Другие устройства аккаунта могут управлять этим (задание 0011): живой поток открывается с `remote=1`.
     pub const REMOTE_CONTROL: Key<bool> = Key::new("playback.remoteControl", || true);
     /// Адрес сервера; пусто — рабочий сервер по умолчанию.

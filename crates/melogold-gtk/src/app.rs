@@ -50,7 +50,8 @@ pub fn run(args: Vec<String>) -> glib::ExitCode {
             if let Err(error) = paths.ensure() {
                 eprintln!("папки данных не создались: {error}");
             }
-            logging::init(&paths.logs());
+            let saved = melogold_core::settings::Settings::load(&paths.settings());
+            logging::init(&paths.logs(), saved.get(&keys::LOG_ENABLED), saved.get(&keys::LOG_RETENTION_DAYS));
             crate::memory::trim_periodically();
             let lang = localization::lang();
             tracing::info!(
