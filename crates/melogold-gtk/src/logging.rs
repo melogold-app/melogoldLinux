@@ -99,6 +99,25 @@ impl Write for LogFile {
     }
 }
 
+/// Журнал одним файлом, чтобы отправить (31.10.2026, Максим: «чтобы логи уходили файлом»): шапка,
+/// последнее падение, прошлый запуск и этот. Файла нет — раздел пропускаем; байты не по UTF-8 (строка
+/// оборвалась на падении) не мешают остальному.
+pub fn export(logs: &Path, header: &str) -> String {
+    let mut text = header.trim_end().to_owned();
+    text.push('\n');
+    for (title, path) in [("Падение", crash_path(logs)), ("Прошлый запуск", previous_path(logs)), ("Этот запуск", current_path(logs))]
+    {
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        text.push_str(&format!("\n===== {title} ({name}) =====\n"));
+        text.push_str(&String::from_utf8_lossy(&bytes));
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+    text
+}
+
 fn now_utc() -> String {
     let seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     format!("unix {seconds}")
@@ -125,6 +144,27 @@ mod tests {
         let current = std::fs::metadata(current_path(&dir)).unwrap().len();
         assert!(current <= MAX_BYTES, "current.log {current} байт");
         assert_eq!(std::fs::metadata(previous_path(&dir)).unwrap().len(), MAX_BYTES);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn export_is_the_header_then_crash_previous_and_current() {
+        let dir = std::env::temp_dir().join(format!("melogold-export-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(current_path(&dir), "этот").unwrap();
+        std::fs::write(previous_path(&dir), b"\xff\xfe\n").unwrap();
+
+        let text = export(&dir, "Melogold 1.0\n");
+        assert!(text.starts_with("Melogold 1.0\n"));
+        assert!(!text.contains("Падение"), "нет last-crash.txt — нет и раздела");
+        let previous = text.find("===== Прошлый запуск (previous.log) =====").unwrap();
+        let current = text.find("===== Этот запуск (current.log) =====\nэтот\n").unwrap();
+        assert!(previous < current);
+
+        std::fs::write(crash_path(&dir), "panic").unwrap();
+        let text = export(&dir, "Melogold 1.0");
+        assert!(text.find("===== Падение (last-crash.txt) =====\npanic\n").unwrap() < text.find("Прошлый запуск").unwrap());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -92,6 +92,9 @@ const LINUX_ONLY: &[(&str, &str, &str)] = &[
     ("LinuxSystem", "Система", "System"),
     ("LinuxLogs", "Журналы", "Logs"),
     ("LinuxLogsFolder", "Папка журналов", "Logs folder"),
+    ("LinuxLogsFile", "Журнал одним файлом", "Log as one file"),
+    ("LinuxLogsFileHint", "Этот запуск, прошлый и последнее падение", "This run, the one before and the last crash"),
+    ("LinuxSaveLog", "Сохранить…", "Save…"),
     ("LinuxCheckExtraction", "Проверить извлечение", "Check extraction"),
     (
         "LinuxCheckExtractionHint",
