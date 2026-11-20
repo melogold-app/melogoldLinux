@@ -825,6 +825,7 @@ impl Engine {
         self.auto_advance = !user_action;
         if !self.queue.move_next(user_action) {
             self.auto_advance = false;
+            self.finish_crossfade();
             // Конец очереди без автовоспроизведения: остановка на последнем треке в начале.
             if let Some(output) = &self.output {
                 output.pause();
