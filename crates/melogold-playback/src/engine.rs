@@ -962,7 +962,8 @@ impl Engine {
             && self.output_video_id.as_deref().is_some_and(|id| id != track.video_id)
         {
             if let Some(output) = self.output.take() {
-                self.crossfade_tail = Some(CrossfadeTail { output, stream: self.stream.take(), retired_at: Instant::now(), fade_started: None });
+                self.crossfade_tail =
+                    Some(CrossfadeTail { output, stream: self.stream.take(), retired_at: Instant::now(), fade_started: None });
             }
             if let Ok(mut pipeline) = self.shared.pipeline.lock() {
                 *pipeline = None;
