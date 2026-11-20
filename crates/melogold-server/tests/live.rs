@@ -15,7 +15,7 @@ use futures_util::FutureExt;
 use melogold_core::lyrics::sync_rules::{sources, StoredLyrics};
 use melogold_core::music::Track;
 use melogold_data::{Database, Library};
-use melogold_server::account::{Account, AccountState, DeviceIdentity, DEFAULT_SERVER_URL};
+use melogold_server::account::{Account, AccountState, DeviceIdentity};
 use melogold_server::session::SessionStore;
 use melogold_server::sync::LibrarySync;
 
@@ -61,7 +61,7 @@ async fn two_devices_share_the_library() {
         return;
     }
     let _ = tracing_subscriber::fmt().with_env_filter("warn,melogold=info").with_test_writer().try_init();
-    let server = std::env::var("MELOGOLD_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_URL.to_owned());
+    let server = std::env::var("MELOGOLD_SERVER").expect("set MELOGOLD_SERVER for live tests");
     let dir = std::env::temp_dir().join(format!("melogold-live-{}", melogold_core::ids::new_uuid()));
     std::fs::create_dir_all(&dir).unwrap();
     let suffix: String = melogold_core::ids::new_uuid().chars().filter(|c| c.is_ascii_alphanumeric()).take(10).collect();

@@ -70,7 +70,8 @@ impl Api {
             }
             builder.build().expect("HTTP-клиент собирается")
         };
-        Api { base: base.trim_end_matches('/').to_owned(), http: build(Some(Duration::from_secs(35))), stream: build(None) }
+        let base = melogold_core::server_address::normalize(base).map(|addr| addr.url).unwrap_or_default();
+        Api { base, http: build(Some(Duration::from_secs(35))), stream: build(None) }
     }
 
     pub fn base(&self) -> &str {
@@ -86,6 +87,9 @@ impl Api {
         sync: bool,
         timeout: Option<Duration>,
     ) -> Result<reqwest::Response, ApiError> {
+        if self.base.is_empty() {
+            return Err(ApiError::new(0, "server_not_configured", "Set your server address in Settings"));
+        }
         let mut request =
             self.http.request(method.clone(), format!("{}{path}", self.base)).header(reqwest::header::ACCEPT, "application/json");
         if let Some(token) = token {

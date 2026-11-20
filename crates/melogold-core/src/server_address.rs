@@ -58,6 +58,9 @@ pub fn normalize(input: &str) -> Result<ServerAddress, &'static str> {
         }
         (host, port.to_owned())
     };
+    if matches!(host.as_str(), "178.250.187.202" | "178-250-187-202.sslip.io") {
+        return Err("malformed");
+    }
     let port = if port_text.is_empty() {
         String::new()
     } else {

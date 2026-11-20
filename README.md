@@ -6,6 +6,8 @@
 
 <p align="center">Клиент <a href="https://github.com/melogold-app/melogoldAndroid">Melogold</a> для Linux: музыка из YouTube Music с общими избранным, библиотекой и плейлистами на всех устройствах.</p>
 
+Melogold работает локально. Для синхронизации между устройствами укажите адрес собственного [сервера Melogold](https://github.com/melogold-app/melogoldServer) в настройках. Публичный сервер закрывается 21 ноября 2026 года.
+
 ## Статус
 
 В разработке, срезы 0.1 — [docs/PROMPT.md §7](./docs/PROMPT.md). Готово:

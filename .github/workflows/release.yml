@@ -1,0 +1,49 @@
+name: Package Linux release
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        script: [package, flatpak]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build distribution packages
+        run: sudo bash scripts/${{ matrix.script }}.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.script }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/*.flatpak
+            dist/update.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+  publish:
+    needs: packages
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish verified artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -er .version dist/update.json)
+          test "$version" = "$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          jq -r '[.assets.x86_64,.packages.deb.x86_64,.packages.rpm.x86_64][] | "\(.sha256)  dist/\(.fileName)"' dist/update.json | sha256sum -c -
+          test -s dist/Melogold.flatpak
+          cat "release-notes/$version.ru.md" "release-notes/$version.en.md" > "$RUNNER_TEMP/notes.md"
+          gh release create "v$version" --draft --target "$GITHUB_SHA" --title "Melogold $version" --notes-file "$RUNNER_TEMP/notes.md" dist/*.deb dist/*.rpm dist/*.AppImage dist/*.flatpak dist/update.json
+          gh release edit "v$version" --draft=false --latest

@@ -570,7 +570,7 @@ pub static STRINGS: &[(&str, &str, &str)] = &[
     ("ServerRegistrationFirst", "Регистрация открыта для первого аккаунта", "Registration is open for the first account"),
     ("ServerRegistrationOpen", "Регистрация открыта", "Registration is open"),
     ("ServerSwitchSignsOut", "После смены сервера нужно будет войти заново", "After switching servers you will sign in again"),
-    ("ServerText", "Библиотека синхронизируется через этот сервер. Можно указать свой — сервер открытый и ставится одной командой", "Your library syncs through this server. You can use your own: the server is open source and installs with one command"),
+    ("ServerText", "Для синхронизации укажите адрес своего сервера Melogold в настройках сервера.", "To sync, enter your own Melogold server address in server settings."),
     ("ServerTitle", "Сервер Melogold", "Melogold server"),
     ("ServerTooOld", "Сервер слишком старый для этой версии Melogold", "The server is too old for this version of Melogold"),
     ("ServerUnreachable", "Сервер не отвечает", "The server doesn't answer"),

@@ -12,9 +12,6 @@ pub const ISSUES_URL: &str = "https://github.com/melogold-app/melogoldLinux/issu
 /// `platform` в `DeviceInput` и в User-Agent сервера (API §1.2, §1.6).
 pub const PLATFORM: &str = "linux";
 
-/// Рабочий сервер по умолчанию — константа сборки (docs/PROMPT.md §1).
-pub const DEFAULT_SERVER_URL: &str = "https://178-250-187-202.sslip.io";
-
 /// User-Agent запросов к серверу Melogold: `melogold-linux/<semver>` (API §1.2).
 pub fn server_user_agent() -> String {
     format!("melogold-{PLATFORM}/{VERSION}")

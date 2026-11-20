@@ -17,9 +17,6 @@ use crate::api::{Api, ApiError, API_VERSION, SYNC_PROTOCOL};
 use crate::dto::*;
 use crate::session::{SessionStore, StoreKind, StoredSession};
 
-/// Сервер по умолчанию, пока нет официального домена (как у Android и Windows).
-pub const DEFAULT_SERVER_URL: &str = melogold_core::app_info::DEFAULT_SERVER_URL;
-
 /// Устройства аккаунта: `id` → (имя, платформа).
 pub type DeviceNames = HashMap<String, (String, String)>;
 
@@ -80,7 +77,8 @@ impl Account {
     /// Аккаунт без сессии; [`Account::load`] читает её из хранилища. `server_url` — выбранный в
     /// настройках (иначе по умолчанию).
     pub fn new(identity: DeviceIdentity, store: SessionStore, server_url: Option<String>) -> Arc<Account> {
-        let server_url = server_url.filter(|u| !u.is_empty()).unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
+        let configured = server_url.and_then(|url| melogold_core::server_address::normalize(&url).ok());
+        let server_url = configured.map(|addr| addr.url).unwrap_or_default();
         Arc::new(Account {
             identity,
             store,
@@ -101,6 +99,12 @@ impl Account {
     /// Прочитать сессию (связка ключей может отвечать не сразу — окно её не ждёт).
     pub async fn load(&self) {
         let (session, store_kind) = self.store.load().await;
+        let session = if session.as_ref().is_some_and(|s| melogold_core::server_address::normalize(&s.server_url).is_err()) {
+            self.store.save(None).await;
+            None
+        } else {
+            session
+        };
         let state = match &session {
             Some(s) => AccountState::SignedIn { login: s.login.clone(), device_id: s.device_id.clone(), server_url: s.server_url.clone() },
             None => AccountState::SignedOut,

@@ -15,7 +15,7 @@ use melogold_core::devices::{self, DeviceKind};
 use melogold_core::iso;
 use melogold_core::server_address;
 use melogold_core::text::now_ms;
-use melogold_server::account::{AccountState, DEFAULT_SERVER_URL};
+use melogold_server::account::AccountState;
 use melogold_server::api::ApiError;
 use melogold_server::dto::{DeviceDto, LinkDetails};
 use melogold_server::sync::SyncStatus;
@@ -28,6 +28,7 @@ use crate::window::MainWindow;
 /// Ошибка сервера словами (Windows `AccountTexts.Error`).
 pub fn error_text(error: &ApiError) -> &'static str {
     tr(match error.code.as_str() {
+        "server_not_configured" => "ServerText",
         "invalid_credentials" => "AccountErrorCredentials",
         "login_throttled" | "rate_limited" | "reauth_throttled" => "AccountErrorThrottled",
         "device_limit_reached" => "AccountErrorDeviceLimit",
@@ -1018,13 +1019,10 @@ pub fn server_page_for(window: &MainWindow, url: Option<&str>, expected_id: Opti
     switch_note.add_css_class("dim-label");
     switch_note.add_css_class("caption");
     f.body.append(&switch_note);
-    let default = gtk::Button::builder().label(tr("ServerDefault")).halign(gtk::Align::Center).build();
-    default.add_css_class("flat");
-    f.body.append(&default);
 
     let checked: Rc<RefCell<Option<(String, melogold_server::dto::ServerInfo)>>> = Rc::default();
     let update: Rc<dyn Fn()> = {
-        let (weak, address, hint, info, check, connect, switch_note, default, checked) = (
+        let (weak, address, hint, info, check, connect, switch_note, checked) = (
             window.downgrade(),
             address.clone(),
             hint.clone(),
@@ -1032,7 +1030,6 @@ pub fn server_page_for(window: &MainWindow, url: Option<&str>, expected_id: Opti
             check.clone(),
             connect.clone(),
             switch_note.clone(),
-            default.clone(),
             Rc::clone(&checked),
         );
         Rc::new(move || {
@@ -1064,7 +1061,6 @@ pub fn server_page_for(window: &MainWindow, url: Option<&str>, expected_id: Opti
                 label.set_label(tr(if current { "ServerCurrent" } else { "ServerConnect" }));
             }
             switch_note.set_visible(!current && account.session().is_some());
-            default.set_visible(address.text().trim() != DEFAULT_SERVER_URL);
             match checked.borrow().as_ref() {
                 Some((url, server)) if Some(url) == normalized.as_ref() => {
                     let registration = tr(match server.registration.as_str() {
@@ -1116,7 +1112,7 @@ pub fn server_page_for(window: &MainWindow, url: Option<&str>, expected_id: Opti
                     Some(Ok(info)) => {
                         checked.replace(Some((url.clone(), info)));
                         if do_connect {
-                            window.ctx.settings.set(&melogold_core::settings::keys::SERVER_URL, (url != DEFAULT_SERVER_URL).then_some(url));
+                            window.ctx.settings.set(&melogold_core::settings::keys::SERVER_URL, Some(url));
                             window.go_back();
                         }
                     }
@@ -1149,8 +1145,6 @@ pub fn server_page_for(window: &MainWindow, url: Option<&str>, expected_id: Opti
     check.button.connect_clicked(move |_| r(false));
     let r = Rc::clone(&run_check);
     connect.button.connect_clicked(move |_| r(true));
-    let address_ref = address.clone();
-    default.connect_clicked(move |_| address_ref.set_text(DEFAULT_SERVER_URL));
     // Проверить сразу: видно, какой сервер и открыта ли регистрация.
     let r = Rc::clone(&run_check);
     f.page.connect_shown(move |_| r(false));
