@@ -123,6 +123,7 @@ pub struct Settings {
     pub muted: bool,
     pub speed: f64,
     pub normalize: bool,
+    pub crossfade: bool,
     pub autoplay: bool,
     /// «Не сохранять историю» (REWRITE §3.5.4): прослушивания не записываются.
     pub history_paused: bool,
@@ -130,7 +131,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { volume: 0.8, muted: false, speed: 1.0, normalize: true, autoplay: true, history_paused: false }
+        Self { volume: 0.8, muted: false, speed: 1.0, normalize: true, crossfade: false, autoplay: true, history_paused: false }
     }
 }
 
@@ -365,6 +366,21 @@ struct Autoplay {
     seeds_without_new: u32,
 }
 
+const FADE_SECONDS: f64 = 3.0;
+
+struct CrossfadeTail {
+    output: Output,
+    stream: Option<StreamInfo>,
+    retired_at: Instant,
+    fade_started: Option<Instant>,
+}
+
+impl CrossfadeTail {
+    fn progress(&self) -> f64 {
+        self.fade_started.map_or(0.0, |start| (start.elapsed().as_secs_f64() / FADE_SECONDS).clamp(0.0, 1.0))
+    }
+}
+
 struct Engine {
     deps: Deps,
     tx: UnboundedSender<Command>,
@@ -374,6 +390,8 @@ struct Engine {
     status: Status,
     play_when_ready: bool,
     output: Option<Output>,
+    output_video_id: Option<String>,
+    crossfade_tail: Option<CrossfadeTail>,
     stream: Option<StreamInfo>,
     duration: Option<Duration>,
     generation: u64,
@@ -417,6 +435,8 @@ impl Engine {
             status: Status::Idle,
             play_when_ready: false,
             output: None,
+            output_video_id: None,
+            crossfade_tail: None,
             stream: None,
             duration: None,
             generation: 0,
@@ -447,7 +467,19 @@ impl Engine {
         self.restore_saved();
         self.emit_queue();
         self.emit_state();
-        while let Some(command) = receiver.recv().await {
+        let mut crossfade_tick = tokio::time::interval(Duration::from_millis(50));
+        crossfade_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            let command = tokio::select! {
+                command = receiver.recv() => {
+                    let Some(command) = command else { break };
+                    command
+                }
+                _ = crossfade_tick.tick(), if self.settings.crossfade && (self.status == Status::Playing || self.crossfade_tail.is_some()) => {
+                    self.tick_crossfade();
+                    continue;
+                }
+            };
             if matches!(command, Command::Shutdown) {
                 self.finish_listening();
                 self.save_queue();
@@ -547,6 +579,9 @@ impl Engine {
             Command::Settings(settings) => {
                 let speed_changed = (settings.speed - self.settings.speed).abs() > f64::EPSILON;
                 self.settings = settings;
+                if speed_changed || !settings.crossfade {
+                    self.finish_crossfade();
+                }
                 self.apply_volume();
                 self.emit_state();
                 if speed_changed {
@@ -775,6 +810,7 @@ impl Engine {
 
     fn pause(&mut self) {
         self.play_when_ready = false;
+        self.finish_crossfade();
         if let Some(output) = &self.output {
             output.pause();
         }
@@ -812,6 +848,7 @@ impl Engine {
     }
 
     fn seek(&mut self, position: Duration) {
+        self.finish_crossfade();
         match &self.output {
             Some(output) => {
                 output.seek(position, self.rate());
@@ -825,15 +862,59 @@ impl Engine {
     /// Громкость с нормализацией: `loudnessDb` — насколько трек громче эталона YouTube; громкие
     /// приглушаются, тихие не усиливаются.
     fn apply_volume(&self) {
-        let Some(output) = &self.output else { return };
+        let progress = self.crossfade_tail.as_ref().map_or(1.0, CrossfadeTail::progress);
+        if let Some(output) = &self.output {
+            self.set_volume(output, self.stream.as_ref(), progress);
+        }
+        if let Some(tail) = &self.crossfade_tail {
+            self.set_volume(&tail.output, tail.stream.as_ref(), 1.0 - progress);
+        }
+    }
+
+    fn set_volume(&self, output: &Output, stream: Option<&StreamInfo>, weight: f64) {
         let mut volume = self.settings.volume;
         if self.settings.normalize {
-            if let Some(loudness) = self.stream.as_ref().and_then(|s| s.loudness_db).filter(|l| *l > 0.0) {
+            if let Some(loudness) = stream.and_then(|s| s.loudness_db).filter(|l| *l > 0.0) {
                 // Кубическая шкала громкости: множитель амплитуды — кубический корень.
                 volume *= 10f64.powf(-loudness / 20.0).cbrt();
             }
         }
-        output.set_volume(volume, self.settings.muted);
+        output.set_volume(volume * weight.cbrt(), self.settings.muted);
+    }
+
+    fn finish_crossfade(&mut self) {
+        if let Some(tail) = self.crossfade_tail.take() {
+            tail.output.pause();
+            tokio::task::spawn_blocking(move || drop(tail));
+            self.apply_volume();
+        }
+    }
+
+    fn tick_crossfade(&mut self) {
+        if let Some(tail) = &mut self.crossfade_tail {
+            if self.status == Status::Playing {
+                tail.fade_started.get_or_insert_with(Instant::now);
+            }
+            if tail.progress() >= 1.0 || tail.retired_at.elapsed().as_secs_f64() >= FADE_SECONDS * 2.0 {
+                self.finish_crossfade();
+            } else {
+                self.apply_volume();
+            }
+            return;
+        }
+        if self.sleep_at_track_end || self.status != Status::Playing {
+            return;
+        }
+        let Some(next) = self.queue.peek_next(false).and_then(|index| self.queue.items().get(index)) else { return };
+        if self.output_video_id.as_deref() == Some(next.track.video_id.as_str()) || !self.preloaded.contains_key(&next.track.video_id) {
+            return;
+        }
+        if let (Some(position), Some(duration)) = (self.position(), self.duration) {
+            let remaining = duration.saturating_sub(position);
+            if !remaining.is_zero() && remaining.as_secs_f64() <= FADE_SECONDS * self.rate() {
+                self.next(false);
+            }
+        }
     }
 
     // ── загрузка трека ──
@@ -845,6 +926,8 @@ impl Engine {
     }
 
     fn release_output(&mut self) {
+        self.finish_crossfade();
+        self.output_video_id = None;
         if let Ok(mut pipeline) = self.shared.pipeline.lock() {
             *pipeline = None;
         }
@@ -871,7 +954,23 @@ impl Engine {
         self.load_started = play.then(Instant::now);
         self.play_when_ready = play;
         self.error = None;
-        self.release_output();
+        self.finish_crossfade();
+        if self.settings.crossfade
+            && play
+            && start.is_zero()
+            && self.status == Status::Playing
+            && self.output_video_id.as_deref().is_some_and(|id| id != track.video_id)
+        {
+            if let Some(output) = self.output.take() {
+                self.crossfade_tail = Some(CrossfadeTail { output, stream: self.stream.take(), retired_at: Instant::now(), fade_started: None });
+            }
+            if let Ok(mut pipeline) = self.shared.pipeline.lock() {
+                *pipeline = None;
+            }
+        } else {
+            self.release_output();
+        }
+        self.output_video_id = None;
         self.stream = None;
         self.duration = None;
         self.set_status(Status::Resolving);
@@ -971,6 +1070,7 @@ impl Engine {
         self.stream = Some(stream.info());
         self.duration = Some(stream.duration());
         self.output = Some(output);
+        self.output_video_id = Some(track.video_id.clone());
         self.apply_volume();
         self.skips_in_row = 0;
         self.played_session.insert(track.video_id.clone());

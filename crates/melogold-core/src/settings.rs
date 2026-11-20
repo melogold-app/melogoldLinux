@@ -154,6 +154,7 @@ pub mod keys {
     pub const APP_LOCALE: Key<String> = Key::new("app.locale", || "system".into());
     /// Раздел при выходе: приложение открывается в нём (docs/PROMPT.md §5.1).
     pub const LAST_TAB: Key<Tab> = Key::new("shell.lastTab", Tab::default);
+    pub const CROSSFADE: Key<bool> = Key::new("playback.crossfade", || false);
     pub const NORMALIZATION: Key<bool> = Key::new("playback.normalization", || true);
     pub const AUTOPLAY: Key<bool> = Key::new("playback.autoplay", || true);
     /// Скорость 0,5–2× — одна глобальная настройка (docs/PROMPT.md §4).

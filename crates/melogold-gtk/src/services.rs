@@ -307,6 +307,7 @@ pub fn playback_settings(settings: &SettingsStore) -> engine::Settings {
         muted: settings.get(&keys::MUTED),
         speed: settings.get(&keys::SPEED).clamp(0.5, 2.0),
         normalize: settings.get(&keys::NORMALIZATION),
+        crossfade: settings.get(&keys::CROSSFADE),
         autoplay: settings.get(&keys::AUTOPLAY),
         history_paused: settings.get(&keys::HISTORY_PAUSED),
     }

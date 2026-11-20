@@ -232,6 +232,23 @@ fn playback_group(window: &MainWindow) -> adw::PreferencesGroup {
     });
     group.add(&normalize);
 
+    let crossfade = adw::SwitchRow::builder()
+        .title(tr("SettingsCrossfade.Header"))
+        .subtitle(tr("SettingsCrossfade.Description"))
+        .active(window.ctx.settings.get(&keys::CROSSFADE))
+        .build();
+    let weak = window.downgrade();
+    crossfade.connect_active_notify(move |row| {
+        let Some(window) = weak.upgrade() else { return };
+        window.ctx.settings.set(&keys::CROSSFADE, row.is_active());
+        window
+            .ctx
+            .services
+            .player
+            .send(melogold_playback::engine::Command::Settings(crate::services::playback_settings(&window.ctx.settings)));
+    });
+    group.add(&crossfade);
+
     // «Управление с других устройств» (задание 0011): выключено — поток событий без `remote=1`.
     let remote = adw::SwitchRow::builder()
         .title(tr("LinuxRemoteAllow"))

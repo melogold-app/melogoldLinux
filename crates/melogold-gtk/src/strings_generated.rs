@@ -595,6 +595,8 @@ pub static STRINGS: &[(&str, &str, &str)] = &[
     ("SettingsLicenses.Description", "Программы с открытым кодом в Melogold", "Open source software in Melogold"),
     ("SettingsLicenses.Header", "Лицензии", "Licenses"),
     ("SettingsNormalize.Description", "Регулирует громкость до фиксированного уровня", "Keeps every track at the same loudness"),
+    ("SettingsCrossfade.Header", "Плавная смена треков", "Crossfade"),
+    ("SettingsCrossfade.Description", "Накладывает конец трека на начало следующего на 3 секунды", "Overlap tracks for 3 seconds"),
     ("SettingsNormalize.Header", "Нормализация громкости", "Loudness normalization"),
     ("SettingsPauseHistory.Description", "Прослушивания не попадают в историю и «Для вас»", "Plays don't go into History and For you"),
     ("SettingsPauseHistory.Header", "Приостановить историю воспроизведений", "Pause playback history"),
